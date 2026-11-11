@@ -491,7 +491,12 @@ int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp,
         }
         st->tx_fin_seq_set = true;
     }
-    seq = st->tx_fin_seq;
+    /* 0.8 FEC names a packet frontier in this header; a non-FEC session names
+     * a byte offset. The 16-byte body already carries pkt_end/pkt_base, so a
+     * FEC peer reads the same frontier from both places. A byte value here
+     * made the receiver compare packet 32768 with byte 33,488,896 and close
+     * the target before the last short block was delivered. */
+    seq = sess->fec ? st->tx_fin_pkts : st->tx_fin_seq;
     spin_unlock(&sess->tx_lock);
     tbt_put_le64(body, st->tx_fin_pkts);
     tbt_put_le64(body + 8, st->tx_fin_pkt_base);

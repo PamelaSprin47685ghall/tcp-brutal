@@ -387,6 +387,36 @@ int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len)
     return 0;
 }
 
+/* The FEC walk reached the packet end FIN named. The FIN header carries a
+ * packet frontier while the drain waits on a byte cursor, so the walk states
+ * the byte end here. Until this runs, rx_fin_seq is U64_MAX and the drain
+ * keeps the target's write side open; completing on the packet frontier
+ * alone was the ordering bug that discarded the last short block. */
+void tbt_rx_fec_fin_ready(struct tbt_stream *st, u64 bytes)
+{
+    bool ready = false;
+
+    if (!st)
+        return;
+    spin_lock_bh(&st->rx_lock);
+    if (st->rx_fin_seen && st->rx_fin_fec && !st->rx_fin_done &&
+        !st->rx_fin_bytes_set)
+    {
+        st->rx_fin_seq = bytes;
+        st->rx_fin_bytes_set = true;
+        ready = true;
+    }
+    spin_unlock_bh(&st->rx_lock);
+    if (!ready)
+        return;
+    pr_info_ratelimited("tbtun: fec FIN bytes sid=%llu pkt_end=%llu bytes=%llu rx_next=%llu\n",
+                        (unsigned long long)st->sid,
+                        (unsigned long long)st->rx_fin_pkt,
+                        (unsigned long long)bytes,
+                        (unsigned long long)READ_ONCE(st->rx_next));
+    tbt_sock_kick(st);
+}
+
 static int tbt_rx_fbk(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *body)
 {
     struct tbt_session *sess = c->sess;
@@ -499,10 +529,29 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
         if (!st->rx_fin_seen)
         {
             st->rx_fin_seen = true;
-            st->rx_fin_seq = hdr->seq;
-            pr_info_ratelimited("tbtun: rx FIN sid=%llu seq=%llu carrier=%u state=%u rx_next=%llu\n",
+            if (sess->fec)
+            {
+                /* 0.8 FEC: the FIN header repeats the packet frontier, not
+                 * the byte offset. rx_next is a byte cursor, so comparing
+                 * the two would complete the FIN at once (field: 32768 >=
+                 * 33,488,896) and let the drain shut the target before the
+                 * last short block arrived. Wait for the walk to state the
+                 * byte end instead. */
+                st->rx_fin_pkt = tbt_le64(payload);
+                st->rx_fin_seq = U64_MAX;
+                st->rx_fin_fec = true;
+                st->rx_fin_bytes_set = false;
+            }
+            else
+            {
+                st->rx_fin_seq = hdr->seq;
+                st->rx_fin_bytes_set = true;
+            }
+            pr_info_ratelimited("tbtun: rx FIN sid=%llu seq=%llu fec=%d pkt_end=%llu carrier=%u state=%u rx_next=%llu\n",
                                 (unsigned long long)st->sid,
                                 (unsigned long long)hdr->seq,
+                                sess->fec ? 1 : 0,
+                                (unsigned long long)st->rx_fin_pkt,
                                 (unsigned int)c->index,
                                 READ_ONCE(st->state),
                                 (unsigned long long)READ_ONCE(st->rx_next));
@@ -512,7 +561,7 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
          * flag were both lost, the FIN offset is the only remaining statement
          * of how many packets the stream holds. */
         if (sess->fec)
-            tbt_fec_rx_fin(sess, st, hdr->seq, tbt_le64(payload),
+            tbt_fec_rx_fin(sess, st, tbt_le64(payload),
                            tbt_le64(payload + 8));
         WRITE_ONCE(st->sack_dirty, true);
         /* The drain shuts the write side once rx_next reaches the FIN's seq

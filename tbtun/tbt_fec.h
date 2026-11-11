@@ -204,6 +204,15 @@ static inline bool tbt_fec_fin_valid(u64 pkt_end, u64 pkt_base, u64 span)
     return tbt_fec_fin_valid_base(pkt_end, pkt_base, 0, span);
 }
 
+/* A FEC FIN may complete only after the delivery walk reached the packet
+ * end it names. A partial walk has a cursor below that end; the shares it
+ * still owes are the tail of the last super-block. */
+static inline bool tbt_fec_fin_delivered(u64 total_pkts, u64 next_deliver,
+                                         bool deliver_partial)
+{
+    return !deliver_partial && next_deliver >= total_pkts;
+}
+
 /* Standard CRC32C (Castagnoli), reflected, init ~0, final xor. A fresh CRC
  * uses seed 0; chaining uses the previous return value as the next seed. */
 u32 tbt_fec_crc32c(u32 seed, const void *data, size_t len);

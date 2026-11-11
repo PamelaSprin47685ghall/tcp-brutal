@@ -660,6 +660,12 @@ struct tbt_stream
     u64 hole_since_ns;        /* a hole is outstanding since this time */
     u64 rx_fin_seq;           /* byte offset the peer's FIN follows */
     bool rx_fin_seen;
+    /* FEC FIN: header.seq is the packet frontier, not a byte offset. The
+     * drain must wait until the delivery walk reaches it, then this caches
+     * the byte end the walk computed. */
+    u64 rx_fin_pkt;           /* FIN's packet end (header.seq) */
+    bool rx_fin_fec;
+    bool rx_fin_bytes_set;
     bool rx_fin_done;
     u64 rx_fin_done_ns;       /* when the peer's FIN reached the application;
                                * bounds a target that never closes its half */
@@ -877,6 +883,10 @@ struct tbt_fec_tx
     u8 *rec; /* TBT_FEC_REC_MAX: one complete record */
     u16 fill;
     u64 seq; /* next global packet seq */
+    /* The logical seq after the last DATA packet actually sent. seq also
+     * advances over the zero padding of a block cut short; a FIN must name
+     * this value so its pkt_end stops at the last real share. */
+    u64 last_real_end;
     /* Pump self-heal: the last time the FEC TX pump ran and the packet seq it
      * saw. If the ring has data, credit is open, and this pair has not moved
      * for TBT_FEC_PUMP_REARM_MS, the close path re-arms the work. */
@@ -1051,7 +1061,6 @@ struct tbt_fec_rx
     u64 min_block_seen;
     u64 ack_deliver;  /* last frontier sent in an ACK */
     u64 total_pkts;   /* stream packet count; valid when total_known */
-    u64 total_bytes;  /* FIN's byte offset; 0 when only LAST named the end */
     bool total_known;
     /* w_fec_rx owns decode and ordered delivery; carriers only place shares.
      * rx->lock is a leaf: it covers the window check, slot placement, counts
@@ -1077,14 +1086,6 @@ struct tbt_fec_rx
      * kilobyte off the workqueue stack. */
     struct tbt_fec_decode_snap *decode_snap;
     u64 stream_pkt_base;    /* absolute seq of the bound stream's first packet */
-    /* A FIN for the next stream can arrive before its OPEN binds it; keep one
-     * slot and consume it on adoption instead of overwriting the current
-     * stream's total. */
-    u64 next_fin_sid;
-    u64 next_fin_end;
-    u64 next_fin_base;
-    u64 next_fin_bytes;
-    bool next_fin_valid;
     struct tbt_fec_blk *blk; /* groups * slots */
     /* Lazy block buffers. A slot takes a buffer from this free list on
      * its first share and returns it when the super-block is delivered
@@ -1838,6 +1839,8 @@ struct tbt_session
     atomic64_t fec_credit_midblock_wait;
     atomic64_t fec_tx_block_complete;
     atomic64_t fec_tx_block_partial;
+    atomic64_t fec_tx_block_final; /* short block closed because the stream
+                                    * ended, not because it under-filled */
     atomic64_t fec_replay_evicted_before_nack;
     atomic64_t fec_tx_pump_rearm;
     atomic64_t fec_tx_run_leak;
@@ -1845,6 +1848,8 @@ struct tbt_session
     atomic64_t fec_replay_false_enospc;
     atomic64_t fec_block_complete_without_replay;
     atomic64_t fec_fin_frozen_with_pending;
+    atomic64_t fec_fin_with_undelivered; /* detach/kill while the FEC walk
+                                          * still owed bytes below FIN's end */
     /* FEC sender scheduling. fec_flush_pass counts accepted DATA records.
      * fec_flush_skip and fec_hol_wait are kept for the old per-carrier queue
      * accounting; the session FIFO never queues a record behind one socket,
@@ -2440,10 +2445,16 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len);
  * reorder blocks and delivery cursors before its bytes can reach the new
  * stream. The first FEC record after this call sets the new frontier. */
 void tbt_fec_rx_new_stream(struct tbt_session *sess, u64 sid);
-/* The old FIN record names the stream's total byte offset. The FEC receiver
- * uses it to complete a final block whose parity and LAST flag were lost. */
+/* FIN names the stream's packet range. 0.8 FEC sends the frontier in both
+ * the frame header and the body, so pkt_end is the only end marker; the
+ * receiver uses it to complete a final block whose parity and LAST flag
+ * were lost. */
 void tbt_fec_rx_fin(struct tbt_session *sess, struct tbt_stream *st,
-                    u64 total_bytes, u64 pkt_end, u64 pkt_base);
+                    u64 pkt_end, u64 pkt_base);
+/* The FEC walk reached FIN's packet end: publish the byte end to the drain.
+ * Called from w_fec_rx after the last share of the last super-block is
+ * queued, so the target sees every byte before its write side shuts. */
+void tbt_rx_fec_fin_ready(struct tbt_stream *st, u64 bytes);
 int tbt_fec_record_len(const u8 *buf, size_t have, size_t *need);
 /* tbt_carrier.c: write one whole record, no frame header. */
 int tbt_carrier_send_raw(struct tbt_carrier *c, const void *data, size_t len);

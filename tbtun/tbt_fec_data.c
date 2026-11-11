@@ -1609,7 +1609,7 @@ static void tbt_fec_replay_account(struct tbt_session *sess,
 
 static void tbt_fec_tx_emit_parity(struct tbt_session *sess,
                                    struct tbt_fec_tx *tx, u16 group,
-                                   u64 block_id, u16 win_len)
+                                   u64 block_id, u16 win_len, bool final)
 {
     struct tbt_fec_gtx *g = &tx->g[group];
     struct tbt_fec_hdr h;
@@ -1622,6 +1622,10 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess,
         return;
     if (win_len >= tx->blk_n)
         atomic64_inc(&sess->fec_tx_block_complete);
+    else if (final)
+        /* The stream's own last block: a short tail here is the intended
+         * close, not a block the packetizer failed to fill. */
+        atomic64_inc(&sess->fec_tx_block_final);
     else
         atomic64_inc(&sess->fec_tx_block_partial);
     count = tbt_fec_tx_parity_count(win_len, tx->blk_n, tx->blk_m,
@@ -1778,11 +1782,16 @@ static void tbt_fec_tx_emit_empty(struct tbt_session *sess,
  * middle of a block, so a group before the landing point skipped share 0
  * while packetize() still counted the skipped slots as real packets. */
 static void tbt_fec_tx_close_block(struct tbt_session *sess,
-                                   struct tbt_fec_tx *tx, bool advance)
+                                   struct tbt_fec_tx *tx, bool advance,
+                                   bool final)
 {
     u64 block_id = tx->cur_block;
     u16 group;
 
+    /* Keep the end of the last real share before the padding jump below.
+     * A FIN names this watermark, never the block boundary seq reaches. */
+    if (tx->seq > tx->last_real_end)
+        tx->last_real_end = tx->seq;
     for (group = 0; group < tx->groups; group++)
     {
         struct tbt_fec_gtx *g = &tx->g[group];
@@ -1803,7 +1812,7 @@ static void tbt_fec_tx_close_block(struct tbt_session *sess,
         atomic64_inc(&sess->fec_short_blocks);
         memset(g->buf + (size_t)len * TBT_FEC_S, 0,
                (size_t)(tx->blk_n - len) * TBT_FEC_S);
-        tbt_fec_tx_emit_parity(sess, tx, group, block_id, len);
+        tbt_fec_tx_emit_parity(sess, tx, group, block_id, len, final);
         g->nreal = 0;
     }
     if (advance)
@@ -1836,7 +1845,22 @@ static void tbt_fec_tx_finish(struct tbt_session *sess,
 
     if (READ_ONCE(st->fec_finished))
         return;
-    WRITE_ONCE(st->fec_pkt_end, tx->seq);
+    /* A block cut by the idle path before FIN arrived is this stream's final
+     * short block, not an under-filled middle block. Move the one count the
+     * cut already took so the two counters keep their meaning. */
+    if (tx->last_real_end < tx->blk_seq0)
+    {
+        if (atomic64_read(&sess->fec_tx_block_partial))
+        {
+            atomic64_dec(&sess->fec_tx_block_partial);
+            atomic64_inc(&sess->fec_tx_block_final);
+        }
+    }
+    /* last_real_end, not seq: a block the idle path cut short advanced seq
+     * over padding positions that carry no stream byte. FIN must name the
+     * packet after the last real share, so the receiver can derive the last
+     * block's tail from it even when every parity row was lost. */
+    WRITE_ONCE(st->fec_pkt_end, tx->last_real_end);
     /* close_block() advances tx->seq to the next block even when the last
      * block was already closed by the short-packet path. Calling it again on
      * an empty next block would emit a full set of empty markers for a block
@@ -1845,7 +1869,7 @@ static void tbt_fec_tx_finish(struct tbt_session *sess,
      * close a block that actually received a packet. */
     block_start = tx->blk_seq0;
     if (st->fec_pkt_base_set && tx->seq > block_start)
-        tbt_fec_tx_close_block(sess, tx, true);
+        tbt_fec_tx_close_block(sess, tx, true, true);
     smp_store_release(&st->fec_finished, true);
     /* The close path's tbt_tx_fin() retry is driven by w_fbk. If the tick
      * slept while the session had no stream, wake it now that the final block
@@ -1942,6 +1966,9 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
         rel = seq - tx->blk_seq0;
     }
     tx->seq++;
+    /* The stream's packet end follows real shares only. A block closed
+     * short jumps over padding slots; FIN must not inherit that jump. */
+    tx->last_real_end = tx->seq;
     group = (u16)(rel / tx->blk_n);
     share = (u16)(rel % tx->blk_n);
     block_id = tx->cur_block;
@@ -2055,7 +2082,8 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
 
     if (share + 1 == tx->blk_n)
     {
-        tbt_fec_tx_emit_parity(sess, tx, group, block_id, tx->g[group].nreal);
+        tbt_fec_tx_emit_parity(sess, tx, group, block_id,
+                               tx->g[group].nreal, false);
         tx->g[group].nreal = 0;
     }
     if (last && st)
@@ -2763,7 +2791,7 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
              * packet buffered and gets its own tail deadline below. */
             if (fill_ready || cut_block)
             {
-                tbt_fec_tx_close_block(sess, tx, true);
+                tbt_fec_tx_close_block(sess, tx, true, false);
                 tx->block_at_ns = 0;
                 tx->short_at_ns = 0;
                 /* The bytes kept above still need the interactive tail:
@@ -4041,6 +4069,9 @@ static noinline void tbt_fec_deliver_est_fold(struct tbt_session *sess,
     }
 }
 
+static void tbt_fec_rx_fin_publish(struct tbt_stream *st,
+                                   struct tbt_fec_rx *rx);
+
 static int tbt_fec_deliver_ready(struct tbt_session *sess,
                                  struct tbt_fec_flow *f)
 {
@@ -4295,14 +4326,6 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess,
                 blocked_why = "short";
                 break;
             }
-            if (known && rx->total_bytes && cur + 1 == total_pkts)
-            {
-                u64 done = off;
-                u64 tail = rx->total_bytes - done;
-
-                if (tail > 0 && tail <= rx->s)
-                    len = (u16)tail;
-            }
             /* Defence in depth: hdr_check() already refuses an epoch
              * larger than S, but a delivery length that named more than
              * one slot would read past this block's buffer. */
@@ -4478,8 +4501,14 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess,
         if (st)
             tbt_stream_kill(st, TBT_ST_HOLE);
     }
+    /* A FIN may have arrived before this walk reached its packet end. Now
+     * that it has, publish the byte end so the drain can shut the target's
+     * write side in order. */
     if (st)
+    {
+        tbt_fec_rx_fin_publish(st, rx);
         tbt_stream_put(st);
+    }
     return 0;
 }
 
@@ -7870,17 +7899,46 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
     return rc;
 }
 
+/* Publish FIN's byte end once the walk reached the packet end it names.
+ * deliver_bytes is written by w_fec_rx only; a stable read of it plus the
+ * delivered predicate means the walk has queued every real share. */
+static void tbt_fec_rx_fin_publish(struct tbt_stream *st,
+                                   struct tbt_fec_rx *rx)
+{
+    u64 bytes;
+
+    if (!READ_ONCE(st->rx_fin_seen) || READ_ONCE(st->rx_fin_done))
+        return;
+    if (!READ_ONCE(rx->total_known) ||
+        !tbt_fec_fin_delivered(READ_ONCE(rx->total_pkts),
+                               READ_ONCE(rx->next_deliver),
+                               READ_ONCE(rx->deliver_partial)))
+        return;
+    bytes = READ_ONCE(rx->deliver_bytes) > READ_ONCE(rx->stream_base)
+                ? READ_ONCE(rx->deliver_bytes) - READ_ONCE(rx->stream_base)
+                : 0;
+    tbt_rx_fec_fin_ready(st, bytes);
+}
+
 /* FIN names the stream's absolute packet range: pkt_end is the packet after
- * its last DATA packet, pkt_base the block-aligned packet of its first one.
+ * its last DATA packet, pkt_base the block-aligned packet of its first one,
+ * and the frame header repeats pkt_end (0.8 FEC has no byte offset here).
  * The packet count is therefore pkt_end itself, not ceil(bytes / S): a short
  * share makes the byte count an upper bound on the packet count, and the
  * second stream's pkt_end must not be compared with the first stream's
  * next_super base.
  *
- * A FIN that arrives before its stream is adopted is parked in next_fin_*;
- * deliver_ready() consumes it when the stream identity settles. */
+ * FIN alone does not mean the bytes reached the target. The walk may still
+ * owe the last short super-block, so the drain completes only after
+ * tbt_fec_rx_fin_publish() states the byte end. This is the half-close
+ * ordering the field lost: FIN arrived first on another carrier, the drain
+ * compared its packet frontier with rx_next's byte cursor, shut the target's
+ * write side, and the 64 KiB tail was discarded as EPIPE.
+ *
+ * A FIN whose stream is already bound names the current flow; the carrier
+ * parser drops it if no flow exists for its sid. */
 void tbt_fec_rx_fin(struct tbt_session *sess, struct tbt_stream *st,
-                    u64 total_bytes, u64 pkt_end, u64 pkt_base)
+                    u64 pkt_end, u64 pkt_base)
 {
     struct tbt_fec_flow *f;
     struct tbt_fec_rx *rx;
@@ -7938,22 +7996,17 @@ void tbt_fec_rx_fin(struct tbt_session *sess, struct tbt_stream *st,
     }
     if (!rx->total_known)
     {
-        rx->total_bytes = total_bytes;
         rx->total_pkts = pkt_end;
         rx->total_known = true;
     }
-    else
-    {
-        if (pkt_end != rx->total_pkts)
-            atomic64_inc(&sess->fec_fin_bad); /* keep LAST's value */
-        if (!rx->total_bytes)
-            rx->total_bytes = total_bytes;
-    }
+    else if (pkt_end != rx->total_pkts)
+        atomic64_inc(&sess->fec_fin_bad); /* keep LAST's value */
     rx->work_pending = true;
     wake = true;
     spin_unlock_bh(&rx->lock);
     if (wake)
         tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
+    tbt_fec_rx_fin_publish(st, rx);
 }
 
 /* ------------------------------------------------------------------ *
@@ -8889,6 +8942,22 @@ void tbt_fec_flow_detach(struct tbt_stream *st)
     if (!f)
         return;
     sess = f->sess;
+    /* Detach is the last point a stream can still own undelivered FEC
+     * bytes. A FIN in flight with a short final block is the case this
+     * guards: completion must wait for the walk, never for the unlink. */
+    if (f->rx && READ_ONCE(st->rx_fin_seen) &&
+        !READ_ONCE(st->rx_fin_done) && READ_ONCE(f->rx->total_known) &&
+        !tbt_fec_fin_delivered(READ_ONCE(f->rx->total_pkts),
+                               READ_ONCE(f->rx->next_deliver),
+                               READ_ONCE(f->rx->deliver_partial)))
+    {
+        atomic64_inc(&sess->fec_fin_with_undelivered);
+        pr_info_ratelimited("tbtun: fec detach with undelivered sid=%llu next=%llu total=%llu bytes=%llu\n",
+                            (unsigned long long)st->sid,
+                            (unsigned long long)READ_ONCE(f->rx->next_deliver),
+                            (unsigned long long)READ_ONCE(f->rx->total_pkts),
+                            (unsigned long long)READ_ONCE(f->rx->deliver_bytes));
+    }
     mutex_lock(&sess->fec_alloc_lock);
     spin_lock(&sess->lock);
     WRITE_ONCE(f->state, 3);
