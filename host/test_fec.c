@@ -2574,7 +2574,7 @@ static void test_group_reassembly(void)
 
 /* ------------------------------------------------------------------ *
  * 9c. Credit split: the sender window is (K-2) super-blocks, bounded by
- * the packet cap. Splitting one G=32 flow into two G=16 flows must keep
+ * the share cap. Splitting one G=32 flow into two G=16 flows must keep
  * the same aggregate window, because the two rings hold the same packets.
  * ------------------------------------------------------------------ */
 
@@ -2585,50 +2585,55 @@ static void test_credit_split(void)
     u32 credit;
     u16 g;
 
-    /* No packet cap: credit follows K-2 whole super-blocks and rises with
+    /* No share cap: credit follows K-2 whole super-blocks and rises with
      * the group count. */
     for (g = 1; g <= 32; g++)
     {
-        credit = tbt_fec_credit_packets(g, N, M, K, SLOTS, 0);
+        credit = tbt_fec_credit_shares(g, N, M, K, SLOTS, 0);
         ok_u32(credit % ((u32)g * (N + M)), 0, "credit is whole super-blocks");
         ok(credit <= (u32)(K - 2) * g * (N + M),
            "credit is at most K-2 super-blocks", NULL);
         ok(credit >= prev, "credit is monotonic in groups", NULL);
         prev = credit;
     }
-    ok_u32(tbt_fec_credit_packets(16, N, M, K, SLOTS, 0) * 2,
-           tbt_fec_credit_packets(32, N, M, K, SLOTS, 0),
+    ok_u32(tbt_fec_credit_shares(16, N, M, K, SLOTS, 0) * 2,
+           tbt_fec_credit_shares(32, N, M, K, SLOTS, 0),
            "two G=16 flows equal one G=32 flow");
-    ok_u32(tbt_fec_credit_packets(32, N, M, K, SLOTS, 0),
+    ok_u32(tbt_fec_credit_shares(32, N, M, K, SLOTS, 0),
            (u32)(K - 2) * 32 * (N + M),
            "G=32 credit is K-2 super-blocks");
 
-    /* A packet cap bounds every shape. */
+    /* A share cap bounds every shape. */
     for (g = 1; g <= 32; g++)
     {
-        credit = tbt_fec_credit_packets(g, N, M, K, SLOTS, TBT_FEC_CREDIT_MAX);
+        credit = tbt_fec_credit_shares(g, N, M, K, SLOTS, TBT_FEC_CREDIT_MAX);
         ok(credit <= TBT_FEC_CREDIT_MAX, "credit is bounded by the cap", NULL);
         ok(credit >= 1, "credit grants at least one share", NULL);
     }
 
     /* A small arena slot count caps K before the ring K does. */
-    ok_u32(tbt_fec_credit_packets(32, N, M, K, 8, 0), 6 * 32 * (N + M),
+    ok_u32(tbt_fec_credit_shares(32, N, M, K, 8, 0), 6 * 32 * (N + M),
            "slots cap the credit to K-2 blocks");
-    ok_u32(tbt_fec_credit_packets(16, N, M, K, 8, 0) * 2,
-           tbt_fec_credit_packets(32, N, M, K, 8, 0),
+    ok_u32(tbt_fec_credit_shares(16, N, M, K, 8, 0) * 2,
+           tbt_fec_credit_shares(32, N, M, K, 8, 0),
            "two capped G=16 flows equal one capped G=32 flow");
 
     /* A K too small for the two-block slack still grants one super-block. */
-    ok_u32(tbt_fec_credit_packets(32, N, M, 2, SLOTS, 0), 32 * (N + M),
+    ok_u32(tbt_fec_credit_shares(32, N, M, 2, SLOTS, 0), 32 * (N + M),
            "K=2 grants one super-block");
-    ok_u32(tbt_fec_credit_packets(32, N, M, 0, SLOTS, 0), 32 * (N + M),
+    ok_u32(tbt_fec_credit_shares(32, N, M, 0, SLOTS, 0), 32 * (N + M),
            "K=0 grants one super-block");
-    /* A cap below one super-block returns the single-packet floor. */
-    ok_u32(tbt_fec_credit_packets(32, N, M, K, SLOTS, 1), 1,
-           "cap below a super-block floors at one share");
-    ok_u32(tbt_fec_credit_packets(0, N, M, K, SLOTS, 0), 1,
+    /* The grant is billed in whole blocks: a cap below one block still
+     * grants one block, because a fraction of a block converts to none. */
+    ok_u32(tbt_fec_credit_shares(32, N, M, K, SLOTS, 1), 32 * (N + M),
+           "cap below a super-block grants one whole block");
+    ok_u32(tbt_fec_credit_shares(32, N, M, K, SLOTS, 32 * (N + M)),
+           32 * (N + M), "a one-block cap grants that block");
+    ok_u32(tbt_fec_credit_shares(32, N, M, K, SLOTS, 32 * (N + M) + 1),
+           32 * (N + M), "a cap above one block rounds down to one");
+    ok_u32(tbt_fec_credit_shares(0, N, M, K, SLOTS, 0), 1,
            "zero groups floors at one share");
-    ok_u32(tbt_fec_credit_packets(32, 0, M, K, SLOTS, 0),
+    ok_u32(tbt_fec_credit_shares(32, 0, M, K, SLOTS, 0),
            (u32)(K - 2) * 32 * M, "zero n still counts the m shares");
 }
 

@@ -1665,7 +1665,7 @@ static void test_replay_window(void)
 
     /* The credit is K_eff-2 super-blocks, K_eff = min(ring K, arena slots),
      * capped to TBT_FEC_CREDIT_MAX shares. For this shape the ring binds. */
-    credit = tbt_fec_credit_packets(G, N, M, k, (u16)slots,
+    credit = tbt_fec_credit_shares(G, N, M, k, (u16)slots,
                                     TBT_FEC_CREDIT_MAX);
     blocks = credit / ((u32)G * (N + M));
     ok_int((int)blocks, (int)k - 2,
@@ -1702,13 +1702,13 @@ static void test_replay_window(void)
            "256-carrier grouped K");
     ok_int(tbt_fec_replay_k_for(1, 192, 64, TBT_FEC_S), 66,
            "256-carrier single K");
-    ok_int((int)tbt_fec_credit_packets(4, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX),
+    ok_int((int)tbt_fec_credit_shares(4, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX),
            2048, "32-carrier credit");
-    ok_int((int)tbt_fec_credit_packets(8, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX),
+    ok_int((int)tbt_fec_credit_shares(8, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX),
            4096, "64-carrier credit");
-    ok_int((int)tbt_fec_credit_packets(32, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX),
+    ok_int((int)tbt_fec_credit_shares(32, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX),
            16384, "256-carrier grouped credit");
-    ok_int((int)tbt_fec_credit_packets(1, 192, 64, 66, 66, TBT_FEC_CREDIT_MAX),
+    ok_int((int)tbt_fec_credit_shares(1, 192, 64, 66, 66, TBT_FEC_CREDIT_MAX),
            16384, "256-carrier single credit (16384 shares)");
 
     /* The ring stays inside 20 MiB (descriptors + 8 hot block planes) and
@@ -1730,13 +1730,13 @@ static void test_replay_window(void)
        "256-carrier grouped 66-slot address space");
     ok((u64)1 * 66 * 256 * 8192 <= 140u * 1024 * 1024,
        "256-carrier single 66-slot address space");
-    ok(tbt_fec_credit_packets(4, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX) <=
+    ok(tbt_fec_credit_shares(4, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX) <=
            TBT_FEC_CREDIT_MAX &&
-           tbt_fec_credit_packets(8, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX) <=
+           tbt_fec_credit_shares(8, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX) <=
                TBT_FEC_CREDIT_MAX &&
-           tbt_fec_credit_packets(32, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX) <=
+           tbt_fec_credit_shares(32, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX) <=
                TBT_FEC_CREDIT_MAX &&
-           tbt_fec_credit_packets(1, 192, 192, 66, 66, TBT_FEC_CREDIT_MAX) <=
+           tbt_fec_credit_shares(1, 192, 64, 66, 66, TBT_FEC_CREDIT_MAX) <=
                TBT_FEC_CREDIT_MAX,
        "credit stays inside the 16384-share cap");
 }
@@ -2743,20 +2743,20 @@ static void test_block_late(void)
  */
 static void test_credit_window(void)
 {
-    const u32 credit_pkts = 1280; /* 5 super-blocks of 256 shares */
-    const u32 blocks = tbt_fec_credit_blocks(credit_pkts, 1, 128, 128);
+    const u32 credit_shares = 1280; /* 5 super-blocks of 256 shares */
+    const u32 blocks = tbt_fec_credit_blocks(credit_shares, 1, 128, 128);
     int i;
 
-    ok_int(blocks, 5, "credit: the packet grant names five super-blocks");
+    ok_int(blocks, 5, "credit: the share grant names five super-blocks");
     ok_int(tbt_fec_credit_blocks(1792, 1, 128, 128), 7,
            "credit: 1792 shares are 7 blocks at 128/128");
     ok_int(tbt_fec_credit_blocks(1792, 1, 146, 110), 7,
            "credit: 1792 shares are 7 blocks at 146/110");
     ok_int(tbt_fec_credit_blocks(1792, 1, 192, 64), 7,
            "credit: 1792 shares are 7 blocks at 192/64");
-    ok_int(tbt_fec_credit_packets(1, 128, 128, 66, 9, 0), 1792,
+    ok_int(tbt_fec_credit_shares(1, 128, 128, 66, 9, 0), 1792,
            "credit: groups=1 7-block grant is 1792 shares");
-    ok_int(tbt_fec_credit_packets(8, 8, 24, 66, 9, 0), 1792,
+    ok_int(tbt_fec_credit_shares(8, 8, 24, 66, 9, 0), 1792,
            "credit: groups=8 7-block grant is 1792 shares");
     ok_int(tbt_fec_credit_blocks(1792, 8, 8, 24), 7,
            "credit: groups=8 1792 shares are 7 blocks");

@@ -494,7 +494,7 @@ static inline bool tbt_fec_rx_block_late(bool rebase, bool delivered,
 struct tbt_fec_ack
 {
     u64 next_deliver;   /* packet frontier: the sender's credit window */
-    u32 credit_packets; /* share grant; n+m per whole block */
+    u32 credit_packets; /* wire name; units are shares: n+m per whole block */
     u32 rtt_us;
     /* Stream-relative bytes the receiver has handed to its output socket.
      * The sender's tx_ack is this value, not next_deliver * S: a short share
@@ -709,10 +709,12 @@ long tbt_fec_host_live_allocs(void);
  * partial block the ring cannot cover, and capped to `max_shares`
  * (TBT_FEC_CREDIT_MAX) to bound memory. A K too small to hold the two-block
  * slack still grants one super-block: the stream must move, and repair is
- * already unavailable. */
-static inline u32 tbt_fec_credit_packets(u16 groups, u16 n, u16 m,
-                                         u16 k_ring, u16 slots,
-                                         u32 max_shares)
+ * already unavailable. A cap below one whole block still grants one block:
+ * the grant is billed in blocks, and a fraction of a block is worth zero
+ * blocks to every gate. */
+static inline u32 tbt_fec_credit_shares(u16 groups, u16 n, u16 m,
+                                        u16 k_ring, u16 slots,
+                                        u32 max_shares)
 {
     u32 per_block = (u32)groups * ((u32)n + m);
     u32 k_eff = k_ring;
@@ -729,10 +731,12 @@ static inline u32 tbt_fec_credit_packets(u16 groups, u16 n, u16 m,
     {
         u32 limit = max_shares / per_block;
 
+        if (!limit)
+            return per_block;
         if (blocks > limit)
             blocks = limit;
     }
-    return blocks ? blocks * per_block : 1;
+    return blocks * per_block;
 }
 
 /* How many whole super-blocks a share grant is worth. The credit arrives

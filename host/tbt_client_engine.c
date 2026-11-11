@@ -230,7 +230,7 @@ struct flow
     u64 rx_inflight_bad;
     u64 rx_block_stalled;
     u64 rx_shape_mismatch;
-    u32 rx_credit_packets; /* units: shares, one block is groups*(n+m) */
+    u32 rx_credit_shares; /* units: shares, one block is groups*(n+m) */
     u64 rx_credit_bad;
     u16 rx_used;
     u64 rx_deliver_bytes;
@@ -1312,7 +1312,7 @@ static u32 flow_rx_credit_update(struct flow *f)
     if (!block || credit < block || credit > cap ||
         credit > (u64)0xffffffffu)
         f->rx_credit_bad++;
-    f->rx_credit_packets = (u32)credit;
+    f->rx_credit_shares = (u32)credit;
     return (u32)credit;
 }
 
@@ -2501,9 +2501,16 @@ static int flow_tx_ready(struct flow *f, u64 now)
 }
 
 /* The peer's ACK credit is in shares. One block is groups*(n+m) shares and
- * groups*n DATA packets; convert to a local packet window capped at four
- * blocks. A missing grant still allows one block so the first ACK can
- * arrive; a one-block grant is stop-and-wait. */
+ * groups*n DATA packets; convert it to a packet window over the ACK
+ * frontier. The local window is additionally capped at four blocks: that cap
+ * is a deliberate conservative bound for this reference client (bounded
+ * userspace buffers, a short loopback, and no kernel qdisc), not a copy of
+ * the module's policy, which lets the peer grant up to K-2 blocks. The
+ * unacknowledged block count is bounded separately by the replay ring in
+ * flow_tx_block_credit_ok(), and the exact frontier here needs no extra
+ * block of headroom because the window is a whole number of blocks. A
+ * missing grant still allows one block so the first ACK can arrive, and a
+ * one-block grant is stop-and-wait. */
 static bool flow_tx_credit_ok(const struct flow *f)
 {
     u64 block_shares = (u64)f->groups * (f->n + f->m);
@@ -2723,12 +2730,17 @@ static void flow_tick(struct flow *f, u64 now)
     }
     if (e->cfg.verbose && now - f->last_stat_ns >= 1000000000ull)
     {
+        u64 rx_block_shares = (u64)f->rx_groups * (f->rx_n + f->rx_m);
+        u32 rx_credit_blocks =
+            rx_block_shares ? (u32)(f->rx_credit_shares / rx_block_shares) : 0;
+
         f->last_stat_ns = now;
         logmsg(e,
                "tbt_client: flow %llu near=%d tx_seq=%llu ack_next=%llu "
                "rx_next=%llu rx_bytes=%llu rx_used=%u rx_late=%llu "
                "rx_win_drop=%llu rx_stale=%llu rx_inflight_bad=%llu "
-               "rx_stalled=%llu rx_shape_mismatch=%llu rx_credit=%u "
+               "rx_stalled=%llu rx_shape_mismatch=%llu "
+               "rx_credit_shares=%u rx_credit_blocks=%u "
                "rx_credit_bad=%llu rx_unknown_sid=%llu out=%zu/%zu up=%u\n",
                (unsigned long long)f->sid, f->near,
                (unsigned long long)f->tx_seq,
@@ -2741,7 +2753,7 @@ static void flow_tick(struct flow *f, u64 now)
                (unsigned long long)f->rx_inflight_bad,
                (unsigned long long)f->rx_block_stalled,
                (unsigned long long)f->rx_shape_mismatch,
-               f->rx_credit_packets,
+               f->rx_credit_shares, rx_credit_blocks,
                (unsigned long long)f->rx_credit_bad,
                (unsigned long long)e->rx_unknown_sid, f->out_len,
                f->out_off, e->up_count);

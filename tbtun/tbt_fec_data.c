@@ -295,8 +295,8 @@ static struct tbt_fec_grouped *tbt_fec_codec_build(
  * on the near end the local TX is the 8x32 uplink while the ACK it grants
  * covers the far's 1x256 downlink. Choosing by fec_sclc_shape.variant there
  * gave the downlink the uplink window and halved its credit. */
-static u32 tbt_fec_credit_max_packets_dir(const struct tbt_session *sess,
-                                          bool up)
+static u32 tbt_fec_credit_max_shares_dir(const struct tbt_session *sess,
+                                         bool up)
 {
     if (!sess->fec_sclc)
         return TBT_FEC_CREDIT_MAX;
@@ -304,9 +304,9 @@ static u32 tbt_fec_credit_max_packets_dir(const struct tbt_session *sess,
 }
 
 /* The local sender's cap, used for the TX credit and its own start value. */
-static u32 tbt_fec_credit_max_packets(const struct tbt_session *sess)
+static u32 tbt_fec_credit_max_shares(const struct tbt_session *sess)
 {
-    return tbt_fec_credit_max_packets_dir(
+    return tbt_fec_credit_max_shares_dir(
         sess, sess->fec_sclc_shape.variant == TBT_FEC_SCLC_UP);
 }
 
@@ -2268,7 +2268,7 @@ static void tbt_fec_tx_stall_diag(struct tbt_session *sess,
      * compares packets, so a byte-count difference is not a packet lead. At
      * S=1024, 9152 "packets" derived from bytes is 9152*1024 bytes of
      * submitted application data, most of it still in the TX ring. */
-    pr_info_ratelimited("tbtun: fec TX stall diag ack_bytes=%llu tx_bytes=%llu tx_pkts=%llu peer_pkts=%llu lead_pkts=%lld credit_pkts=%u credit_blocks=%u n=%u groups=%u hdr_n=%u hdr_m=%u want_m=%u peer_epoch=%llu cur_block=%llu base_pkt=%llu base_block=%llu credit_wait=%llu txp=%d txq=%u fec_tx_run=%u sched_tx=%d g=%u s=%u replay_q=%u replay_bytes=%u high=%d replay_throttled=%llu age_us=%llu\n",
+    pr_info_ratelimited("tbtun: fec TX stall diag ack_bytes=%llu tx_bytes=%llu tx_pkts=%llu peer_pkts=%llu lead_pkts=%lld credit_shares=%u credit_blocks=%u n=%u groups=%u hdr_n=%u hdr_m=%u want_m=%u peer_epoch=%llu cur_block=%llu base_pkt=%llu base_block=%llu credit_wait=%llu txp=%d txq=%u fec_tx_run=%u sched_tx=%d g=%u s=%u replay_q=%u replay_bytes=%u high=%d replay_throttled=%llu age_us=%llu\n",
                         READ_ONCE(st->tx_ack), READ_ONCE(st->tx_seq),
                         tx_pkts, peer_pkts,
                         (long long)(tx_pkts - peer_pkts), credit,
@@ -2470,9 +2470,9 @@ static void tbt_fec_tx_codec_tick(struct tbt_session *sess,
     tbt_fec_tx_sent_clear(tx);
     spin_unlock_bh(&tx->shape_lock);
     rk = tx->replay ? tbt_fec_replay_k(tx->replay) : sess->fec_replay_k;
-    tx->credit_cap = tbt_fec_credit_packets(
+    tx->credit_cap = tbt_fec_credit_shares(
         tx->groups, n, tx->m, rk, sess->fec_slots,
-        tbt_fec_credit_max_packets(sess));
+        tbt_fec_credit_max_shares(sess));
     if (tx->credit > tx->credit_cap)
         tx->credit = tx->credit_cap;
     if (tx->codec_entry)
@@ -3672,20 +3672,21 @@ static void tbt_fec_ack(struct tbt_session *sess, struct tbt_fec_flow *f,
     /* The credit is K_eff-2 super-blocks: the ring holds K, and two are
      * slack so a block the receiver can still NACK is never evicted. The
      * receiver's arena `slots` is the other bound (a sender inside the
-     * credit cannot overrun it), and the parent window caps the packets
-     * (16 MiB downlink, 8 MiB uplink). The sender applies the same cap.
-     * The cap follows the direction being ACKed: a multi-group receive
-     * flow is the peer's 8x32 uplink, a single-group one its 1x256
-     * downlink. Using the local TX variant here halved the downlink. */
+     * credit cannot overrun it), and the share window caps the credit
+     * (16 MiB each direction at S=1024; 16384 shares). The sender applies
+     * the same cap. The cap follows the direction being ACKed: a
+     * multi-group receive flow is the peer's 8x32 uplink, a single-group
+     * one its 1x256 downlink. Using the local TX variant here halved the
+     * downlink. */
     {
         struct tbt_fec_rx *rx = f->rx;
 
         u16 fn, fm;
 
         tbt_fec_frontier_shape(rx, READ_ONCE(rx->next_super), &fn, &fm);
-        a.credit_packets = tbt_fec_credit_packets(
+        a.credit_packets = tbt_fec_credit_shares(
             rx->groups, fn, fm, rx->replay_k, rx->slots,
-            tbt_fec_credit_max_packets_dir(sess, rx->groups > 1));
+            tbt_fec_credit_max_shares_dir(sess, rx->groups > 1));
         /* The peer uses this as the replay round trip: a share asked again
          * before it can arrive would only duplicate the repair. The sample
          * is the NACK scan's carrier RTT gauge, 0 before the first one. */
@@ -4485,11 +4486,12 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess,
                            rx->deliver_bytes - rx->stream_base : 0;
 
         rx->ack_deliver = rx->next_deliver;
-        /* The ACK names the frontier and the bytes. The frontier keeps the
-         * sender's credit window in packet units; the byte count is what
-         * tx_ack and every retention decision use. They are not
-         * interchangeable: a block closed early, or a share whose payload is
-         * shorter than S, leaves the frontier ahead of the bytes. */
+        /* The ACK names the frontier and the bytes. The frontier is the
+         * packet position the credit gate compares against; the grant itself
+         * is in shares, and the byte count is what tx_ack and every retention
+         * decision use. They are not interchangeable: a block closed early,
+         * or a share whose payload is shorter than S, leaves the frontier
+         * ahead of the bytes. */
         tbt_fec_ack(sess, f, st, rx->next_deliver, stream_bytes);
     }
     if (blocked)
@@ -8355,14 +8357,14 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     {
         tx->codec_variant = groups > 1 ? 1 : 0;
     }
-    tx->credit_cap = tbt_fec_credit_packets(groups, n, m, sess->fec_replay_k,
-                                            sess->fec_slots,
-                                            tbt_fec_credit_max_packets(sess));
+    tx->credit_cap = tbt_fec_credit_shares(groups, n, m, sess->fec_replay_k,
+                                           sess->fec_slots,
+                                           tbt_fec_credit_max_shares(sess));
     {
         /* Before the first ACK the peer has not named its window. Opening
          * the full cap here let the sender blast K-2 blocks at a receiver
          * whose arena may be smaller; the receiver dropped the excess and
-         * its ACK froze. Start with one super-block and let the first ACK
+         * its ACK froze. Start with two super-blocks and let the first ACK
          * open the window it can actually buffer. */
         u32 two = 2u * (u32)groups * ((u32)n + m);
 
