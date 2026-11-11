@@ -30,7 +30,9 @@ struct tbt_cc_info
 int tbt_cc_module_init(void);
 void tbt_cc_module_exit(void);
 
-/* Push tunnel context. No-op unless sk currently runs this CC. */
+/* Push tunnel context. rate_cap_bps is this carrier's share of the tunnel
+ * rate (the session divides its aggregate by the stripe width). No-op unless
+ * sk currently runs this CC. */
 void tbt_cc_set_tunnel(struct sock *sk, u32 rate_cap_bps, u32 loss_ppm);
 void tbt_cc_set_hold(struct sock *sk, bool hold);
 

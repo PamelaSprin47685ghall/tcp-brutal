@@ -837,7 +837,9 @@ static void tbt_car_poll_one(struct tbt_carrier *c, bool paused)
      * and the loss the FEC feedback path measured. The CC keeps only the
      * socket's private block, so no carrier or session pointer can outlive
      * the socket it was trusted to. */
-    tbt_cc_set_tunnel(sk, sess->tunnel->cfg.tunnel_rate,
+    tbt_cc_set_tunnel(sk,
+                      sess->n_car ? sess->tunnel->cfg.tunnel_rate / sess->n_car
+                                  : 0,
                       READ_ONCE(sess->cc_loss_ppm));
     {
         u32 una = READ_ONCE(tp->snd_una);
@@ -3572,9 +3574,13 @@ static bool tbt_car_set_cc(struct socket *s, struct tbt_session *sess)
     if (err)
         pr_info_ratelimited("tbtun: carrier TCP_CONGESTION=%s refused: %d but actual=%s\n",
                             name, err, tbt_car_cc_actual(s->sk));
-    /* No-op unless this socket runs tbtcc. Harmless for BBR. */
+    /* No-op unless this socket runs tbtcc. Harmless for BBR. The configured
+     * tunnel rate is the session's aggregate; one carrier's share is that
+     * rate divided by the stripe width. */
     tbt_cc_set_tunnel(s->sk,
-                      sess && sess->tunnel ? sess->tunnel->cfg.tunnel_rate : 0,
+                      sess && sess->tunnel && sess->n_car
+                          ? sess->tunnel->cfg.tunnel_rate / sess->n_car
+                          : 0,
                       sess ? READ_ONCE(sess->cc_loss_ppm) : 0);
     return true;
 }
