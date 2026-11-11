@@ -2275,11 +2275,21 @@ void tbt_tx_fec_poll(struct tbt_session *sess)
 
 static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
 {
-    u64 since = READ_ONCE(st->close_since_ns);
     u64 start, budget, bound, now = tbt_now_ns();
+    u64 hard_cap = (u64)READ_ONCE(close_hard_cap_ms) * NSEC_PER_MSEC;
+    struct sock *sk = READ_ONCE(st->sk);
     bool peer_fin = READ_ONCE(st->rx_fin_done);
     bool fin_written = READ_ONCE(st->tx_fin_written);
     bool tx_unacked = READ_ONCE(st->tx_ack) < READ_ONCE(st->tx_seq);
+    bool target_eof = sk &&
+                      tbt_stream_peer_eof(
+                          (READ_ONCE(sk->sk_shutdown) & RCV_SHUTDOWN) != 0,
+                          READ_ONCE(sk->sk_state) == TCP_CLOSE,
+                          READ_ONCE(st->state) == TBT_ST_DEAD);
+    bool local_tx_done = fin_written || target_eof;
+    bool no_unacked = !tx_unacked;
+    bool no_rx_pending = READ_ONCE(st->rx_queued) == 0;
+    bool four = local_tx_done && peer_fin && no_unacked && no_rx_pending;
 
     budget = tbt_tx_wait_budget_ns(sess, st);
     bound = tbt_tx_close_bound(peer_fin && !fin_written, budget);
@@ -2288,13 +2298,29 @@ static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
                    READ_ONCE(st->close_since_ns) != 0);
     tbt_tx_fec_rearm_if_pending(sess, st);
 
+    /* The normal close budget starts only when both directions are finished
+     * and no data is in flight: local transmit done, peer FIN in, every byte
+     * acknowledged, and nothing left to deliver. Starting it on the peer FIN
+     * alone cut a download that was still sending data. The short FIN-write
+     * window below is measured from this same instant, so a target EOF that
+     * happens long after the peer FIN still gets its full window. */
+    if (four)
+    {
+        if (!READ_ONCE(st->close_ready_ns))
+            WRITE_ONCE(st->close_ready_ns, now);
+    }
+    else
+    {
+        WRITE_ONCE(st->close_ready_ns, 0);
+    }
+
     /* The peer's FIN reached the application but the target never closed its
      * half, so our FIN was never requested or written. Without this bound the
      * far flow and its target would live until session teardown, and a
      * single-threaded source could be held by the idle old stream. */
     if (peer_fin && !fin_written)
     {
-        struct sock *sk = READ_ONCE(st->sk);
+        u64 ready = READ_ONCE(st->close_ready_ns);
 
         /* The peer FIN is in, but the delivery queue still holds bytes: the
          * target is not idle, so the short bound does not apply yet. */
@@ -2309,29 +2335,20 @@ static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
                       (READ_ONCE(sk->sk_shutdown) & RCV_SHUTDOWN) != 0,
                       READ_ONCE(sk->sk_state) == TCP_CLOSE, false))
             tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
-        if (tbt_tx_peer_fin_close_allowed(peer_fin, fin_written, tx_unacked,
-                                          READ_ONCE(st->rx_fin_done_ns),
-                                          now, bound))
+        /* A peer FIN only closes the receive direction. The short bound may
+         * release the stream only after the local transmit direction has
+         * also finished and nothing is left in flight; otherwise this is a
+         * legal half-close whose reverse direction is still downloading.
+         * The window runs from close_ready_ns (all four conditions), not
+         * from the peer FIN, which may arrive minutes earlier. */
+        if (local_tx_done && no_unacked && no_rx_pending && ready &&
+            now > ready && now - ready > bound)
         {
             atomic64_inc(&sess->close_timeouts);
-            tbt_stream_kill(st, TBT_ST_DEAD);
+            tbt_stream_kill(st, TBT_ST_CLOSE_TIMEOUT);
             return;
         }
     }
-    /* A peer FIN with our TX still unacked starts the normal close budget
-     * even when the local target has not requested its own FIN. Otherwise
-     * this branch returned with since == 0 and the 30 s cap never ran. */
-    if (!since && peer_fin && tx_unacked)
-    {
-        u64 t = READ_ONCE(st->rx_fin_done_ns);
-
-        if (!t)
-            t = now;
-        WRITE_ONCE(st->close_since_ns, t);
-        since = t;
-    }
-    if (!since)
-        return;
     if (READ_ONCE(st->tx_fin_written))
     {
         /* Our half is on the wire and every byte before it was acked.  If the
@@ -2349,22 +2366,45 @@ static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
             fw = READ_ONCE(st->tx_start_ns);
         if (!fw || READ_ONCE(st->rx_fin_done) || READ_ONCE(st->rx_queued))
             return;
-        if (now <= fw || now - fw <= bound)
+        if (now <= fw || now - fw <= hard_cap)
             return;
+        pr_info_ratelimited("tbtun: close_hard_cap sid=%llu why=peer_fin_missing tx_fin_written=1 target_eof=%d rx_fin_done=0 tx_unacked=%d rx_queued=%u idle_ms=%llu\n",
+                            (unsigned long long)st->sid, target_eof ? 1 : 0,
+                            tx_unacked ? 1 : 0, READ_ONCE(st->rx_queued),
+                            (unsigned long long)((now - fw) / NSEC_PER_MSEC));
         atomic64_inc(&sess->close_detaches);
         tbt_stream_detach_from_session(st);
         return;
     }
-    start = since;
-    if (READ_ONCE(st->tx_ack) < READ_ONCE(st->tx_seq))
+    /* Peer FIN is in, the receive queue is empty, but the four close
+     * conditions are still not met (the target does not finish, or an
+     * unacknowledged tail never drains). Only the hard cap may reclaim such
+     * a stream, and it runs from the last receive/ack progress so a target
+     * that is still producing data never reaches it. */
+    if (peer_fin && no_rx_pending && !four)
     {
+        const char *why = local_tx_done ? "tx_ack_stalled"
+                                        : "target_tx_not_done";
+        u64 p = READ_ONCE(st->rx_fin_done_ns);
         u64 ack_ns = READ_ONCE(st->last_ack_ns);
 
-        if (ack_ns > start)
-            start = ack_ns;
+        if (ack_ns > p)
+            p = ack_ns;
+        if (!p || now <= p || now - p <= hard_cap)
+            return;
+        pr_info_ratelimited("tbtun: close_hard_cap sid=%llu why=%s tx_fin_written=%d target_eof=%d rx_fin_done=1 tx_unacked=%d rx_queued=%u idle_ms=%llu\n",
+                            (unsigned long long)st->sid, why,
+                            READ_ONCE(st->tx_fin_written) ? 1 : 0,
+                            target_eof ? 1 : 0, tx_unacked ? 1 : 0,
+                            READ_ONCE(st->rx_queued),
+                            (unsigned long long)((now - p) / NSEC_PER_MSEC));
+        atomic64_inc(&sess->close_timeouts);
+        tbt_stream_kill(st, TBT_ST_CLOSE_TIMEOUT);
+        return;
     }
-    if (READ_ONCE(st->pause_cleared_ns) > start)
-        start = READ_ONCE(st->pause_cleared_ns);
+    if (!four || !READ_ONCE(st->close_ready_ns))
+        return;
+    start = READ_ONCE(st->close_ready_ns);
     budget = tbt_tx_wait_budget_ns(sess, st);
     if (now <= start || now - start <= budget)
         return;
@@ -2391,13 +2431,14 @@ static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
                                 (now - start) / NSEC_PER_USEC);
         return;
     }
-    if (debug >= 2)
-        pr_info("tbtun: CLOSETIMEOUT sid=%llu ack=%llu txseq=%llu fin=%llu age_us=%llu\n",
-                (unsigned long long)st->sid, READ_ONCE(st->tx_ack),
-                READ_ONCE(st->tx_seq), READ_ONCE(st->tx_fin_seq),
-                (now - start) / NSEC_PER_USEC);
+    pr_info_ratelimited("tbtun: close_timeout sid=%llu why=close_budget tx_fin_written=%d target_eof=%d rx_fin_done=%d tx_unacked=%d rx_queued=%u age_ms=%llu\n",
+                        (unsigned long long)st->sid,
+                        READ_ONCE(st->tx_fin_written) ? 1 : 0,
+                        target_eof ? 1 : 0, peer_fin ? 1 : 0,
+                        tx_unacked ? 1 : 0, READ_ONCE(st->rx_queued),
+                        (unsigned long long)((now - start) / NSEC_PER_MSEC));
     atomic64_inc(&sess->close_timeouts);
-    tbt_stream_kill(st, TBT_ST_DEAD);
+    tbt_stream_kill(st, TBT_ST_CLOSE_TIMEOUT);
 }
 
 /* Apply one ack value (a byte offset below which the peer has delivered
