@@ -1865,6 +1865,23 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
 
     if (!tx->fill && !last)
         return;
+    /* Runtime guard for the 0.8 credit contract: a DATA packet must never
+     * leave while it is more than the granted window past the peer's packet
+     * frontier. The gate should make this unreachable; the counter and the
+     * debug line make a regression visible instead of silent. */
+    {
+        u64 peer = READ_ONCE(tx->peer_pkts);
+        u32 credit = READ_ONCE(tx->credit);
+
+        if (tx->seq > peer && tx->seq - peer > credit)
+        {
+            atomic64_inc(&sess->fec_credit_violation);
+            if (debug)
+                pr_info_ratelimited("tbtun: fec credit violation seq=%llu peer=%llu credit=%u n=%u groups=%u\n",
+                                    tx->seq, peer, credit, tx->n,
+                                    tx->groups);
+        }
+    }
     len = tx->fill;
     /* The block under construction owns a fixed shape. Its packets are laid
      * group-major: seq = blk_seq0 + group*blk_n + share. A block that is

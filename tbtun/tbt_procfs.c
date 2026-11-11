@@ -1178,7 +1178,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "bind_drop_no_stream=%llu "
                               "fec_drop_window=%llu fec_drop_sid=%llu fec_drop_crypto=%llu "
                               "fec_ack_tx=%llu fec_ack_rx=%llu "
-                              "fec_credit_wait=%llu\n",
+                              "fec_credit_wait=%llu fec_credit_violation=%llu\n",
                            id, tbt_stat_read(&s->fec_proto_fail),
                            tbt_stat_read(&s->fec_hdr_crc_fail),
                            tbt_stat_read(&s->fec_payload_crc_fail),
@@ -1191,7 +1191,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_drop_crypto),
                            tbt_stat_read(&s->fec_ack_tx),
                            tbt_stat_read(&s->fec_ack_rx),
-                           tbt_stat_read(&s->fec_credit_wait));
+                           tbt_stat_read(&s->fec_credit_wait),
+                           tbt_stat_read(&s->fec_credit_violation));
                 /* Every way a share or a block can be lost. Without these a
                  * stalled FEC stream reports zero errors: the counters that
                  * name the loss were simply not exported. */

@@ -1819,6 +1819,7 @@ struct tbt_session
     atomic64_t fec_ack_tx;
     atomic64_t fec_ack_rx;
     atomic64_t fec_credit_wait;
+    atomic64_t fec_credit_violation;
     /* FEC sender scheduling. fec_flush_pass counts accepted DATA records.
      * fec_flush_skip and fec_hol_wait are kept for the old per-carrier queue
      * accounting; the session FIFO never queues a record behind one socket,

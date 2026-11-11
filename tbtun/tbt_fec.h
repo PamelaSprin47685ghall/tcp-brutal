@@ -1273,6 +1273,16 @@ static inline bool tbt_fec_credit_waiting(u64 peer_pkts, u64 seq,
 
     if (!credit || !groups || !n)
         return true;
+    /*
+     * Absolute packet invariant: the receiver buffers `credit` DATA
+     * packets ahead of the packet frontier, regardless of block cuts or a
+     * shape switch. The block gate below is relative to base_pkt, which is
+     * reset on every shape switch; using only that gate let a switch move
+     * the frontier back to zero and open another full window. O(1), exact,
+     * and independent of n/m changing mid-stream.
+     */
+    if (seq > peer_pkts && seq - peer_pkts > credit)
+        return true;
     credit_blocks = tbt_fec_credit_blocks(credit, groups, n);
     if (peer_pkts < base_pkt)
         peer_pkts = base_pkt;
