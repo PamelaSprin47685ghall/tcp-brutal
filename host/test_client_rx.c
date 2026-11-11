@@ -1088,6 +1088,144 @@ static void test_shape_switch_stream(void)
     free(expected);
 }
 
+/* A split change must leave the blocks that are already in the reorder
+ * window decodable with their own n/m, while the committed credit window
+ * follows groups*(n+m) and therefore does not move at all. Eight old-shape
+ * blocks fill every slot; the ninth block arrives under the new split. */
+static void test_shape_switch_inflight(void)
+{
+    enum { OLD_N = 139, OLD_M = 117, NEW_N = 160, NEW_M = 96 };
+    static const u16 drop[] = { 5, 77, 138 };
+    u8 *old_data = malloc((size_t)OLD_N * TBT_FEC_S);
+    u8 *new_data = malloc((size_t)NEW_N * TBT_FEC_S);
+    u8 *old_parity[OLD_M];
+    u8 *new_parity[NEW_M];
+    u8 *dp[256], *pp[256];
+    struct tbt_fec_grouped *old_codec, *new_codec;
+    size_t expected_len =
+        (size_t)TBT_RX_SLOTS * OLD_N * TBT_FEC_S + (size_t)NEW_N * TBT_FEC_S;
+    u8 *expected = malloc(expected_len);
+    u8 dig_e[32], dig_o[32];
+    size_t j;
+    u16 i, s;
+
+    if (!old_data || !new_data || !expected)
+        abort();
+    for (j = 0; j < (size_t)OLD_N * TBT_FEC_S; j++)
+        old_data[j] = (u8)(j * 7u + 3u);
+    for (j = 0; j < (size_t)NEW_N * TBT_FEC_S; j++)
+        new_data[j] = (u8)(j * 11u + 5u);
+
+    clear_engine();
+    set_downlink_shape();
+    old_codec = flow_rx_codec(&f, OLD_N, OLD_M);
+    CHECK(old_codec != NULL, "inflight: old-shape codec");
+    if (!old_codec)
+        return;
+    for (i = 0; i < OLD_N; i++)
+        dp[i] = old_data + (size_t)i * TBT_FEC_S;
+    for (i = 0; i < OLD_M; i++)
+    {
+        old_parity[i] = calloc(1, TBT_FEC_S);
+        pp[i] = old_parity[i];
+    }
+    CHECK(tbt_fec_grouped_encode(old_codec, 0, dp, OLD_N, pp) == 0,
+          "inflight: old-shape parity");
+
+    /* One share per block fills the window under the old split. */
+    for (i = 0; i < TBT_RX_SLOTS; i++)
+        send_data_payload(i, (u64)i * OLD_N, OLD_N, OLD_M, 0, 0,
+                          TBT_FEC_S, false, dp[0]);
+    CHECK(f.rx_used == TBT_RX_SLOTS, "inflight: every slot is occupied");
+
+    CHECK(flow_commit_shape(&f, NEW_N, NEW_M),
+          "inflight: the new split commits");
+    CHECK(f.rx_n == NEW_N && f.rx_m == NEW_M,
+          "inflight: the committed expectation is the new split");
+    CHECK(f.rx_credit_shares == (TBT_RX_SLOTS - 1) * 256u,
+          "inflight: credit is 7 * (n+m), independent of the split");
+
+    /* Complete the eight old blocks with their old n/m. Block 0 loses
+     * three DATA shares, so the old codec must still recover it. */
+    for (i = 0; i < TBT_RX_SLOTS; i++)
+    {
+        for (s = 0; s < OLD_N; s++)
+        {
+            if (i == 0 && (s == drop[0] || s == drop[1] || s == drop[2]))
+                continue;
+            send_data_payload(i, (u64)i * OLD_N, OLD_N, OLD_M, 0, s,
+                              TBT_FEC_S, false, dp[s]);
+        }
+        if (i == 0)
+        {
+            for (s = 0; s < OLD_M && f.rx_next_block == i; s++)
+                send_parity_payload(i, (u64)i * OLD_N, OLD_N, OLD_M, 0, s,
+                                    OLD_N, 0, pp[s]);
+        }
+        CHECK(f.rx_next_block == (u64)i + 1,
+              "inflight: an old-shape block still delivers");
+    }
+    CHECK(f.rx_n == OLD_N && f.rx_m == OLD_M,
+          "inflight: the draining block owns the expectation");
+    CHECK(f.rx_credit_shares == (TBT_RX_SLOTS - 1) * 256u,
+          "inflight: credit did not move with the old split");
+
+    /* The first new-shape block follows and adopts 160/96. */
+    new_codec = flow_rx_codec(&f, NEW_N, NEW_M);
+    CHECK(new_codec != NULL, "inflight: new-shape codec");
+    for (i = 0; i < NEW_N; i++)
+        dp[i] = new_data + (size_t)i * TBT_FEC_S;
+    for (i = 0; i < NEW_M; i++)
+    {
+        new_parity[i] = calloc(1, TBT_FEC_S);
+        pp[i] = new_parity[i];
+    }
+    CHECK(tbt_fec_grouped_encode(new_codec, 0, dp, NEW_N, pp) == 0,
+          "inflight: new-shape parity");
+    for (s = 0; s < NEW_N; s++)
+    {
+        if (s == 3 || s == 80 || s == 159)
+            continue;
+        send_data_payload(TBT_RX_SLOTS, (u64)TBT_RX_SLOTS * OLD_N,
+                          NEW_N, NEW_M, 0, s, TBT_FEC_S, false, dp[s]);
+    }
+    for (s = 0; s < NEW_M && f.rx_next_block == TBT_RX_SLOTS; s++)
+        send_parity_payload(TBT_RX_SLOTS, (u64)TBT_RX_SLOTS * OLD_N,
+                            NEW_N, NEW_M, 0, s, NEW_N, 0, pp[s]);
+
+    CHECK(f.rx_next_block == TBT_RX_SLOTS + 1,
+          "inflight: the new-shape block delivers after the old ones");
+    CHECK(f.rx_n == NEW_N && f.rx_m == NEW_M,
+          "inflight: the new split owns the expectation at the end");
+    CHECK(f.rx_shape_bad == 0 && f.rx_window_drop == 0 &&
+              f.rx_late_share == 0,
+          "inflight: no old-shape share is rejected or late");
+    CHECK(f.rx_credit_bad == 0, "inflight: credit invariant holds");
+
+    for (i = 0; i < TBT_RX_SLOTS; i++)
+        memcpy(expected + (size_t)i * OLD_N * TBT_FEC_S, old_data,
+               (size_t)OLD_N * TBT_FEC_S);
+    memcpy(expected + (size_t)TBT_RX_SLOTS * OLD_N * TBT_FEC_S, new_data,
+           (size_t)NEW_N * TBT_FEC_S);
+    CHECK(f.out_len == expected_len && f.out_off == 0,
+          "inflight: every mixed-split byte is delivered");
+    if (f.out_len == expected_len)
+    {
+        sha_digest(expected, expected_len, dig_e);
+        sha_digest(f.out, f.out_len, dig_o);
+        CHECK(memcmp(dig_e, dig_o, 32) == 0,
+              "inflight: byte-exact SHA across the switch");
+    }
+
+    for (i = 0; i < OLD_M; i++)
+        free(old_parity[i]);
+    for (i = 0; i < NEW_M; i++)
+        free(new_parity[i]);
+    free(old_data);
+    free(new_data);
+    free(expected);
+}
+
 /* adaptive=off must not install the control law and must not emit a
  * periodic FBK target; CFG_ACK still goes out. */
 static void make_down_cfg(u8 body[TBT_FEC_CFG_LEN], u32 epoch)
@@ -1124,11 +1262,34 @@ static void test_adaptive_off(void)
     CHECK(flow_send_fbk(&f, 0, 1) == 0, "adaptive off: periodic FBK is a no-op");
     CHECK(e.npending == 0, "adaptive off: no FBK target is queued");
 
+    /* A directed FBK is the CFG handshake, not the control law: it must
+     * still leave when adaptive is off, and it must not move the split. */
+    clear_pending();
+    CHECK(flow_send_fbk(&f, TBT_FEC_FBK_F_CFG_ACK, 1) == 0,
+          "adaptive off: directed CFG_ACK still sends");
+    CHECK(e.npending == 1, "adaptive off: one directed FBK is queued");
+    if (e.npending == 1)
+        CHECK(e.pending[0].rec[TBT_FEC_HDR_LEN + TBT_FEC_FBK_FLAGS] ==
+                  TBT_FEC_FBK_F_CFG_ACK,
+              "adaptive off: the directed flags survive");
+    CHECK(f.rx_n == 128 && f.rx_m == 128 && f.rx_shape_bad == 0,
+          "adaptive off: a directed FBK runs no control law");
+
     e.cfg.cfg.adaptive = 1;
     f.rx_shape_set = false;
     make_down_cfg(body, 2);
     CHECK(handle_cfg(&f, body) == 0, "adaptive on: CFG installs");
     CHECK(f.ctl_ready, "adaptive on: control law is initialized");
+
+    /* Flip the law off under a live controller: the guard, not the missing
+     * init, must keep the periodic FBK and any commit silent. */
+    e.cfg.cfg.adaptive = 0;
+    clear_pending();
+    CHECK(flow_send_fbk(&f, 0, 1) == 0,
+          "adaptive off: a live control law still sends no periodic FBK");
+    CHECK(e.npending == 0, "adaptive off: the live law queues nothing");
+    CHECK(f.rx_n == 128 && f.rx_m == 128 && f.rx_shape_bad == 0,
+          "adaptive off: the live law commits nothing");
 }
 
 /* nonce= on the client is the HELLO session nonce; an unset near generates
@@ -1157,6 +1318,153 @@ static void test_session_nonce_config(void)
     e.near = false;
     engine_init_session_nonce(&e);
     CHECK(!e.session_nonce_set, "nonce: unset far adopts the peer nonce");
+
+    clear_engine();
+    e.near = false;
+    e.cfg.cfg.nonce_set = true;
+    memcpy(e.cfg.cfg.nonce, pinned, sizeof(pinned));
+    engine_init_session_nonce(&e);
+    CHECK(e.session_nonce_set &&
+              memcmp(e.session_nonce, pinned, sizeof(pinned)) == 0,
+          "nonce: a configured far pins the nonce it requires");
+}
+
+/* The HELLO nonce is the 16 bytes at body + 2. A wrong nonce must be
+ * refused before hello_crypto() commits the peer key and RX nonce, or the
+ * first wrong-nonce connection poisons every later HELLO. */
+static void make_hello(u8 body[TBT_HELLO_BODY_LEN_V6], u8 role,
+                       const u8 nonce[16], bool crypto,
+                       const u8 crypto_nonce[TBT_CRYPTO_NONCE_LEN],
+                       const u8 key[TBT_CRYPTO_KEY_LEN])
+{
+    memset(body, 0, TBT_HELLO_BODY_LEN_V6);
+    body[0] = TBT_WIRE_VERSION_V6;
+    body[1] = role;
+    memcpy(body + 2, nonce, 16);
+    tbt_put_le16(body + 18, TBT_PAYLOAD_MAX);
+    tbt_put_le16(body + 20, TBT_CHUNK_MAX);
+    body[22] = (u8)(e.cfg.cfg.profile & 3);
+    if (crypto)
+        tbt_crypto_hello_fill(body, true, TBT_CRYPTO_KEY_ID_HELLO,
+                              crypto_nonce, key);
+}
+
+static void test_session_nonce_hello(void)
+{
+    static struct carrier c;
+    struct tbt_rec rec;
+    u8 body[TBT_HELLO_BODY_LEN_V6];
+    u8 good[16], bad[16], key[TBT_CRYPTO_KEY_LEN];
+    u8 cn_a[TBT_CRYPTO_NONCE_LEN], cn_b[TBT_CRYPTO_NONCE_LEN];
+    u16 i;
+
+    for (i = 0; i < 16; i++)
+    {
+        good[i] = (u8)(0x40 + i);
+        bad[i] = (u8)(0x90 + i);
+    }
+    for (i = 0; i < TBT_CRYPTO_KEY_LEN; i++)
+        key[i] = (u8)(0x20 + i);
+    for (i = 0; i < TBT_CRYPTO_NONCE_LEN; i++)
+    {
+        cn_a[i] = (u8)(0x60 + i);
+        cn_b[i] = (u8)(0x70 + i);
+    }
+
+    /* Near: the far's HELLO must echo the local nonce. */
+    clear_engine();
+    e.near = true;
+    e.session_nonce_set = true;
+    memcpy(e.session_nonce, good, sizeof(good));
+    memset(&c, 0, sizeof(c));
+    c.index = 3;
+    c.hello_sent = true;
+    memset(&rec, 0, sizeof(rec));
+    rec.hdr.type = TBT_F_HELLO;
+    rec.hdr.path_id = 3;
+    rec.body_len = TBT_HELLO_BODY_LEN_V6;
+    rec.body = body;
+
+    make_hello(body, TBT_ROLE_FAR, good, false, NULL, NULL);
+    CHECK(handle_hello(&e, &c, &rec) == 0,
+          "nonce hello: the near accepts its own nonce");
+    make_hello(body, TBT_ROLE_FAR, bad, false, NULL, NULL);
+    CHECK(handle_hello(&e, &c, &rec) == -EPROTO,
+          "nonce hello: the near rejects a different nonce");
+
+    /* Far with crypto on and a pinned nonce: the wrong-nonce HELLO is
+     * refused and must leave no key, RX nonce or carrier slot behind. */
+    clear_engine();
+    e.near = false;
+    e.n_car = 1;
+    e.crypto_on = true;
+    e.session_nonce_set = true;
+    memcpy(e.session_nonce, good, sizeof(good));
+    memset(&c, 0, sizeof(c));
+    c.index = -1;
+    c.hello_sent = true;
+    rec.hdr.path_id = 0;
+
+    make_hello(body, TBT_ROLE_NEAR, bad, true, cn_a, key);
+    CHECK(handle_hello(&e, &c, &rec) == -EPROTO,
+          "nonce hello: the far rejects a different nonce");
+    CHECK(!e.key_owned && !e.rx_ready,
+          "nonce hello: a rejected HELLO commits no crypto state");
+    CHECK(e.car[0] == NULL, "nonce hello: a rejected HELLO takes no slot");
+
+    make_hello(body, TBT_ROLE_NEAR, good, true, cn_b, key);
+    CHECK(handle_hello(&e, &c, &rec) == 0,
+          "nonce hello: the far accepts the pinned nonce");
+    CHECK(e.rx_ready && e.key_owned,
+          "nonce hello: the accepted HELLO commits crypto state");
+    CHECK(e.car[0] == &c && c.index == 0,
+          "nonce hello: the accepted HELLO takes its slot");
+    CHECK(!memcmp(e.session_nonce, good, sizeof(good)),
+          "nonce hello: the accepted HELLO leaves the nonce intact");
+}
+
+/* The parser owns the length and format: 32 hex digits are the full value,
+ * 16 pin the low 64 bits (the documented rule), and every other length is
+ * refused rather than truncated. */
+static void test_session_nonce_parse(void)
+{
+    static const char *const fmt =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 nonce=%s";
+    static const u8 full[16] = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66,
+                                 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd,
+                                 0xee, 0xff };
+    static const u8 half[16] = { 0, 0, 0, 0, 0, 0, 0, 0,
+                                 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66,
+                                 0x77 };
+    char line[256];
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr;
+
+    snprintf(line, sizeof(line), fmt,
+             "00112233445566778899aabbccddeeff");
+    memset(&cmd, 0, sizeof(cmd));
+    memset(&perr, 0, sizeof(perr));
+    CHECK(tbt_parse_line(line, &cmd, &perr) == 0 && cmd.cfg.nonce_set &&
+              !memcmp(cmd.cfg.nonce, full, sizeof(full)),
+          "nonce parse: 32 hex digits are the full value");
+
+    snprintf(line, sizeof(line), fmt, "0011223344556677");
+    memset(&cmd, 0, sizeof(cmd));
+    CHECK(tbt_parse_line(line, &cmd, &perr) == 0 && cmd.cfg.nonce_set &&
+              !memcmp(cmd.cfg.nonce, half, sizeof(half)),
+          "nonce parse: 16 hex digits pin the low 64 bits");
+
+    snprintf(line, sizeof(line), fmt, "0011");
+    CHECK(tbt_parse_line(line, &cmd, &perr) != 0,
+          "nonce parse: a 2-byte value is refused");
+    snprintf(line, sizeof(line), fmt,
+             "00112233445566778899aabbccddeeff0");
+    CHECK(tbt_parse_line(line, &cmd, &perr) != 0,
+          "nonce parse: 33 hex digits are refused");
+    snprintf(line, sizeof(line), fmt,
+             "zz112233445566778899aabbccddeeff");
+    CHECK(tbt_parse_line(line, &cmd, &perr) != 0,
+          "nonce parse: non-hex digits are refused");
 }
 
 /* The stall dump must fire once for an incomplete head and expose both
@@ -1230,8 +1538,11 @@ int main(void)
     test_downlink_erasure();
     test_shape_rejection();
     test_shape_switch_stream();
+    test_shape_switch_inflight();
     test_adaptive_off();
     test_session_nonce_config();
+    test_session_nonce_hello();
+    test_session_nonce_parse();
     test_stall_dump();
     test_tx_idle_empty();
     test_tx_peer_credit();

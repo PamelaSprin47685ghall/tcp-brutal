@@ -2067,8 +2067,12 @@ static int handle_hello(struct engine *e, struct carrier *c,
     if (tbt_le16(rec->body + 18) != TBT_PAYLOAD_MAX ||
         tbt_le16(rec->body + 20) != TBT_CHUNK_MAX)
         return -EPROTO;
-    if (hello_crypto(e, rec->body, rec->body_len))
-        return -EPROTO;
+    /* The session nonce and the carrier index are admission checks, not
+     * state. Run them before hello_crypto(), which commits the peer key and
+     * the RX nonce: a HELLO refused here must leave no trace, or one
+     * wrong-nonce connection can poison the far's crypto state for every
+     * later HELLO. The far's first HELLO adopts the nonce only after every
+     * check has passed. */
     if (e->near)
     {
         if (rec->hdr.path_id != c->index)
@@ -2076,20 +2080,22 @@ static int handle_hello(struct engine *e, struct carrier *c,
         if (memcmp(rec->body + 2, e->session_nonce, 16))
             return -EPROTO;
     }
-    else
+    else if (rec->hdr.path_id >= e->n_car ||
+             (e->session_nonce_set &&
+              memcmp(rec->body + 2, e->session_nonce, 16)))
+    {
+        return -EPROTO;
+    }
+    if (hello_crypto(e, rec->body, rec->body_len))
+        return -EPROTO;
+    if (!e->near)
     {
         u16 index = rec->hdr.path_id;
 
-        if (index >= e->n_car)
-            return -EPROTO;
         if (!e->session_nonce_set)
         {
             memcpy(e->session_nonce, rec->body + 2, 16);
             e->session_nonce_set = true;
-        }
-        else if (memcmp(rec->body + 2, e->session_nonce, 16))
-        {
-            return -EPROTO;
         }
         if (e->car[index] && e->car[index] != c)
             carrier_close(e, e->car[index]);
@@ -3365,8 +3371,23 @@ int tbt_engine_run(const struct tbt_engine_cfg *cfg)
             case EP_TIMER:
             {
                 u64 ticks;
+                ssize_t got;
+                int rerr;
 
-                (void)read(e->timerfd, &ticks, sizeof(ticks));
+                do
+                    got = read(e->timerfd, &ticks, sizeof(ticks));
+                while (got < 0 && errno == EINTR);
+                rerr = errno;
+                if (got < 0)
+                {
+                    if (rerr != EAGAIN && rerr != EWOULDBLOCK)
+                        logmsg(e, "tbt_client: timerfd read: %s\n",
+                               strerror(rerr));
+                }
+                else if ((size_t)got != sizeof(ticks))
+                {
+                    logmsg(e, "tbt_client: timerfd short read %zd\n", got);
+                }
                 break;
             }
             default:
