@@ -53,6 +53,16 @@ unsigned int max_carriers = TBT_MAX_CARRIERS_LIMIT;
 module_param(max_carriers, uint, 0444);
 MODULE_PARM_DESC(max_carriers, "Carrier sockets per session, 1..256 (default 256)");
 
+/* Final bound for a stream whose close never completes: the peer FIN never
+ * arrives, or the target neither finishes nor sends. It must be far longer
+ * than any legitimate in-flight transfer, because a legal half-close (the
+ * peer sends FIN and stops writing while the reverse direction keeps
+ * downloading) must not be cut short. Writable so a probe can shorten it. */
+unsigned int close_hard_cap_ms = 600000;
+module_param(close_hard_cap_ms, uint, 0644);
+MODULE_PARM_DESC(close_hard_cap_ms,
+                 "Half-open close hard cap in ms (default 600000)");
+
 /* Debug-only loss injection gate. `carrier <n> drop_ppm <ppm>` is refused
  * unless the module was loaded with debug_loss=1, so a production module
  * cannot be talked into dropping frames through /proc. Read-only after load
@@ -152,6 +162,11 @@ static int __init tbtun_init(void)
     if (!max_tunnels)
     {
         pr_err("tbtun: max_tunnels must be >= 1\n");
+        return -EINVAL;
+    }
+    if (close_hard_cap_ms < 1000 || close_hard_cap_ms > 3600000)
+    {
+        pr_err("tbtun: close_hard_cap_ms must be 1000..3600000\n");
         return -EINVAL;
     }
 

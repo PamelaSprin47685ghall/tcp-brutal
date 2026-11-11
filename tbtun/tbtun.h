@@ -284,6 +284,8 @@ extern unsigned int debug;
 extern unsigned int tbt_fec_groups_per_flow;
 extern unsigned int max_tunnels;
 extern unsigned int max_carriers;
+/* Close hard cap for a half-open stream, in milliseconds. */
+extern unsigned int close_hard_cap_ms;
 /* Peripheral BBR hold, opt-in (module param hold_enable). */
 extern bool tbt_hold_enable;
 
@@ -619,6 +621,8 @@ struct tbt_stream
                                * runs from here and from the last ack, so a
                                * slow but progressing drain is not cut short */
     u64 close_fin_written_ns; /* our FIN reached the wire: the peer-FIN bound */
+    u64 close_ready_ns;       /* both directions finished with no in-flight
+                               * data: the normal close budget starts here */
     /* These are indexed by carrier, and a FEC v6 session has up to 256
      * carriers: one `unsigned long` or a `[16]` array would write past itself
      * at index 16..255 and corrupt whatever follows in the struct (measured:
@@ -702,6 +706,7 @@ enum tbt_stream_state
     TBT_ST_REORDER, /* reorder window overflow: distinct from a gap */
     TBT_ST_HOLE, /* hole budget expired: bounded reset, DESIGN.md §4.6 B */
     TBT_ST_DEAD,
+    TBT_ST_CLOSE_TIMEOUT, /* reason only: the close hard cap fired */
 };
 
 /* Per-carrier partial record state. Lives on the carrier, never global: two
