@@ -1912,14 +1912,12 @@ static void rx_group_try(struct flow *f, struct rx_block *b, u16 group)
     }
     if (!g->real_set)
         return;
-    {
-        u16 extra = f->rx_groups > 1
-                        ? TBT_FEC_SCLC_WAKE_EXTRA_UP
-                        : tbt_fec_sclc_wake_extra_down(n);
-
-        if ((u32)g->ndata + g->nparity < (u32)real + extra)
-            return;
-    }
+    /* The same wake line the module uses. A short downlink block is
+     * covered one for one by its p = real rows, so the full-block delta0
+     * margin must not hold its first attempt back. */
+    if (!tbt_fec_sclc_decode_wake(real, n, m, f->rx_groups, g->ndata,
+                                  g->nparity))
+        return;
     {
         struct tbt_fec_grouped *codec = flow_rx_codec(f, n, m);
 
