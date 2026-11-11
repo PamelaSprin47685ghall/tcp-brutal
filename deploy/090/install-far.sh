@@ -2,14 +2,18 @@
 # deploy/090/install-far.sh
 # Far side only: mihomo + tbtun.ko. Never installs tbt_client.
 #
-#   ./install-far.sh          install files
-#   ./install-far.sh --start  install, start mihomo, then modprobe and write
-#                             the tunnel line (mihomo must bind 19001 first)
+#   ./install-far.sh            install, start mihomo, then modprobe and write
+#                               the tunnel line (mihomo must bind 19001 first)
+#   ./install-far.sh --no-start install files only
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-start=0
-[ "${1:-}" = "--start" ] && start=1
+start=1
+case "${1:-}" in
+    --no-start) start=0 ;;
+    --start|"") start=1 ;;
+    *) echo "usage: $0 [--no-start]" >&2; exit 2 ;;
+esac
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "install-far: run as root (writes /usr/local, /lib/modules, /proc)" >&2
@@ -46,9 +50,14 @@ wait_port() {
 
 if [ "$start" -eq 1 ]; then
     # 1. mihomo binds the VLESS inbound first
-    nohup /usr/local/bin/mihomo -d /etc/mihomo-090 -f /etc/mihomo-090/config.yaml \
-        >>/var/log/tbtun-090/mihomo.log 2>&1 &
-    echo $! > /run/tbtun-090/mihomo.pid
+    if [ -f /run/tbtun-090/mihomo.pid ] && \
+       kill -0 "$(cat /run/tbtun-090/mihomo.pid)" 2>/dev/null; then
+        echo "install-far: mihomo already running"
+    else
+        nohup /usr/local/bin/mihomo -d /etc/mihomo-090 -f /etc/mihomo-090/config.yaml \
+            >>/var/log/tbtun-090/mihomo.log 2>&1 &
+        echo $! > /run/tbtun-090/mihomo.pid
+    fi
     if ! wait_port "$vless" 50; then
         echo "install-far: mihomo did not bind 127.0.0.1:$vless" >&2
         tail -n 50 /var/log/tbtun-090/mihomo.log >&2 || true

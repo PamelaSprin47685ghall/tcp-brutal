@@ -2,14 +2,18 @@
 # deploy/090/install-near.sh
 # Near side only: mihomo + tbt_client. Never installs or loads tbtun.ko.
 #
-#   ./install-near.sh          install files
-#   ./install-near.sh --start  install, then start tbt_client and mihomo in
-#                              the required order (client first)
+#   ./install-near.sh            install, then start tbt_client and mihomo in
+#                                the required order (client first)
+#   ./install-near.sh --no-start install files only
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-start=0
-[ "${1:-}" = "--start" ] && start=1
+start=1
+case "${1:-}" in
+    --no-start) start=0 ;;
+    --start|"") start=1 ;;
+    *) echo "usage: $0 [--no-start]" >&2; exit 2 ;;
+esac
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "install-near: run as root (writes /usr/local, /etc)" >&2
@@ -44,9 +48,14 @@ wait_port() {
 
 if [ "$start" -eq 1 ]; then
     # 1. userspace client listens on 19000
-    nohup /usr/local/bin/tbt_client --config /etc/tbtun-090.conf \
-        >>/var/log/tbtun-090/tbt_client.log 2>&1 &
-    echo $! > /run/tbtun-090/tbt_client.pid
+    if [ -f /run/tbtun-090/tbt_client.pid ] && \
+       kill -0 "$(cat /run/tbtun-090/tbt_client.pid)" 2>/dev/null; then
+        echo "install-near: tbt_client already running"
+    else
+        nohup /usr/local/bin/tbt_client --config /etc/tbtun-090.conf \
+            >>/var/log/tbtun-090/tbt_client.log 2>&1 &
+        echo $! > /run/tbtun-090/tbt_client.pid
+    fi
     if ! wait_port "$port" 50; then
         echo "install-near: tbt_client did not listen on $port" >&2
         tail -n 50 /var/log/tbtun-090/tbt_client.log >&2 || true
@@ -54,9 +63,14 @@ if [ "$start" -eq 1 ]; then
     fi
 
     # 2. mihomo may now dial 127.0.0.1:$port
-    nohup /usr/local/bin/mihomo -d /etc/mihomo-090 -f /etc/mihomo-090/config.yaml \
-        >>/var/log/tbtun-090/mihomo.log 2>&1 &
-    echo $! > /run/tbtun-090/mihomo.pid
+    if [ -f /run/tbtun-090/mihomo.pid ] && \
+       kill -0 "$(cat /run/tbtun-090/mihomo.pid)" 2>/dev/null; then
+        echo "install-near: mihomo already running"
+    else
+        nohup /usr/local/bin/mihomo -d /etc/mihomo-090 -f /etc/mihomo-090/config.yaml \
+            >>/var/log/tbtun-090/mihomo.log 2>&1 &
+        echo $! > /run/tbtun-090/mihomo.pid
+    fi
 
     mixed=$(sed -n 's/^mixed-port:[[:space:]]*\([0-9][0-9]*\).*/\1/p' /etc/mihomo-090/config.yaml | head -n 1)
     if [ -n "$mixed" ] && wait_port "$mixed" 50; then
