@@ -84,6 +84,13 @@ and moves independently of the module version.
 
 ### Fixed
 
+- A write that ends on a non-1024-byte boundary no longer loses its tail. The
+  idle cut counted the buffered partial packet as a real share, so every
+  grace pass closed an empty block, re-armed the 25 ms block deadline, and
+  never reached the 100 ms tail grace; 8191 bytes delivered 7168 and 8193
+  delivered 8192. `tbt_fec_cut_pass()` now derives the block state from real
+  shares only, and `host/test_cell_tail` pins the cut for 1, 37, 1023, 1024,
+  1025, 8191, 8192 and 8193 bytes on both the idle cut and a half-close.
 - The peripheral BBR hold saves and restores `snd_cwnd` and `sk_pacing_rate`
   again. After 200 ms of carrier idleness the 50 ms poll snapshots both fields,
   bounded by `snd_wnd/mss`, `snd_cwnd_clamp`, `sk_sndbuf/mss` and
