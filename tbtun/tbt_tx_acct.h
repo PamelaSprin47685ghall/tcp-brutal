@@ -243,9 +243,12 @@ static inline bool tbt_hold_session_idle(u32 tx_queued, u32 ctl_real)
     return !tx_queued && !ctl_real;
 }
 
-/* Peripheral BBR hold state rules (tbt_carrier.c). 0.7.0 removed the
- * cwnd/pacing snapshot and its writes, so these predicates now only decide
- * when the carrier is idle enough to be marked held.
+/* Peripheral BBR hold state rules (tbt_carrier.c). When a carrier goes idle
+ * the kernel snapshots snd_cwnd and sk_pacing_rate; while it stays idle the
+ * poll writes both back, so the next burst does not start from BBR's
+ * idle-collapsed window. BBR keeps ownership of its own model: these rules
+ * never touch delivered/rate_delivered, and every non-PAD writer cancels the
+ * hold before it queues bytes, so the first real ACK owns the next decision.
  *
  * Enter requires no bytes in flight: an ACK is about to rewrite the window,
  * and the 200 ms idle interval already implies an empty send path for a real
@@ -261,9 +264,85 @@ static inline bool tbt_hold_enter(bool enable, bool no_inflight, bool tbt_idle,
 }
 
 static inline bool tbt_hold_keep(bool active, bool real_data, bool loss,
-                                 u64 now, u64 until_ns)
+                                 bool wnd_shrunk, u64 now, u64 until_ns)
 {
-    return active && !real_data && !loss && (!until_ns || now <= until_ns);
+    return active && !real_data && !loss && !wnd_shrunk &&
+           (!until_ns || now <= until_ns);
+}
+
+/* Snapshot bounds. The hold restores a window the path already accepted, but
+ * the snapshot must not exceed any current limit: the peer window
+ * (snd_wnd/mss), tcp_snd_cwnd_clamp, or the send buffer in packets
+ * (sk_sndbuf/mss). A zero limit is "no limit" for the first three; mss==0 is
+ * treated as 1 so the division cannot trap. A zero cwnd returns 0, which
+ * means "no snapshot". */
+static inline u32 tbt_hold_cwnd_save(u32 cwnd, u32 wnd_pkts, u32 clamp,
+                                     u32 sndbuf, u32 mss)
+{
+    u32 buf_pkts;
+
+    if (!cwnd)
+        return 0;
+    if (wnd_pkts && wnd_pkts < cwnd)
+        cwnd = wnd_pkts;
+    if (clamp && clamp < cwnd)
+        cwnd = clamp;
+    if (sndbuf)
+    {
+        buf_pkts = sndbuf / (mss ? mss : 1);
+        if (buf_pkts < cwnd)
+            cwnd = buf_pkts;
+    }
+    return cwnd ? cwnd : 1;
+}
+
+/* The clamp again at write time: tcp_snd_cwnd_clamp may have moved while the
+ * hold was active. 0 still means "no snapshot". */
+static inline u32 tbt_hold_cwnd_restore(u32 cwnd, u32 clamp)
+{
+    if (!cwnd)
+        return 0;
+    if (clamp && clamp < cwnd)
+        cwnd = clamp;
+    return cwnd ? cwnd : 1;
+}
+
+/* sk_max_pacing_rate is the operator's ceiling; a zero ceiling means none. */
+static inline unsigned long tbt_hold_pacing_save(unsigned long pacing,
+                                                 unsigned long max_rate)
+{
+    if (max_rate && pacing > max_rate)
+        return max_rate;
+    return pacing;
+}
+
+/* Why tbt_car_hold_apply() may not write this poll.
+ *
+ * Every non-PAD writer clears hold_active before it queues bytes:
+ * tbt_carrier_xmit() for the ARQ/control pump, tbt_carrier_send_fec_batch()
+ * for FEC data. A hold that is still active with bytes in flight is therefore
+ * waiting for a PAD, whose writer deliberately exempts TBT_F_PAD. That is a
+ * SKIP, not an exit: ending the hold here re-paid the 200 ms enter delay and
+ * restarted the 10 s cap once per keepalive period. An inactive hold or a CA
+ * that left Open is a real race with a live congestion decision and ends it.
+ */
+enum tbt_hold_apply
+{
+    TBT_HOLD_APPLY_OK = 0,
+    TBT_HOLD_APPLY_SKIP,
+    TBT_HOLD_APPLY_EXIT,
+};
+
+static inline enum tbt_hold_apply tbt_hold_apply_gate(bool active,
+                                                      bool ca_open,
+                                                      bool una_eq_nxt,
+                                                      u32 packets_out)
+{
+    if (!active || !ca_open)
+        return TBT_HOLD_APPLY_EXIT;
+    if (!una_eq_nxt || packets_out)
+        return TBT_HOLD_APPLY_SKIP;
+    return TBT_HOLD_APPLY_OK;
 }
 
 /* Fold the legacy 16-bit path mask into a 256-bit carrier mask. The source is

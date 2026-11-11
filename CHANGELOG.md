@@ -27,6 +27,18 @@ and moves independently of the module version.
   the bracketed IPv6 form. The unused `TBT_PARSE_EAFNOSUPPORT` error code is
   gone.
 
+### Fixed
+
+- The peripheral BBR hold saves and restores `snd_cwnd` and `sk_pacing_rate`
+  again. After 200 ms of carrier idleness the 50 ms poll snapshots both fields,
+  bounded by `snd_wnd/mss`, `snd_cwnd_clamp`, `sk_sndbuf/mss` and
+  `sk_max_pacing_rate`, and writes them back while the session stays idle and
+  TCP has nothing in flight. A non-PAD write cancels the hold before it queues
+  bytes; a PAD in flight only skips that poll. 0.7.0 removed the restore, so
+  the first burst after an idle period started from BBR's collapsed window.
+  `host/test_hold` pins the save bounds, the apply gate and the save/restore
+  loop.
+
 ## [0.7.3] - 2026-11-11
 
 ### Fixed

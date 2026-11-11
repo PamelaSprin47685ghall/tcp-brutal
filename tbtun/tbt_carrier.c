@@ -475,9 +475,14 @@ static bool tbt_car_paused(struct tbt_session *sess)
     return paused;
 }
 
-/* Peripheral BBR hold (hold_enable). 0.7.0 leaves cwnd and pacing_rate to
- * BBR: the module never writes either field. The poll only tracks whether a
- * carrier is idle, and a real frame ends that state; PAD is exempt because
+/* Peripheral BBR hold (hold_enable). BBR collapses cwnd and pacing after an
+ * idle period, and ProbeRTT may lower both for 200 ms; this poll restores the
+ * last good values while the carrier has nothing real to send, so the next
+ * burst does not start from the idle window. It never touches
+ * delivered/rate_delivered, never changes the TCP sequence space and never
+ * writes a BBR mode field: the apply gate requires CA_Open and an empty send
+ * path, and every non-PAD writer clears hold_active before it queues bytes,
+ * so the first real ACK owns the next decision. PAD is exempt because
  * keepalive must not make an idle carrier look busy. */
 #define TBT_HOLD_ENTER_NS (200ULL * NSEC_PER_MSEC)
 #define TBT_HOLD_MAX_NS (10ULL * NSEC_PER_SEC)
@@ -514,6 +519,46 @@ static bool tbt_car_hold_idle(struct tbt_session *sess)
            !READ_ONCE(sess->fec_replay_queued);
 }
 
+static void tbt_car_hold_apply(struct tbt_carrier *c, struct tcp_sock *tp,
+                               struct sock *sk)
+{
+    u32 cwnd = tbt_hold_cwnd_restore(READ_ONCE(c->hold_cwnd),
+                                     READ_ONCE(tp->snd_cwnd_clamp));
+    enum tbt_hold_apply gate;
+
+    if (!cwnd)
+        return;
+    lock_sock(sk);
+    /* Re-check under the socket lock. A non-PAD writer clears hold_active
+     * before it queues bytes, so this catches the real race. The in-flight
+     * test must not end the hold: PAD is the only frame that leaves it active
+     * with packets_out set, and its writer exempts TBT_F_PAD on purpose. */
+    gate = tbt_hold_apply_gate(
+        READ_ONCE(c->hold_active),
+        inet_csk(sk)->icsk_ca_state == TCP_CA_Open,
+        READ_ONCE(tp->snd_una) == READ_ONCE(tp->snd_nxt),
+        READ_ONCE(tp->packets_out));
+    if (gate == TBT_HOLD_APPLY_EXIT)
+    {
+        release_sock(sk);
+        WRITE_ONCE(c->hold_active, false);
+        WRITE_ONCE(c->hold_since_ns, 0);
+        return;
+    }
+    if (gate == TBT_HOLD_APPLY_SKIP)
+    {
+        release_sock(sk);
+        return;
+    }
+    tcp_snd_cwnd_set(tp, cwnd);
+    /* cmpxchg keeps a pacing write that BBR made after the read: it only
+     * installs the snapshot when the field still holds the value we saw. */
+    if (c->hold_pacing)
+        (void)cmpxchg(&sk->sk_pacing_rate, READ_ONCE(sk->sk_pacing_rate),
+                      c->hold_pacing);
+    release_sock(sk);
+}
+
 static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
                                struct sock *sk, u64 now)
 {
@@ -524,6 +569,7 @@ static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
     bool recent_loss;
     bool no_inflight;
     bool ca_open;
+    u32 mss, wnd_pkts;
 
     if (loss)
         WRITE_ONCE(c->hold_last_loss_ns, now);
@@ -536,17 +582,22 @@ static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
         return;
     }
     real_data = !tbt_car_hold_idle(c->sess);
+    mss = READ_ONCE(tp->mss_cache) ?: 1;
+    wnd_pkts = READ_ONCE(tp->snd_wnd) / mss;
     no_inflight = READ_ONCE(tp->snd_una) == READ_ONCE(tp->snd_nxt) &&
                   READ_ONCE(tp->packets_out) == 0;
     ca_open = inet_csk(sk)->icsk_ca_state == TCP_CA_Open;
 
     if (c->hold_active)
     {
-        if (!tbt_hold_keep(true, real_data, loss, now, c->hold_until_ns))
+        if (!tbt_hold_keep(true, real_data, loss, wnd_pkts < c->hold_cwnd,
+                           now, c->hold_until_ns))
         {
             WRITE_ONCE(c->hold_active, false);
             WRITE_ONCE(c->hold_since_ns, 0);
+            return;
         }
+        tbt_car_hold_apply(c, tp, sk);
         return;
     }
     if (!tbt_hold_enter(enable, no_inflight, !real_data, ca_open, loss,
@@ -564,8 +615,23 @@ static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
         }
         return;
     }
-    WRITE_ONCE(c->hold_until_ns, now + TBT_HOLD_MAX_NS);
-    WRITE_ONCE(c->hold_active, true);
+    {
+        u32 sndbuf = sk->sk_sndbuf > 0 ? (u32)sk->sk_sndbuf : 0;
+        u32 cwnd = tbt_hold_cwnd_save(READ_ONCE(tp->snd_cwnd), wnd_pkts,
+                                      READ_ONCE(tp->snd_cwnd_clamp), sndbuf,
+                                      mss);
+        unsigned long pacing =
+            tbt_hold_pacing_save(READ_ONCE(sk->sk_pacing_rate),
+                                 sk->sk_max_pacing_rate);
+
+        if (!cwnd)
+            return;
+        c->hold_cwnd = cwnd;
+        c->hold_pacing = pacing;
+        WRITE_ONCE(c->hold_until_ns, now + TBT_HOLD_MAX_NS);
+        WRITE_ONCE(c->hold_active, true);
+        tbt_car_hold_apply(c, tp, sk);
+    }
 }
 
 /* C2/C3 liveness net, for one carrier. The session's 50 ms poll calls this for

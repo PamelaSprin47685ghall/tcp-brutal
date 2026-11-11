@@ -2177,8 +2177,12 @@ struct tbt_carrier
     u64 last_rx_ns;
     u64 last_tx_ns;
     u64 join_deadline_ns;         /* provisional carriers only */
-    /* hold_enable: the carrier stayed idle for the enter interval. 0.7.0
-     * leaves cwnd/pacing to BBR, so no snapshot is stored or restored. */
+    /* hold_enable: last good window, saved when the carrier went idle.
+     * tbt_car_hold_apply() writes both back while the session stays idle and
+     * TCP has nothing in flight; a non-PAD write clears hold_active first, so
+     * the next ACK owns BBR's decision. hold_cwnd == 0 means no snapshot. */
+    u32 hold_cwnd;
+    unsigned long hold_pacing;
     u64 hold_until_ns;
     u64 hold_since_ns;
     u64 hold_last_loss_ns;

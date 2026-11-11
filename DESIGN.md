@@ -2826,11 +2826,17 @@ Implemented in C3, per session:
    is retired.
 
    The poll also tracks the peripheral idle hold (`hold_enable=1` by default; write `0`
-   to disable). 0.7.0 removed the old snapshot and restore of `snd_cwnd`/`sk_pacing_rate`:
-   the hold only marks a carrier that has been idle for 200 ms, and a real (non-PAD)
-   frame clears the mark. A carrier is never marked while any FEC byte sits in the out
-   queues. `host/test_hold` covers the enter/keep/exit rules; the module no longer writes
-   `tcp_sock` window fields, so the hold cannot fight BBR.
+   to disable). A carrier that has queued nothing for 200 ms snapshots `snd_cwnd` and
+   `sk_pacing_rate`; every later poll writes both back while the session stays idle and
+   TCP has nothing in flight, so BBR's idle restart and ProbeRTT do not make the next
+   burst start from a collapsed window. The snapshot is bounded by `snd_wnd/mss`,
+   `tcp_snd_cwnd_clamp`, `sk_sndbuf/mss` and `sk_max_pacing_rate`, and the clamp is
+   applied again at write time. A real (non-PAD) frame clears the hold before it queues
+   bytes, so the first real ACK owns BBR's next decision; a PAD in flight only skips the
+   write. A carrier is never marked while any FEC byte sits in the out queues.
+   `host/test_hold` covers the enter/keep/exit rules, the save bounds and the apply gate.
+   The module writes only these two window fields, never a BBR model field (`delivered`,
+   `rate_delivered`, mode), and it never changes the sequence space.
 2. `tbt_carrier_lost()` also runs on a carrier write error and on `carrier <n> down`. It
    excludes the path from scheduling immediately and marks every retained frame last sent
    on it overdue, so the normal scheduler re-sends them on the live paths. An ARQ stall
