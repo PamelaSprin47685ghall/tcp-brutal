@@ -2122,6 +2122,17 @@ void tbt_tx_fec_rearm_if_pending(struct tbt_session *sess, struct tbt_stream *st
     }
     ring = (u64)(READ_ONCE(tx->head) - READ_ONCE(tx->tail)) +
            READ_ONCE(tx->fill);
+    /* A stale pause: the pump drained the ring below half but its resume
+     * path did not run (it was already idle). Clear it here and ask the
+     * capture work for more bytes; without this the target's remaining
+     * echo never reaches the FEC ring. */
+    if (READ_ONCE(st->tx_paused) &&
+        (u32)(READ_ONCE(tx->head) - READ_ONCE(tx->tail)) <=
+            READ_ONCE(tx->ring_size) / 2)
+    {
+        WRITE_ONCE(st->tx_paused, false);
+        tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
+    }
     credit = READ_ONCE(tx->credit);
     peer = READ_ONCE(tx->peer_pkts);
     seq = READ_ONCE(tx->seq);
