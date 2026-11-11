@@ -58,6 +58,16 @@ static const char *tbt_adapt_reason_name(u8 reason)
     return reason < ARRAY_SIZE(names) ? names[reason] : "?";
 }
 
+/* The continuous controller's own reason enum. */
+static const char *tbt_adapt_sclc_reason_name(u8 reason)
+{
+    static const char *const names[] = {
+        "none", "cold", "steady", "burst", "backup", "paused", "saturated",
+    };
+
+    return reason < ARRAY_SIZE(names) ? names[reason] : "?";
+}
+
 // ---------------------------------------------------------------------------
 // config: write
 
@@ -1420,7 +1430,10 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                                   "switches=%u aborts=%u rollbacks=%u "
                                   "pauses=%llu pause_ns=%llu "
                                   "sample_unknown=%llu abandoned=%llu "
-                                  "state=%s reason=%s\n",
+                                  "state=%s reason=%s "
+                                  "m_target=%u q_raw=%u q=%u delta=%u "
+                                  "delta_off=%d burst=%u eps=%u sigma=%u backup=%u "
+                                  "ctl_reason=%s frozen=%u\n",
                                id, tbt_read_bool(s->adaptive) ? "on" : "off",
                                READ_ONCE(a->epoch), an, am, ag,
                                READ_ONCE(a->class), READ_ONCE(a->p_ppm),
@@ -1433,7 +1446,19 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                                READ_ONCE(a->sample_unknown),
                                READ_ONCE(a->abandoned),
                                tbt_adapt_state_name(READ_ONCE(a->state)),
-                               tbt_adapt_reason_name(READ_ONCE(a->reason)));
+                               tbt_adapt_reason_name(READ_ONCE(a->reason)),
+                               READ_ONCE(a->m_target),
+                               READ_ONCE(a->q_raw_q16),
+                               READ_ONCE(a->q_q16),
+                               READ_ONCE(a->delta_q16),
+                               READ_ONCE(a->delta_off_q16),
+                               READ_ONCE(a->burst_q16),
+                               READ_ONCE(a->eps_q16),
+                               READ_ONCE(a->sigma_q16),
+                               READ_ONCE(a->backup),
+                               tbt_adapt_sclc_reason_name(
+                                   READ_ONCE(a->ctl_reason)),
+                               READ_ONCE(a->frozen));
                 }
                 seq_printf(m, "tunnel %llu c8 profile_mismatch=%llu http_parse_err=%llu "
                               "http_status_err=%llu http_req=%llu http_resp=%llu "

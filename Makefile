@@ -200,12 +200,6 @@ HOST_BENCH_SCLC_DOWN := host/bench_sclc_downlink
 HOST_BENCH_SCLC_DOWN_SRCS := host/bench_sclc_downlink.c tbtun/tbt_fec_sclc.c
 HOST_BENCH_SCLC_DOWN_HDRS := tbtun/tbt_fec_sclc.h tbtun/tbt_fec.h \
                    tbtun/tbt_uapi.h
-HOST_BENCH_SCLC_SIM := host/sim_sclc_adaptive
-HOST_BENCH_SCLC_SIM_SRCS := host/sim_sclc_adaptive.c tbtun/tbt_fec_sclc.c \
-                   tbtun/tbt_fec_adapt_sclc.c
-HOST_BENCH_SCLC_SIM_HDRS := tbtun/tbt_fec_sclc.h \
-                   tbtun/tbt_fec_adapt_sclc.h tbtun/tbt_fec_adapt.h \
-                   tbtun/tbt_fec.h tbtun/tbt_uapi.h
 HOST_BENCH_SCLC_PIPE := host/bench_sclc_pipe
 HOST_BENCH_SCLC_PIPE_SRCS := host/bench_sclc_pipe.c tbtun/tbt_fec.c \
                    tbtun/tbt_fec_sclc.c tbtun/tbt_sclc_uplink.c \
@@ -511,15 +505,6 @@ host-bench-recovery: $(HOST_BENCH_RECOVERY)
 host-bench-sclc-down: $(HOST_BENCH_SCLC_DOWN)
 	@./$(HOST_BENCH_SCLC_DOWN)
 
-$(HOST_BENCH_SCLC_SIM): $(HOST_BENCH_SCLC_SIM_SRCS) $(HOST_BENCH_SCLC_SIM_HDRS)
-	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_BENCH_SCLC_SIM_SRCS)
-
-# Closed-loop 120 s BEC trace through the real estimator, controller and
-# downlink ladder. This is the cross-rate wire/app witness; it is not a gate
-# and stays out of `check` because it runs the codec for simulation time.
-host-bench-sclc-sim: $(HOST_BENCH_SCLC_SIM)
-	@./$(HOST_BENCH_SCLC_SIM)
-
 # Full-chain production shapes: FEC, header CRCs and ChaCha8 for both
 # directions, at the report loss points. Not part of `check`.
 $(HOST_BENCH_SCLC_PIPE): $(HOST_BENCH_SCLC_PIPE_SRCS)
@@ -693,7 +678,7 @@ host-test-live: $(HOST_HTTP_LIVE)
 	fi
 
 clean: clean-dkms.conf clean-dkms-tarball
-	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_SHAPES) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_FAULT) $(HOST_BENCH_SCLC) $(HOST_BENCH_SCLC_DOWN) $(HOST_BENCH_SCLC_SIM) $(HOST_BENCH_SCLC_PIPE) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_shapes_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fault_san
+	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_SHAPES) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_FAULT) $(HOST_BENCH_SCLC) $(HOST_BENCH_SCLC_DOWN) $(HOST_BENCH_SCLC_PIPE) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_shapes_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fault_san
 	$(RM) $(HOST_INVARIANTS) host/test_invariants_san
 	$(RM) $(HOST_MEM_BUDGET) host/test_mem_budget_san
 	$(RM) $(HOST_CODEC_CACHE)

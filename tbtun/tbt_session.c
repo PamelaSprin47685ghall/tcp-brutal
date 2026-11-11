@@ -733,7 +733,7 @@ int tbt_action_apply(const struct tbt_cmd *cmd)
              * SC-LDPC controller from an on-ladder initial profile. */
             if (cmd->adaptive && s->tunnel &&
                 s->tunnel->cfg.mode == 3 &&
-                (!s->fec_tx || !s->fec_tx->adapt_sclc))
+                (!s->fec_tx || !s->fec_tx->sclc_codec))
             {
                 err = -EOPNOTSUPP;
                 goto out_unlock;

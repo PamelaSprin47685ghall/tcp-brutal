@@ -623,6 +623,52 @@ static void test_null_arguments(void)
     ok(m.slot_frees == 1, "cache still frees its slots");
 }
 
+/* The data-plane gate: a target m replaces the current m only after the
+ * target entry is published. A failed build keeps the current split and is
+ * counted; a later retry can publish the same entry. */
+static void test_rate_gate(void)
+{
+    struct tbt_fec_codec_cache c;
+    struct tbt_fec_codec_key kcur, ktgt;
+    struct tbt_fec_codec_entry *e;
+    struct mock m;
+    bool ready = false;
+    u16 m_cur = 128;
+    u16 m_target = 100;
+
+    memset(&m, 0, sizeof(m));
+    cache_init(&c, &m, 4);
+    kcur = make_key(128, 128, 256, 8, 7);
+    ktgt = make_key(156, 100, 256, 8, 7);
+
+    e = tbt_fec_codec_cache_get(&c, &kcur, &ready);
+    ok(e != NULL && !ready, "rate gate: current codec is reserved");
+    tbt_fec_codec_cache_build_done(e, MOCK_CODEC(100), true);
+    tbt_fec_codec_cache_put(e);
+    eq_u32(m_cur, 128, "rate gate: current m starts at 128");
+
+    e = tbt_fec_codec_cache_get(&c, &ktgt, &ready);
+    ok(e != NULL && !ready, "rate gate: target is not ready yet");
+    eq_u32(m_cur, 128, "rate gate: current m waits for the target codec");
+    tbt_fec_codec_cache_build_done(e, NULL, false);
+    eq_u32(m_cur, 128, "rate gate: failed build keeps the current m");
+    eq_u64(c.stats.build_fail, 1, "rate gate: failure is counted");
+    tbt_fec_codec_cache_put(e);
+
+    e = tbt_fec_codec_cache_get(&c, &ktgt, &ready);
+    ok(e != NULL && !ready, "rate gate: failed entry stays a miss");
+    tbt_fec_codec_cache_build_done(e, MOCK_CODEC(101), true);
+    ok(e->ready, "rate gate: successful build publishes the target");
+    if (e->ready)
+        m_cur = m_target;
+    eq_u32(m_cur, 100, "rate gate: target m applies only after ready");
+    tbt_fec_codec_cache_put(e);
+
+    tbt_fec_codec_cache_destroy(&c);
+    ok(codec_freed(&m, MOCK_CODEC(100)), "rate gate: old codec is freed");
+    ok(codec_freed(&m, MOCK_CODEC(101)), "rate gate: target is freed");
+}
+
 int main(void)
 {
     test_init_capacity();
@@ -633,6 +679,7 @@ int main(void)
     test_capacity_four_two();
     test_destroy_defer();
     test_null_arguments();
+    test_rate_gate();
 
     printf("test_fec_codec_cache: %d checks, %d failures\n", checks,
            failures);

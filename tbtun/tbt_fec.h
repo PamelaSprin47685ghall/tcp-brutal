@@ -2009,41 +2009,8 @@ struct tbt_fec_shape
     u64 base_block;
 };
 
-enum tbt_fec_switch_state
-{
-    TBT_FEC_SW_STEADY = 0, /* no switch in flight */
-    TBT_FEC_SW_CFG_SENT,   /* sender: CFG sent, waiting for CFG_ACK */
-    TBT_FEC_SW_DRAIN,      /* sender: packetizer stopped at P0 */
-    TBT_FEC_SW_PREP,       /* receiver: allocating the new codec */
-    TBT_FEC_SW_ARMED,      /* receiver: CFG_ACK sent, waiting for P0 */
-    TBT_FEC_SW_APPLIED,    /* receiver: new shape installed */
-    TBT_FEC_SW_COOLDOWN,   /* sender: abort finished, cooling down */
-};
-
-/* One shape change in flight. The wire form is FEC_CFG; this struct is the
- * in-kernel record both sides keep while the two-phase commit runs. `flags`
- * is reserved for the WP6/WP7 state machine. */
-struct tbt_fec_switch
-{
-    u32 epoch;
-    u8 state;
-    u8 flags;
-    u64 switch_pkt;
-    u64 block_base;
-    struct tbt_fec_shape shape;
-};
-
-/* Control and estimator entry points. Phase 1 freezes the interface only;
- * WP4-WP7 provide the bodies. */
 struct tbt_session;
 struct tbt_fec_blk;
-
-int tbt_fec_switch_begin(struct tbt_session *sess, struct tbt_fec_shape shape);
-void tbt_fec_switch_on_cfg(struct tbt_session *sess,
-                           const struct tbt_fec_cfg *cfg);
-void tbt_fec_switch_on_fbk(struct tbt_session *sess,
-                           const struct tbt_fec_fbk *fbk);
-void tbt_fec_switch_on_frontier(struct tbt_session *sess, u64 next_deliver);
 
 /* Called only from w_fec_rx, the single writer of the estimator state. */
 void tbt_fec_est_recovered(struct tbt_session *sess, u16 group,

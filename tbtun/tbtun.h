@@ -42,6 +42,8 @@
 #include "tbt_uapi.h"
 /* The adaptive shape/switch structs and their mapping helpers. */
 #include "tbt_fec.h"
+#include "tbt_fec_codec_cache.h"
+#include "tbt_fec_adapt_sclc.h"
 #include "tbt_fec_late.h"
 #include <linux/version.h>
 
@@ -787,6 +789,11 @@ struct tbt_fec_blk
     u16 wake_real;
     u8 wake_first_ok;
     u8 wake_attempts;
+    /* The block's codec entry, held until the slot is reused. A block that
+     * arrives before its codec is built keeps this reference and waits; it
+     * never decodes with another shape. */
+    struct tbt_fec_codec_entry *codec_entry;
+    u8 wake_sampled; /* block_sample() has run for this block */
     u8 *dpresent; /* n flags */
     u8 *ppresent; /* m flags */
     u16 *dlen;    /* n payload lengths */
@@ -935,21 +942,21 @@ struct tbt_fec_tx
      * so the transition is counted once per episode, not once per retry. */
     bool outq_paused;
     spinlock_t shape_lock;
-    struct tbt_fec_grouped *old_codec; /* released on the next swap */
-    u8 switch_state;                   /* enum tbt_fec_switch_state */
-    u8 switch_retries;
-    u32 switch_epoch;
-    u64 switch_pkt;   /* P0: first new-shape record */
-    u64 switch_block; /* B0: first new-shape block id */
-    u64 switch_start_ns;
-    u64 switch_cfg_ns; /* last CFG (re)transmission */
-    struct tbt_fec_shape switch_shape;
-    /* Control law state (tbt_fec_adapt.h). Allocated in init so this header
-     * stays independent of the pure logic module. */
+    /* Continuous SC-LDPC codecs: one cache per TX plane and the entry whose
+     * codec the current n/m names. A switch happens only at a block boundary
+     * and only after the target entry is ready. */
+    struct tbt_fec_codec_cache *codec_cache;
+    struct tbt_fec_codec_entry *codec_entry;
+    struct tbt_fec_codec_entry *codec_pending; /* built target, not applied */
+    bool sclc_codec;
+    struct tbt_fec_sclc_shape sclc_shape;
+    u16 want_m; /* parity target from the peer's FBK */
+    u16 codec_build_fail;
+    u8 codec_backoff;
+    u64 codec_next_ns;
+    /* RLNC control law state (tbt_fec_adapt.h). Allocated in init so this
+     * header stays independent of the pure logic module. */
     struct tbt_fec_adapt *adapt;
-    /* SC-LDPC control law (mode 3). Allocated for every mode-3 session and
-     * disabled when adaptive=off, so a runtime enable needs no allocation. */
-    struct tbt_fec_adapt_sclc_ctl *adapt_sclc;
     /* Peer report from FEC_FBK plus the local residual counters. */
     u32 peer_p_ppm;
     u32 peer_p_fast_ppm;     /* SC-LDPC: FBK +48, parts per million */
@@ -1106,30 +1113,42 @@ struct tbt_fec_rx
     u64 rtt_sample_ns;   /* last carrier RTT sample */
     u32 rtt_us;          /* largest carrier RTT: the replay path's bound */
     u32 nack_cadence_ms; /* adaptive retry interval, 20..500 ms */
-    /* Adaptive shape (0.3.0). The shape fields are read and written under
-     * rx->lock: a carrier places a share while w_fec_rx may apply a switch. */
+    /* Shape in force. The per-block header names n/m; these fields name the
+     * most recent block shape and the direction's fixed n+m. */
     u64 base_pkt;
     u64 base_block;
     u32 epoch; /* committed configuration generation */
     struct tbt_fec_shape shape;
-    struct tbt_fec_shape prev_shape;
-    u64 prev_base_pkt;
-    u64 prev_base_block;
-    struct tbt_fec_grouped *old_codec; /* kept until the new shape commits */
-    struct tbt_fec_grouped *pending_codec; /* PREP allocated, not applied */
-    u8 switch_state;                   /* STEADY/PREP/ARMED/APPLIED */
-    u64 switch_pkt;
-    u64 switch_block;
-    u64 switch_start_ns;
-    struct tbt_fec_cfg pending_cfg;
-    bool cfg_pending;
+    /* Continuous SC-LDPC codecs: one cache per RX plane and the entry whose
+     * codec the current shape names. Blocks hold their own entry. */
+    struct tbt_fec_codec_cache *codec_cache;
+    /* The pre-INIT cache. Its entries may still be held by blocks, so the
+     * object is retired with the plane, not at the swap. */
+    struct tbt_fec_codec_cache *codec_cache_old;
+    struct tbt_fec_codec_entry *codec_entry;
+    bool sclc; /* this plane carries an SC-LDPC codec */
+    struct tbt_fec_sclc_shape sclc_shape;
+    u64 codec_seed;
+    /* Entries waiting for a build in w_fec_rx. Each queued entry owns one
+     * reference so a slot reuse cannot turn build_done() into a stale write. */
+    struct tbt_fec_codec_entry *build_q[TBT_FEC_CODEC_CACHE_MAX];
+    u8 build_q_n;
+    u16 codec_build_fail;
+    u8 codec_backoff;
+    u64 codec_next_ns;
+    /* The parity target last reported to the peer. It changes only after the
+     * target codec is ready; a build failure keeps the current target. */
+    u16 m_target;
+    struct tbt_fec_codec_entry *target_entry;
+    /* Continuous controller (one per direction) and its feedback cadence. */
+    struct tbt_fec_adapt_sclc_ctl ctl;
+    u64 tick_last_ns;
+    u32 tick_last_blocks;
+    u64 tick_abandoned_last;
     /* The peer's initial shape arrived: applied by w_fec_rx, which may
      * allocate. The carrier path only records it. */
     struct tbt_fec_cfg init_cfg;
     bool init_pending;
-    bool commit_pending;   /* first new-shape record: free old_codec */
-    bool rollback_pending; /* old-shape record after APPLIED: undo */
-    u32 prev_epoch;
     /* Estimator (tbt_fec_adapt.h), owned by w_fec_rx. The SC-LDPC
      * estimator is allocated for mode 3 and uses the 256-bit miss bitmap. */
     struct tbt_fec_est *est;
@@ -1336,6 +1355,19 @@ struct tbt_fec_adapt_ctl
     u32 switches, aborts, rollbacks;
     u64 sample_unknown, abandoned; /* blocks skipped / dropped unfinished */
     u64 pauses, pause_ns;          /* entries into a frozen state, time spent */
+    /* Continuous-controller diagnostics. The c13 line prints them; no control
+     * decision reads this copy. */
+    u16 m_target;      /* parity target last reported to the peer */
+    u32 q_raw_q16;     /* Robbins-Monro quantile before the low-pass */
+    u32 q_q16;         /* low-passed quantile used by the output */
+    u32 delta_q16;     /* analytic margin plus online surplus correction */
+    int delta_off_q16; /* the integrated surplus offset, delta - delta0 */
+    u32 burst_q16;     /* feedforward burst term */
+    u32 eps_q16;       /* target first-failure probability */
+    u32 sigma_q16;     /* |E-q| scale */
+    u16 backup;        /* safety shares currently added */
+    u8 ctl_reason;     /* enum tbt_fec_adapt_sclc_reason */
+    u8 frozen;         /* the last tick froze the controller */
 };
 
 struct tbt_session

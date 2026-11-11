@@ -315,6 +315,8 @@ host/test_fec_adapt_sclc
 host/test_fec_adapt_sclc_san
 host/test_fec_sclc
 host/test_fec_sclc_san
+host/test_fec_codec_cache
+host/test_fec_codec_cache_san
 host/test_fec_sclc_shapes
 host/test_fec_sclc_shapes_san
 host/test_fec_sclc_data
