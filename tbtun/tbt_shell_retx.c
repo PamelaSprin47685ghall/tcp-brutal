@@ -146,6 +146,8 @@ static void tbt_shell_resolve(struct tbt_shell_retx *sh,
             {
                 s->state = TBT_SHELL_ACKED;
                 atomic64_inc(&sess->shell_ack_ok);
+                if (!s->seen_retx)
+                    atomic64_inc(&sess->shell_ack_unconfirmed);
             }
         }
     }
@@ -213,6 +215,11 @@ static struct sk_buff *tbt_shell_pick_skb(struct sock *sk,
         if (skb_shared(skb))
         {
             atomic64_inc(&sess->shell_skip_shared);
+            continue;
+        }
+        if (skb_zcopy(skb))
+        {
+            atomic64_inc(&sess->shell_skip_zcopy);
             continue;
         }
         if (skb->ip_summed == CHECKSUM_NONE)
@@ -422,6 +429,25 @@ static void tbt_shell_in_ack(struct sock *sk, u32 flags)
     tp = tcp_sk(sk);
 
     tbt_shell_resolve(sh, sess, tp);
+}
+
+/* Before connect: Linux applies TCP_MAXSEG at handshake time; a call after
+ * connect is ignored (measured on 7.2.9: a connected socket kept its old
+ * mss_cache). The option value includes the 12-byte aligned timestamp option,
+ * so 1079 + 12 produces an effective mss_cache of 1079; a literal 1079
+ * produces 1067 and would split every 1079-byte chunk into two segments. */
+void tbt_shell_retx_pre_connect(struct tbt_carrier *c, struct socket *s)
+{
+    u32 want;
+    int v;
+
+    if (!READ_ONCE(tbt_shell_retx) || !c || !s || !s->sk)
+        return;
+    want = c->profile != 3 ? TBT_SHELL_HTTP_CHUNK_LEN
+                           : TBT_SHELL_RAW_CHUNK_LEN;
+    v = (int)want + 12;
+    if (sock_setsockopt(s, SOL_TCP, TCP_MAXSEG, KERNEL_SOCKPTR(&v), sizeof(v)))
+        atomic64_inc(&c->sess->shell_prep_fail);
 }
 
 int tbt_shell_retx_install(struct tbt_carrier *c, struct socket *s)

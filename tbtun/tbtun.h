@@ -1917,8 +1917,9 @@ struct tbt_session
      * gso is a TSO skb; noskb means the write could not be located (window
      * closed or a short write). These counters are the observable proof
      * that one chunk is one skb, or that it is not. */
-    atomic64_t shell_prep_ok;        /* carriers capped to MSS-sized GSO */
-    atomic64_t shell_prep_short_mss; /* carriers whose MSS < chunk length */
+    atomic64_t shell_prep_ok;        /* carriers with MSS=chunk and GSO off */
+    atomic64_t shell_prep_short_mss; /* carriers whose route MSS < chunk length */
+    atomic64_t shell_prep_fail;      /* TCP_MAXSEG/GSO caps could not be applied */
     atomic64_t shell_chunk_writes;   /* chunk-sized writes checked */
     atomic64_t shell_chunk_exact;    /* one chunk == one non-GSO skb */
     atomic64_t shell_chunk_merged;   /* chunk coalesced into a larger skb */
@@ -1927,7 +1928,9 @@ struct tbt_session
     atomic64_t shell_send_other;     /* carrier writes not chunk-sized */
     u32 shell_gso_before;            /* sk_gso_max_size seen at prep */
     u32 shell_gso_after;             /* sk_gso_max_size after the cap */
-    u32 shell_mss;                   /* mss_cache of the last prepared sk */
+    u32 shell_mss;                   /* mss_cache after TCP_MAXSEG */
+    u32 shell_mss_before;            /* mss_cache before TCP_MAXSEG */
+    u32 shell_gso_segs;              /* sk_gso_max_segs after the cap */
     u32 shell_chunk_sample;          /* len of the last mismatching skb */
     /* Borrowed-shell substitution engine. Every counter names one failure
      * mode or one resolved ownership path; none is silent. */
@@ -1937,6 +1940,7 @@ struct tbt_session
     atomic64_t shell_skip_gso;       /* rtx skb is a GSO skb */
     atomic64_t shell_skip_cloned;    /* skb_cloned() true */
     atomic64_t shell_skip_shared;    /* skb_shared() true */
+    atomic64_t shell_skip_zcopy;     /* skb_zcopy(): user pages must not be written */
     atomic64_t shell_skip_busy;      /* a clone is still in the host queue */
     atomic64_t shell_skip_csum;      /* neither CHECKSUM_PARTIAL nor NONE */
     atomic64_t shell_csum_none;      /* rtx skb carries CHECKSUM_NONE */
@@ -1951,6 +1955,7 @@ struct tbt_session
     atomic64_t shell_store_fail;     /* skb_store_bits() failed */
     atomic64_t shell_selfcheck_fail; /* read-back differs from the encoding */
     atomic64_t shell_ack_ok;         /* owned seq ACKed without a DSACK */
+    atomic64_t shell_ack_unconfirmed;/* ACKed before a retransmit was observed */
     atomic64_t shell_dsack_events;   /* sender saw a DSACK while slots live */
     atomic64_t shell_dsack_requeue;  /* slots returned to the replay queue */
     atomic64_t shell_retx_same;      /* owned skb retransmitted again */
@@ -2185,6 +2190,11 @@ struct tbt_session
  * raw form is 48 + 1024 = 1072. 16 bytes of slack keeps the size line
  * builder inside the buffer for any future record length. */
 #define TBT_SHELL_CHUNK_MAX (TBT_FEC_HDR_LEN + TBT_FEC_PAYLOAD_MAX + 16)
+/* Exact wire length of one FEC chunk. The HTTP size line for a 1072-byte
+ * record is "430\r\n" (5 bytes): 5 + 48 + 1024 + 2 = 1079. Raw mode sends
+ * the record alone: 48 + 1024 = 1072. */
+#define TBT_SHELL_HTTP_CHUNK_LEN (5 + TBT_FEC_HDR_LEN + TBT_FEC_PAYLOAD_MAX + 2)
+#define TBT_SHELL_RAW_CHUNK_LEN (TBT_FEC_HDR_LEN + TBT_FEC_PAYLOAD_MAX)
 
 enum tbt_shell_state
 {
@@ -2498,6 +2508,7 @@ void tbt_carrier_free(struct tbt_carrier *c);
  * owned record to the FEC replay queue before the socket dies, and free()
  * releases the ring after the RCU grace period. poll() resolves ACKED and
  * REQUEUE slots from process context. */
+void tbt_shell_retx_pre_connect(struct tbt_carrier *c, struct socket *s);
 int tbt_shell_retx_install(struct tbt_carrier *c, struct socket *s);
 void tbt_shell_retx_carrier_close(struct tbt_carrier *c);
 void tbt_shell_retx_carrier_free(struct tbt_carrier *c);

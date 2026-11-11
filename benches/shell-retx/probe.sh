@@ -1,23 +1,22 @@
 #!/bin/sh
-# Borrowed-shell retransmission: precondition proof.
+# Borrowed-shell retransmission: decisive probe.
 #
-# The experiment needs one encoded FEC chunk to occupy exactly one skb. This
-# script runs the same transfer twice, with the feature off and on, and reads
-# the module's shell counters:
+# Two questions, in order:
+#   1. Can one 1079-byte FEC chunk be made to occupy exactly one skb?
+#      The module enforces TCP_MAXSEG=chunk, sk_gso_max_size=chunk,
+#      sk_gso_max_segs=1 and MSG_EOR on every carrier write. Its counters
+#      check the skb that owns each just-written chunk:
+#        writes  chunk-sized writes checked
+#        exact   len == chunk and the skb is not GSO
+#        merged  the chunk was appended to a larger skb
+#        gso     the skb is a TSO skb
+#        noskb   the owning skb was not found
+#      OFF is the control; ON must report exact == writes and 0 merged/gso.
+#   2. If that holds, does rewriting the payload of a LOST skb with a record
+#      from the FEC FIFO stay byte-exact under loss and reorder?
 #
-#   writes  chunk-sized carrier writes checked
-#   exact   one chunk == one non-GSO skb
-#   merged  the chunk was appended to a larger skb (autocork/coalescing)
-#   gso     the skb is a TSO skb
-#   noskb   the owning skb could not be located
-#
-# OFF is the control: with no MSG_EOR and no GSO cap, the stack may coalesce.
-# ON adds MSG_EOR to every carrier write and caps sk_gso_max_size at the
-# carrier MSS. If ON still reports merged/gso, the premise is false and the
-# substitution engine must not be built.
-#
-# Usage: probe.sh [size_bytes]
-# The host lock is held for the whole run.
+# The host lock is held for the whole run; it is released after at most
+# 1800 s of waiting, so this probe cannot camp on the shared host.
 set -u
 
 ROOT=/root/shell-retx
@@ -32,21 +31,24 @@ FAR_PORT=19610
 NEAR_PORT=19600
 PB_LO=19650
 PB_HI=19699
+NS=tbtapp
 
 mkdir -p "$TMP" "$OUT"
 export TMPDIR=$TMP
-NS=tbtapp
+SRV_PID=
+SS_PID=
 
 say() { printf '%s\n' "$*"; }
 die() { say "FATAL: $*"; exit 1; }
 
+LOCKED=0
 exec 9>"$LOCK"
-flock -w 3600 9 || die "testhost lock timeout"
-
-SRV_PID=
-CLIENT_PID=
+flock -w 1800 9 || die "testhost lock timeout"
+LOCKED=1
 
 cleanup_net() {
+    [ -n "${SS_PID:-}" ] && kill "$SS_PID" 2> /dev/null
+    SS_PID=
     [ -n "${SRV_PID:-}" ] && kill "$SRV_PID" 2> /dev/null
     SRV_PID=
     timeout 15 sh -c 'echo flush > /proc/net/tbtun/config' 2> /dev/null || true
@@ -56,30 +58,25 @@ cleanup_net() {
     ip netns del "$NS" 2> /dev/null || true
     ip link del sa0 2> /dev/null || true
 }
-
-cleanup() {
-    cleanup_net
-    rm -f "$TMP"/out.bin
-}
+cleanup() { [ "$LOCKED" = 1 ] || return; cleanup_net; rm -f "$TMP"/out.bin; }
 trap cleanup EXIT INT TERM
 
-# One run of one mode. $1 mode 0|1, $2 netem name.
 one_case() {
     mode=$1
     netem=$2
     tag="mode${mode}-${netem}"
-    case_dir=$OUT/$tag
+    case_dir=$OUT/probe-$tag
     mkdir -p "$case_dir"
 
     cleanup_net
-    say "== $tag: size=$SIZE"
+    say "== $tag size=$SIZE"
 
     [ -f "$TMP/src.bin" ] || head -c "$SIZE" /dev/urandom > "$TMP/src.bin"
     want_sha=$(sha256sum "$TMP/src.bin" | cut -d' ' -f1)
 
     ip netns add "$NS" || die "netns add"
     ip netns exec "$NS" ip link set lo up
-    ip link add sa0 type veth peer name sa1 || die "veth add"
+    ip link add sa0 type veth peer name sa1 || die "veth"
     ip link set sa1 netns "$NS"
     ip addr add 10.202.0.1/24 dev sa0
     ip link set sa0 up
@@ -111,19 +108,22 @@ one_case() {
     say "   up far=${up1:-?} near=${up2:-?} after $((i / 2))s"
     if [ "${up1:-0}" != 5 ] || [ "${up2:-0}" != 5 ]; then
         cat /proc/net/tbtun/stats > "$case_dir/stats.txt" 2>&1 || true
-        cat /proc/net/tbtun/config > "$case_dir/config.txt" 2>&1 || true
         dmesg | tail -80 > "$case_dir/dmesg.txt" 2>&1 || true
         die "$tag: carriers did not come up"
     fi
 
     case $netem in
     none) ;;
-    loss1) tc qdisc replace dev lo root netem loss 1% || die "netem loss1" ;;
     loss5) tc qdisc replace dev lo root netem loss 5% || die "netem loss5" ;;
-    loss20) tc qdisc replace dev lo root netem loss 20% || die "netem loss20" ;;
     reorder10) tc qdisc replace dev lo root netem delay 5ms 2ms reorder 10% 50% || die "netem reorder10" ;;
     *) die "unknown netem $netem" ;;
     esac
+
+    # One socket-table sample while the transfer runs: MSS, cwnd, pacing and
+    # any GSO counters the kernel exposes. The decisive skb-boundary evidence
+    # is the module's exact/merged counter above, not this sample.
+    ( sleep 1; ss -tin > "$case_dir/ss.txt" 2>&1 ) &
+    SS_PID=$!
 
     t0=$(date +%s.%N)
     rc=0
@@ -131,6 +131,9 @@ one_case() {
         > "$case_dir/client.log" 2>&1 || rc=$?
     t1=$(date +%s.%N)
     secs=$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.3f", b-a}')
+    mbps=$(awk -v s="$SIZE" -v t="$secs" 'BEGIN{ if (t>0) printf "%.2f", s*8/t/1000000; else print "0" }')
+    wait "$SS_PID" 2> /dev/null
+    SS_PID=
 
     got_bytes=0
     got_sha=none
@@ -142,25 +145,26 @@ one_case() {
         exact=0
     fi
 
-    grep -E ' (c3|c11|c12) | shell ' /proc/net/tbtun/stats > "$case_dir/stats.txt" 2>&1 || true
+    grep -E ' shell | c11 ' /proc/net/tbtun/stats > "$case_dir/stats.txt" 2>&1 || true
     cat /proc/net/tbtun/peers > "$case_dir/peers.txt" 2>&1 || true
-    cat /proc/net/tbtun/tunnels > "$case_dir/tunnels.txt" 2>&1 || true
     dmesg | tail -120 > "$case_dir/dmesg.txt" 2>&1 || true
 
     near_shell=$(awk '$1=="tunnel" && $2==2 && $3=="shell" {sub(/^shell[ \t]*/,"");print}' /proc/net/tbtun/stats 2> /dev/null | tail -1)
-    say "   rc=$rc bytes=$got_bytes/$SIZE sha_ok=$exact seconds=$secs"
+    far_shell=$(awk '$1=="tunnel" && $2==1 && $3=="shell" {sub(/^shell[ \t]*/,"");print}' /proc/net/tbtun/stats 2> /dev/null | tail -1)
+    say "   rc=$rc bytes=$got_bytes/$SIZE sha_ok=$exact seconds=$secs mbps=$mbps"
     say "   near $near_shell"
+    say "   far  $far_shell"
 
     cleanup_net
 }
 
 say "probe start $(date -Is) kernel=$(uname -r) size=$SIZE"
+# The decisive pair: control then enforcement.
 one_case 0 none
 one_case 1 none
-
-if [ "$SIZE" -le 8388608 ]; then
-    one_case 0 loss5
-    one_case 1 loss5
-fi
-
+# Only if the premise held does the substitution run matter.
+one_case 0 loss5
+one_case 1 loss5
+one_case 0 reorder10
+one_case 1 reorder10
 say "probe done $(date -Is)"

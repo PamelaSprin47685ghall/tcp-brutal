@@ -1432,25 +1432,28 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                  * exact is the count that proves one chunk occupied one
                  * non-GSO skb. merged/gso/noskb name every way that proof
                  * failed, and sample is the offending skb length. */
-                seq_printf(m, "tunnel %llu shell prep=%llu short_mss=%llu "
-                              "gso_before=%u gso_after=%u mss=%u "
+                seq_printf(m, "tunnel %llu shell prep=%llu short_mss=%llu prep_fail=%llu "
+                              "gso_before=%u gso_after=%u mss_before=%u mss=%u gso_segs=%u "
                               "writes=%llu exact=%llu merged=%llu gso=%llu "
                               "noskb=%llu other=%llu sample=%u "
-                              "subst=%llu bytes=%llu ack=%llu dsack=%llu "
+                              "subst=%llu bytes=%llu ack=%llu ack_unconf=%llu dsack=%llu "
                               "dsack_rq=%llu retx_same=%llu timeout=%llu "
                               "carrier_lost=%llu requeue_fail=%llu stranded=%llu "
                               "no_rec=%llu ring_full=%llu rec_bad=%llu "
                               "enc_fail=%llu store_fail=%llu selfcheck=%llu "
                               "skip_len=%llu skip_gso=%llu skip_cloned=%llu "
-                              "skip_shared=%llu skip_busy=%llu skip_csum=%llu "
+                              "skip_shared=%llu skip_zcopy=%llu skip_busy=%llu skip_csum=%llu "
                               "csum_none=%llu csum_partial=%llu "
                               "skip_mss=%llu skip_owned=%llu skip_lost=%llu "
                               "skip_prefix=%llu install_fail=%llu\n", id,
                            tbt_stat_read(&s->shell_prep_ok),
                            tbt_stat_read(&s->shell_prep_short_mss),
+                           tbt_stat_read(&s->shell_prep_fail),
                            READ_ONCE(s->shell_gso_before),
                            READ_ONCE(s->shell_gso_after),
+                           READ_ONCE(s->shell_mss_before),
                            READ_ONCE(s->shell_mss),
+                           READ_ONCE(s->shell_gso_segs),
                            tbt_stat_read(&s->shell_chunk_writes),
                            tbt_stat_read(&s->shell_chunk_exact),
                            tbt_stat_read(&s->shell_chunk_merged),
@@ -1461,6 +1464,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->shell_subst),
                            tbt_stat_read(&s->shell_subst_bytes),
                            tbt_stat_read(&s->shell_ack_ok),
+                           tbt_stat_read(&s->shell_ack_unconfirmed),
                            tbt_stat_read(&s->shell_dsack_events),
                            tbt_stat_read(&s->shell_dsack_requeue),
                            tbt_stat_read(&s->shell_retx_same),
@@ -1478,6 +1482,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->shell_skip_gso),
                            tbt_stat_read(&s->shell_skip_cloned),
                            tbt_stat_read(&s->shell_skip_shared),
+                           tbt_stat_read(&s->shell_skip_zcopy),
                            tbt_stat_read(&s->shell_skip_busy),
                            tbt_stat_read(&s->shell_skip_csum),
                            tbt_stat_read(&s->shell_csum_none),

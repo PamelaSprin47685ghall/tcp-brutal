@@ -27,8 +27,10 @@ NS=tbtapp
 mkdir -p "$TMP" "$OUT"
 export TMPDIR=$TMP
 SRV_PID=
+LOCKED=0
 exec 9>"$LOCK"
-flock -w 3600 9 || { echo "LOCK_TIMEOUT"; exit 9; }
+flock -w 1800 9 || { echo "LOCK_TIMEOUT"; exit 9; }
+LOCKED=1
 
 say() { printf '%s\n' "$*"; }
 die() { say "FATAL: $*"; exit 1; }
@@ -43,7 +45,7 @@ cleanup_net() {
     ip netns del "$NS" 2> /dev/null || true
     ip link del sa0 2> /dev/null || true
 }
-cleanup() { cleanup_net; rm -f "$TMP"/out.bin; }
+cleanup() { [ "$LOCKED" = 1 ] || return; cleanup_net; rm -f "$TMP"/out.bin; }
 trap cleanup EXIT INT TERM
 
 # Extract one key=value from the shell line of a tunnel.

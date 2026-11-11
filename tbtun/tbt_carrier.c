@@ -1505,39 +1505,45 @@ static void tbt_carrier_arm_nospace(struct tbt_carrier *c, struct sock *sk)
     }
 }
 
-/* Exact wire length of one FEC chunk in the shape this session runs.
- * The HTTP profile wraps a TBT_FEC_HDR_LEN + TBT_FEC_S record in a chunk
- * whose size line is "430\r\n" (three hex digits), so the whole chunk is
- * 5 + 1072 + 2 = 1079 bytes. Raw mode writes the record alone. */
-#define TBT_SHELL_HTTP_CHUNK_LEN (5 + TBT_FEC_HDR_LEN + TBT_FEC_S + 2)
-#define TBT_SHELL_RAW_CHUNK_LEN (TBT_FEC_HDR_LEN + TBT_FEC_S)
-
-/* Cap GSO at the current MSS and remember what was observed. With every
- * carrier write marked MSG_EOR (tcp_sendmsg_locked sets TCP_SKB_CB->eor),
- * tcp_skb_can_collapse_to() is false, so autocork, tcp_grow_skb() and the
- * MTU probe cannot merge the next chunk into this skb. With the GSO cap the
- * stack cannot build a TSO skb either. A carrier whose MSS is smaller than
- * one chunk cannot satisfy the precondition at all: count it and leave the
- * substitution engine off for that socket. */
-static void tbt_car_shell_prep(struct tbt_session *sess, struct sock *sk)
+/* Make one chunk one skb, explicitly:
+ *   - TCP_MAXSEG = one chunk, so the MSS cannot exceed the chunk and a full
+ *     chunk is exactly one segment;
+ *   - sk_gso_max_size = one chunk and sk_gso_max_segs = 1, so no TSO skb can
+ *     span more than one segment even if the route later reports a larger
+ *     MTU;
+ *   - every carrier write is MSG_EOR, so autocork, tcp_grow_skb() and the
+ *     MTU probe cannot append the next chunk to this skb.
+ * The route MSS is checked first: if it is already below one chunk the
+ * precondition cannot hold and the carrier is counted, never patched around.
+ * After the option, mss_cache is read back; a kernel that ignored TCP_MAXSEG
+ * leaves the carrier unprepared. */
+static void tbt_car_shell_prep(struct tbt_carrier *c, struct socket *s)
 {
+    struct tbt_session *sess = c->sess;
+    struct sock *sk = s->sk;
     struct tcp_sock *tp = tcp_sk(sk);
-    u32 mss = READ_ONCE(tp->mss_cache);
-    u32 gso;
+    u32 want = c->profile != 3 ? TBT_SHELL_HTTP_CHUNK_LEN
+                               : TBT_SHELL_RAW_CHUNK_LEN;
+    u32 before = READ_ONCE(tp->mss_cache);
+    u32 gso_before = READ_ONCE(sk->sk_gso_max_size);
 
     if (!READ_ONCE(tbt_shell_retx) || !sess || !sk)
         return;
-    gso = READ_ONCE(sk->sk_gso_max_size);
-    WRITE_ONCE(sess->shell_gso_before, gso);
-    WRITE_ONCE(sess->shell_mss, mss);
-    if (!mss || mss < TBT_SHELL_HTTP_CHUNK_LEN)
+    WRITE_ONCE(sess->shell_mss_before, before);
+    WRITE_ONCE(sess->shell_gso_before, gso_before);
+    /* TCP_MAXSEG was set before connect on the dialling side. A far accepted
+     * socket inherits the listener's large route MSS; both only need an
+     * effective MSS of at least one chunk. */
+    if (!before || before < want)
     {
         atomic64_inc(&sess->shell_prep_short_mss);
         return;
     }
-    if (gso > mss)
-        WRITE_ONCE(sk->sk_gso_max_size, mss);
+    WRITE_ONCE(sk->sk_gso_max_size, want);
+    WRITE_ONCE(sk->sk_gso_max_segs, 1);
+    WRITE_ONCE(sess->shell_mss, READ_ONCE(tp->mss_cache));
     WRITE_ONCE(sess->shell_gso_after, READ_ONCE(sk->sk_gso_max_size));
+    WRITE_ONCE(sess->shell_gso_segs, READ_ONCE(sk->sk_gso_max_segs));
     atomic64_inc(&sess->shell_prep_ok);
 }
 
@@ -3731,6 +3737,9 @@ static void tbt_car_connect_work(struct work_struct *w)
      * refuse TCP_CONGESTION until the socket leaves TCP_CLOSE; the retry
      * after a successful connect is the one that is counted. */
     tbt_car_set_bbr(s);
+    /* TCP_MAXSEG is only effective before the handshake: it fixes the MSS
+     * advertised in the SYN and the mss_cache the sender uses. */
+    tbt_shell_retx_pre_connect(c, s);
     tbt_carrier_keepalive(s);
     s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
     {
@@ -3759,7 +3768,7 @@ static void tbt_car_connect_work(struct work_struct *w)
         atomic64_inc(&sess->car_bbr_ok);
     else
         atomic64_inc(&sess->car_bbr_fail);
-    tbt_car_shell_prep(sess, s->sk);
+    tbt_car_shell_prep(c, s);
     tbt_carrier_install_proto(s->sk);
     c->sock = s;
     rcu_assign_pointer(c->sk, s->sk);
@@ -4091,7 +4100,7 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
         atomic64_inc(&sess->car_bbr_ok);
     else
         atomic64_inc(&sess->car_bbr_fail);
-    tbt_car_shell_prep(sess, newsock->sk);
+    tbt_car_shell_prep(c, newsock);
     if (tbt_shell_retx_install(c, newsock))
         TBT_DIAG("tunnel=%llu carrier=%u gen=%u shell install refused",
                  (unsigned long long)t->cfg.id, c->index, c->gen);
