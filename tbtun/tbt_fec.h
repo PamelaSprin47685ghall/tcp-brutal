@@ -819,11 +819,6 @@ void tbt_fec_replay_reset(struct tbt_fec_replay *r);
  * 4 when low_mem). Runs in process context and frees overflow. */
 void tbt_fec_replay_ack(struct tbt_fec_replay *r, u64 frontier, bool low_mem,
                         tbt_fec_spinlock_t *lock);
-/* Retire blocks whose stored seq0 + groups*n is at or below peer_pkts. Unlike
- * the block-id frontier, this is exact across a shape switch: the ring keeps
- * each block's own n and seq0. */
-void tbt_fec_replay_ack_pkts(struct tbt_fec_replay *r, u64 peer_pkts,
-                             bool low_mem, tbt_fec_spinlock_t *lock);
 /* Count resident planes at or above the ACK floor. */
 u32 tbt_fec_replay_unacked(struct tbt_fec_replay *r, tbt_fec_spinlock_t *lock);
 /* Reclaim planes under memory pressure or on a stream reset. keep_active

@@ -1219,48 +1219,6 @@ void tbt_fec_replay_ack(struct tbt_fec_replay *r, u64 frontier, bool low_mem,
     }
 }
 
-void tbt_fec_replay_ack_pkts(struct tbt_fec_replay *r, u64 peer_pkts,
-                             bool low_mem, tbt_fec_spinlock_t *lock)
-{
-    u8 *drop[TBT_FEC_REPLAY_K_MAX];
-    u32 i, n = 0, hot_max = low_mem ? TBT_FEC_REPLAY_HOT_LOW :
-                                      TBT_FEC_REPLAY_HOT_MAX;
-
-    if (!r)
-        return;
-    tbt_fec_lock(lock);
-    for (i = 0; i < r->k; i++)
-    {
-        u64 end;
-
-        if (!r->blk_rec[i] || r->block_start[i] == ~0ULL)
-            continue;
-        end = r->shape_seq0[i] +
-              (u64)r->groups * (u64)r->shape_n[i];
-        if (r->shape_n[i] && end <= peer_pkts)
-        {
-            drop[n++] = r->blk_rec[i];
-            r->blk_rec[i] = NULL;
-            r->block_start[i] = ~0ULL;
-        }
-    }
-    tbt_fec_unlock(lock);
-    for (i = 0; i < n; i++)
-    {
-        bool kept = false;
-
-        tbt_fec_lock(lock);
-        if (r->hot_n < hot_max)
-        {
-            r->hot[r->hot_n++] = drop[i];
-            kept = true;
-        }
-        tbt_fec_unlock(lock);
-        if (!kept)
-            tbt_fec_free(drop[i]);
-    }
-}
-
 /* ------------------------------------------------------------------ *
  * NACK pacing
  * ------------------------------------------------------------------ */
