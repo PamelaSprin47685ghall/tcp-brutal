@@ -1,6 +1,0 @@
-[submodule "mptcpd"]
-	path = mptcpd
-	url = https://github.com/multipath-tcp/mptcpd.git
-[submodule "openvpn"]
-	path = openvpn
-	url = https://github.com/OpenVPN/openvpn.git
