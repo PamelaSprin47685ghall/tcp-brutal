@@ -527,11 +527,12 @@ static int sclc_bmap_build(struct tbt_sclc_uplink *u)
     u->nb = (u8)((u->codes + SCLC_BATCH_LANES - 1u) / SCLC_BATCH_LANES);
     if (!u->nb || u->nb > SCLC_MAX_BATCHES)
         return -EINVAL;
-    /* A symbol block is lanes/8 * 4 bytes, so the tail lane count must
-     * divide S for the data shares to fill exactly.  The shipped uplink
-     * shape (block 64, L 8) yields 64 lanes; 8, 16 and 32 also work.  A
-     * shape that would need 24/40/48/56 lanes is rejected instead of
-     * leaving holes in a share. */
+    /* A symbol block is lanes/8 * 4 bytes.  The shipped uplink shape
+     * (block 128, L 16) leaves a tail of 16, 32, 48 or 64 lanes; 48 works
+     * when the region plan can still fill every share exactly (n=7, 11,
+     * 15, 23), and only the single-batch 48-lane shape (n=3) fails.  The
+     * region planner rejects any shape whose per-share bytes do not add
+     * up to S. */
     for (b = 0; b < u->nb; b++)
     {
         u32 left = u->codes - b * SCLC_BATCH_LANES;
