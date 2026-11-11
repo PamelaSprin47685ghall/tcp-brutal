@@ -706,8 +706,16 @@ enum tbt_stream_state
  *
  * TBT_FEC_BATCH_MAX and TBT_PARSER_BUF live in tbt_fec.h so the host memory
  * ledger test sees the same values. tbt_core.c has a BUILD_BUG_ON that keeps
- * this buffer at or below 32 KiB. */
-#define TBT_CAR_PART_MAX (TBT_HTTP_FEC_FRAME_MAX * TBT_FEC_BATCH_MAX)
+ * this buffer at or below 32 KiB.
+ *
+ * The same buffer serves the legacy ARQ and the FEC container. The bound is
+ * therefore the larger frame times the batch count: 0.8.0's 1079-byte FEC
+ * frame alone would truncate every ARQ part. */
+#define TBT_CAR_PART_MAX \
+    ((TBT_HTTP_FRAME_MAX > TBT_HTTP_FEC_FRAME_MAX \
+          ? TBT_HTTP_FRAME_MAX \
+          : TBT_HTTP_FEC_FRAME_MAX) * \
+     TBT_FEC_BATCH_MAX)
 struct tbt_parser
 {
     u8 buf[TBT_PARSER_BUF];
