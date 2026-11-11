@@ -1792,6 +1792,7 @@ static void tbt_fec_tx_close_block(struct tbt_session *sess,
         tx->blk_seq0 = tx->seq;
         tx->blk_n = tx->n;
         tx->blk_m = tx->m;
+        tbt_fec_tx_sent_clear(tx);
     }
 }
 
@@ -2060,6 +2061,14 @@ static bool tbt_fec_tx_block_started(const struct tbt_fec_tx *tx)
     return span && tx->seq > tx->blk_seq0 && tx->seq - tx->blk_seq0 < span;
 }
 
+static void tbt_fec_tx_sent_clear(struct tbt_fec_tx *tx)
+{
+    u16 g;
+
+    for (g = 0; g < tx->groups; g++)
+        memset(tx->g[g].sent, 0, sizeof(tx->g[g].sent));
+}
+
 static bool tbt_fec_tx_credit_ok(const struct tbt_fec_tx *tx)
 {
     /* The gate is a block-boundary gate. Once the block has a share, send
@@ -2260,6 +2269,7 @@ static void tbt_fec_tx_block_advance(struct tbt_fec_tx *tx)
         tx->cur_block++;
         tx->blk_n = tx->n;
         tx->blk_m = tx->m;
+        tbt_fec_tx_sent_clear(tx);
         rel = tx->seq - tx->blk_seq0;
     }
 }
@@ -2386,6 +2396,7 @@ static void tbt_fec_tx_codec_tick(struct tbt_session *sess,
     tx->rate_ppm = (u32)((((u64)n * 1000000u) + shares - 1u) / shares);
     tx->base_pkt = tx->seq;
     tx->base_block = tx->cur_block;
+    tbt_fec_tx_sent_clear(tx);
     spin_unlock_bh(&tx->shape_lock);
     rk = tx->replay ? tbt_fec_replay_k(tx->replay) : sess->fec_replay_k;
     tx->credit_cap = tbt_fec_credit_packets(
