@@ -3,6 +3,35 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [Unreleased]
+
+### Fixed
+
+- `host/tbt_client` accepts userspace keys after `--config FILE`. The tunnel
+  line, including its PSKs, stays in the file; `drop_ppm=`, `run_ms=`,
+  `local_queue_bytes=` and `verbose=` follow on the command line and are
+  applied. Any other trailing token is an error instead of being silently
+  ignored. `host/test_client_args` pins the split, the file/command-line
+  precedence and the byte-exact kernel line.
+- The userspace client's `adaptive=on` receiver no longer drops the block
+  outside its reorder ring. The ACK granted `TBT_RX_SLOTS - 1` blocks while
+  the sender is documented to carry one started block past the window, so
+  block id `rx_next + 8` arrived whole and was dropped: 18,826 shares at 20%
+  loss on `.92`. The grant is now `TBT_RX_SLOTS - 2` whole blocks, matching
+  the module's `K_eff - 2` policy. The control law also stops counting DATA
+  shares still in flight at the decode wake line as channel loss: a
+  first-attempt success samples `E = 0`, and only a failed attempt samples
+  its missing DATA count. On `.92` at 0% loss the old sample read ~44 missing
+  shares (max 82); the new one reads zero. The receiver follows block headers
+  and keeps the FBK target separately, with a 4-share deadband on
+  improvements and immediate loss responses, which cut the 20% run from 184
+  to 48 shape commits (`0.10.0` measured 1,448 at 256 MiB). The 20% loss
+  throughput gap against `adaptive=off` remains open: the NACK hold is
+  `max(carrier rtt) + 4 * rttvar`, which reaches ~1 s when a lossy carrier is
+  in RTO, so a block that needs repair waits about one second per 6-block
+  credit window. `host/test_client_rx` covers the credit headroom, the
+  sample policy and the `m_current`/`m_target` split.
+
 ## [0.10.0] - 2026-11-11
 
 ### Added

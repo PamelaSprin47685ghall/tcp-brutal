@@ -227,9 +227,17 @@ HOST_CLIENT_HDRS := host/tbt_client_engine.h tbtun/tbt_parse.h \
                    tbtun/tbt_fec_codec_cache.h tbtun/tbt_portmap.h \
                    tbtun/tbt_uapi.h
 HOST_CLIENT_OBJS := host/client-engine.o \
+                   host/client-args.o \
                    $(patsubst tbtun/%.c,host/client-%.o,$(filter tbtun/%.c,$(HOST_CLIENT_LIB_SRCS)))
 HOST_CLIENT     := host/tbt_client
 HOST_CLIENT_LIB := host/libtbtun_client.a
+HOST_CLIENT_ARGS := host/test_client_args
+HOST_CLIENT_ARGS_SRCS := host/test_client_args.c host/tbt_client_args.c \
+                   tbtun/tbt_parse.c tbtun/tbt_fec_adapt_sclc.c \
+                   tbtun/tbt_fec_adapt.c tbtun/tbt_portmap.c tbtun/tbt_map.c
+HOST_CLIENT_ARGS_HDRS := host/tbt_client_args.h tbtun/tbt_parse.h \
+                   tbtun/tbt_uapi.h tbtun/tbt_crypto.h tbtun/tbt_portmap.h \
+                   tbtun/tbt_map.h
 HOST_CLIENT_LOOPBACK := host/test_client_loopback
 HOST_CLIENT_WIRE := host/test_client_wire
 HOST_CLIENT_WIRE_SRCS := host/test_client_wire.c tbtun/tbt_proto.c \
@@ -371,7 +379,7 @@ golden-v080: $(GOLDEN_V080)
 
 host-test-san-run: host/test_carrier_policy_san
 
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FIN_TAIL) $(HOST_CELL_TAIL) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_CODEC_CACHE) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_SHAPES) $(HOST_PORTMAP) $(HOST_MAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_INVARIANTS) $(HOST_WIRE_COMPAT) $(HTTP_RFC_GEN) $(HOST_RX_BUDGET) $(HOST_MUX) $(HOST_CLIENT) $(HOST_CLIENT_LOOPBACK) $(HOST_CLIENT_WIRE) $(HOST_CLIENT_RX)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FIN_TAIL) $(HOST_CELL_TAIL) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_CODEC_CACHE) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_SHAPES) $(HOST_PORTMAP) $(HOST_MAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_INVARIANTS) $(HOST_WIRE_COMPAT) $(HTTP_RFC_GEN) $(HOST_RX_BUDGET) $(HOST_MUX) $(HOST_CLIENT) $(HOST_CLIENT_ARGS) $(HOST_CLIENT_LOOPBACK) $(HOST_CLIENT_WIRE) $(HOST_CLIENT_RX)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
@@ -412,6 +420,7 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_CAPTURE_POKE)
 	@./$(HOST_LOCAL_QUEUE)
 	@./$(HOST_MUX)
+	@./$(HOST_CLIENT_ARGS)
 	@./$(HOST_CLIENT_LOOPBACK)
 	@./$(HOST_CLIENT_WIRE)
 	@./$(HOST_CLIENT_RX)
@@ -981,7 +990,12 @@ host/client-%.o: tbtun/%.c $(HOST_CLIENT_HDRS)
 host/client-engine.o: host/tbt_client_engine.c $(HOST_CLIENT_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -c -o $@ $<
 
-host/client-main.o: host/tbt_client_main.c $(HOST_CLIENT_HDRS)
+host/client-args.o: host/tbt_client_args.c host/tbt_client_args.h \
+                   tbtun/tbt_parse.h tbtun/tbt_uapi.h tbtun/tbt_crypto.h
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -c -o $@ $<
+
+host/client-main.o: host/tbt_client_main.c host/tbt_client_args.h \
+                   $(HOST_CLIENT_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -c -o $@ $<
 
 $(HOST_CLIENT_LIB): $(HOST_CLIENT_OBJS)
@@ -992,6 +1006,9 @@ $(HOST_CLIENT): host/client-main.o $(HOST_CLIENT_LIB)
 
 $(HOST_CLIENT_LOOPBACK): host/test_client_loopback.c $(HOST_CLIENT_LIB) $(HOST_CLIENT_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ host/test_client_loopback.c $(HOST_CLIENT_LIB)
+
+$(HOST_CLIENT_ARGS): $(HOST_CLIENT_ARGS_SRCS) $(HOST_CLIENT_ARGS_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_CLIENT_ARGS_SRCS)
 
 host/test_client_loopback_san: host/test_client_loopback.c $(HOST_CLIENT_LIB_SRCS) $(HOST_CLIENT_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -DTBT_LOOPBACK_MB=1 -I tbtun -o $@ host/test_client_loopback.c $(HOST_CLIENT_LIB_SRCS)

@@ -10,7 +10,7 @@
  *   - NACK anchors on rx_next_block, never on a delivery frontier that marker
  *     blocks leave behind;
  *   - rx_next_deliver advances by real packets: marker 0, short sum(win_len);
- *   - ACK credit is (TBT_RX_SLOTS - 1) * groups * (rx_n + rx_m);
+ *   - ACK credit is (TBT_RX_SLOTS - 2) * groups * (rx_n + rx_m);
  *   - n/m are read from every block header, not from the session's first CFG.
  * Counters check that a stale slot below rx_next_block can never be NACKed
  * and that a late replay is counted instead of silently wedging.
@@ -446,9 +446,9 @@ static void test_marker_short_sequence(void)
                                     8u * (TBT_FEC_S + 784u) +
                                     64u * TBT_FEC_S,
           "sequence: delivered bytes");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 8u * (8u + 24u)) &&
-              f.rx_credit_shares == (TBT_RX_SLOTS - 1) * 8u * (8u + 24u),
-          "sequence: ACK credit is 7 blocks of groups*(n+m)");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 2) * 8u * (8u + 24u)) &&
+              f.rx_credit_shares == (TBT_RX_SLOTS - 2) * 8u * (8u + 24u),
+          "sequence: ACK credit is 6 blocks of groups*(n+m)");
     CHECK(f.rx_credit_bad == 0, "sequence: credit invariant holds");
     CHECK(f.rx_stale_nack == 0 && f.rx_late_share == 0 &&
               f.rx_window_drop == 0 && f.rx_shape_bad == 0,
@@ -477,9 +477,9 @@ static void test_credit_inflight(void)
     CHECK(f.rx_inflight_bad == 0, "credit: in-flight count is within slots-1");
     clear_pending();
     CHECK(flow_send_ack(&f) == 0, "credit: ACK sent");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * (132u + 124u)) &&
-              f.rx_credit_shares == (TBT_RX_SLOTS - 1) * (132u + 124u),
-          "credit: ACK grants slots-1 whole blocks");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 2) * (132u + 124u)) &&
+              f.rx_credit_shares == (TBT_RX_SLOTS - 2) * (132u + 124u),
+          "credit: ACK grants slots-2 whole blocks");
     CHECK(f.rx_credit_bad == 0, "credit: credit invariant holds");
 
     /* Complete the head; the seven markers drain behind it. */
@@ -494,8 +494,8 @@ static void test_credit_inflight(void)
     CHECK(f.rx_next_block == 9, "credit: post-drain block accepted");
     CHECK(f.rx_used == 0 && f.rx_window_drop == 0,
           "credit: post-drain ring empty and no drop");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * (146u + 110u)) &&
-              f.rx_credit_shares == (TBT_RX_SLOTS - 1) * (146u + 110u),
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 2) * (146u + 110u)) &&
+              f.rx_credit_shares == (TBT_RX_SLOTS - 2) * (146u + 110u),
           "credit: post-drain credit follows the new split");
 }
 
@@ -541,7 +541,7 @@ static void test_window_and_nack_base(void)
     CHECK(f.rx_next_block == 8, "window: blocks 0..7 drained");
     CHECK(f.rx_next_deliver == 1, "window: frontier is the one real share");
     CHECK(f.rx_deliver_bytes == TBT_FEC_S, "window: delivered one share");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 8u * (8u + 24u)),
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 2) * 8u * (8u + 24u)),
           "window: ACK credit follows the ring");
 
     full_block(8, 8 * 64, 8, 24);
@@ -839,8 +839,8 @@ static void test_multishape_sequence(void)
           "shape: delivered bytes");
     CHECK(f.rx_n == 9 && f.rx_m == 23,
           "shape: current split follows the newest block");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 8u * (9u + 23u)) &&
-              f.rx_credit_shares == (TBT_RX_SLOTS - 1) * 8u * (9u + 23u),
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 2) * 8u * (9u + 23u)) &&
+              f.rx_credit_shares == (TBT_RX_SLOTS - 2) * 8u * (9u + 23u),
           "shape: credit follows groups*(n+m)");
     CHECK(f.rx_credit_bad == 0, "shape: credit invariant holds");
     CHECK(f.rx_shape_bad == 0, "shape: all per-block splits accepted");
@@ -862,6 +862,7 @@ static void set_downlink_shape(void)
     f.rx_shares = 256;
     f.rx_n = 128;
     f.rx_m = 128;
+    (void)flow_rx_credit_update(&f);
 }
 
 static void test_downlink_shapes(void)
@@ -874,9 +875,9 @@ static void test_downlink_shapes(void)
           "down: 132/124 marker accepted");
     CHECK(f.rx_n == 132 && f.rx_m == 124,
           "down: current split follows the marker");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * (132u + 124u)) &&
-              f.rx_credit_shares == (TBT_RX_SLOTS - 1) * 256u,
-          "down: credit is 7 * 256 shares");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 2) * (132u + 124u)) &&
+              f.rx_credit_shares == (TBT_RX_SLOTS - 2) * 256u,
+          "down: credit is 6 * 256 shares");
     CHECK(f.rx_credit_bad == 0, "down: credit invariant holds");
 
     full_block(1, 146, 146, 110);
@@ -884,15 +885,15 @@ static void test_downlink_shapes(void)
           "down: 146/110 full block delivered");
     CHECK(f.rx_n == 146 && f.rx_m == 110,
           "down: current split follows the full block");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * (146u + 110u)) &&
-              f.rx_credit_shares == (TBT_RX_SLOTS - 1) * 256u,
-          "down: credit is 7 * 256 shares after switch");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 2) * (146u + 110u)) &&
+              f.rx_credit_shares == (TBT_RX_SLOTS - 2) * 256u,
+          "down: credit is 6 * 256 shares after switch");
     CHECK(f.rx_credit_bad == 0, "down: credit invariant holds after switch");
     CHECK(flow_rx_codec(&f, 132, 124) != NULL,
           "down: 132/124 codec builds");
     CHECK(flow_rx_codec(&f, 146, 110) != NULL,
           "down: 146/110 codec builds");
-    CHECK(!flow_commit_shape(&f, 200, 56),
+    CHECK(!flow_set_target(&f, 200, 56),
           "down: a split above 192 is refused");
 }
 
@@ -937,9 +938,9 @@ static void test_16m_boundary(void)
     CHECK(f.rx_window_drop == 0 && f.rx_inflight_bad == 0 &&
               f.rx_shape_bad == 0,
           "16m: no window or shape error");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * (146u + 110u)) &&
-              f.rx_credit_shares == (TBT_RX_SLOTS - 1) * 256u,
-          "16m: credit is 7 * 256 shares after boundary");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 2) * (146u + 110u)) &&
+              f.rx_credit_shares == (TBT_RX_SLOTS - 2) * 256u,
+          "16m: credit is 6 * 256 shares after boundary");
     CHECK(f.rx_credit_bad == 0, "16m: credit invariant holds");
 }
 
@@ -960,9 +961,9 @@ static void test_far_shape_ladder(void)
     CHECK(f.rx_next_deliver == 148, "ladder: frontier 2 + 146");
     CHECK(f.rx_n == 146 && f.rx_m == 110,
           "ladder: current split follows the latest block");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * (146u + 110u)) &&
-              f.rx_credit_shares == (TBT_RX_SLOTS - 1) * 256u,
-          "ladder: credit is 7 * 256 shares on the ladder");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 2) * (146u + 110u)) &&
+              f.rx_credit_shares == (TBT_RX_SLOTS - 2) * 256u,
+          "ladder: credit is 6 * 256 shares on the ladder");
     CHECK(f.rx_credit_bad == 0, "ladder: credit invariant holds");
     CHECK(f.rx_shape_bad == 0, "ladder: no shape rejection");
     CHECK(flow_rx_codec(&f, 139, 117) != NULL,
@@ -1959,12 +1960,14 @@ static void test_shape_switch_inflight(void)
                           TBT_FEC_S, false, dp[0]);
     CHECK(f.rx_used == TBT_RX_SLOTS, "inflight: every slot is occupied");
 
-    CHECK(flow_commit_shape(&f, NEW_N, NEW_M),
-          "inflight: the new split commits");
-    CHECK(f.rx_n == NEW_N && f.rx_m == NEW_M,
-          "inflight: the committed expectation is the new split");
-    CHECK(f.rx_credit_shares == (TBT_RX_SLOTS - 1) * 256u,
-          "inflight: credit is 7 * (n+m), independent of the split");
+    CHECK(flow_set_target(&f, NEW_N, NEW_M),
+          "inflight: the new split becomes the FBK target");
+    CHECK(f.rx_n == OLD_N && f.rx_m == OLD_M,
+          "inflight: the target does not move the RX expectation");
+    CHECK(f.ctl_n == NEW_N && f.ctl_m == NEW_M,
+          "inflight: the target is remembered for the next FBK");
+    CHECK(f.rx_credit_shares == (TBT_RX_SLOTS - 2) * 256u,
+          "inflight: credit is 6 * (n+m), independent of the split");
 
     /* Complete the eight old blocks with their old n/m. Block 0 loses
      * three DATA shares, so the old codec must still recover it. */
@@ -1988,7 +1991,7 @@ static void test_shape_switch_inflight(void)
     }
     CHECK(f.rx_n == OLD_N && f.rx_m == OLD_M,
           "inflight: the draining block owns the expectation");
-    CHECK(f.rx_credit_shares == (TBT_RX_SLOTS - 1) * 256u,
+    CHECK(f.rx_credit_shares == (TBT_RX_SLOTS - 2) * 256u,
           "inflight: credit did not move with the old split");
 
     /* The first new-shape block follows and adopts 160/96. */
@@ -2547,7 +2550,7 @@ static void test_session_nonce_parse(void)
 
 /* The stall dump must fire once for an incomplete head and expose both
  * counters: rx_block_stalled and rx_shape_mismatch (a record whose h.n/h.m
- * differs from the committed split). */
+ * differs from the split of the last accepted block). */
 static void test_stall_dump(void)
 {
     u64 now;
@@ -2569,9 +2572,9 @@ static void test_stall_dump(void)
     e.cfg.verbose = 0;
 }
 
-/* The FBK target is a commitment: the reported m_current/m_target and
- * n_current are the split this receiver just adopted, not a suggestion that
- * its RX ignores. */
+/* The FBK names two different splits: m_current/n_current describe the
+ * block just accepted, m_target the split the peer should send next. The
+ * receiver keeps following headers and does not adopt the target. */
 static void test_fbk_commit(void)
 {
     int i;
@@ -2580,7 +2583,10 @@ static void test_fbk_commit(void)
     clear_engine();
     f.ctl_ready = false;
     e.cfg.cfg.adaptive = 1;
-    CHECK(flow_commit_shape(&f, 9, 23), "fbk: commit 9/23");
+    CHECK(flow_set_target(&f, 9, 23), "fbk: target 9/23");
+    CHECK(f.rx_n == 8 && f.rx_m == 24,
+          "fbk: the target does not move the RX expectation");
+    (void)flow_rx_credit_update(&f);
     clear_pending();
     CHECK(flow_send_fbk(&f, 0, 1) == 0, "fbk: send");
     for (i = 0; i < e.npending; i++)
@@ -2590,18 +2596,112 @@ static void test_fbk_commit(void)
         if (rec[0] != TBT_FEC_FBK)
             continue;
         found++;
-        CHECK(rec[TBT_FEC_HDR_LEN + TBT_FEC_FBK_M_CURRENT] == 23,
-              "fbk: m_current is the committed m");
+        CHECK(rec[TBT_FEC_HDR_LEN + TBT_FEC_FBK_M_CURRENT] == 24,
+              "fbk: m_current is the accepted block's m");
         CHECK(rec[TBT_FEC_HDR_LEN + TBT_FEC_FBK_M_TARGET] == 23,
-              "fbk: m_target is the committed m");
-        CHECK(rec[TBT_FEC_HDR_LEN + TBT_FEC_FBK_N_CURRENT] == 9,
-              "fbk: n_current is the committed n");
+              "fbk: m_target is the new target");
+        CHECK(rec[TBT_FEC_HDR_LEN + TBT_FEC_FBK_N_CURRENT] == 8,
+              "fbk: n_current is the accepted block's n");
     }
     CHECK(found == 1, "fbk: one report queued");
-    CHECK(f.rx_n == 9 && f.rx_m == 23, "fbk: RX expectation moves with it");
-    CHECK(f.rx_credit_shares == (TBT_RX_SLOTS - 1) * 8u * 32u,
-          "fbk: credit recomputed from groups*(n+m)");
+    CHECK(f.rx_n == 8 && f.rx_m == 24,
+          "fbk: the RX expectation stayed with the accepted block");
+    CHECK(f.rx_credit_shares == (TBT_RX_SLOTS - 2) * 8u * 32u,
+          "fbk: credit stays slots-2 whole blocks");
     CHECK(f.rx_credit_bad == 0, "fbk: credit invariant holds");
+}
+
+/* The ring is 8 slots and the sender may carry one started block past the
+ * granted window. A slots-1 grant therefore let it open the first block
+ * outside the ring, which arrived as a whole block of rx_window_drop. The
+ * grant is slots-2 so the sender's headroom lands in the last valid slot. */
+static void test_credit_headroom(void)
+{
+    uint32_t credit;
+
+    clear_engine();
+    set_downlink_shape();
+    credit = flow_rx_credit_update(&f);
+    CHECK(credit == (TBT_RX_SLOTS - 2) * 256u,
+          "credit: slots-2 whole blocks");
+    CHECK(credit + 256u <= TBT_RX_SLOTS * 256u,
+          "credit: the sender's extra block still fits the ring");
+    CHECK(flow_send_ack(&f) == 0, "credit: ACK sent");
+    CHECK(last_ack_credit() == (int)credit,
+          "credit: the ACK carries the same grant");
+
+    /* The first share of block 8 is outside an 8-slot ring at next 0. */
+    send_data(0, 0, 128, 128, 0, 0, TBT_FEC_S, false);
+    send_data(8, 8u * 128, 128, 128, 0, 0, TBT_FEC_S, false);
+    CHECK(f.rx_window_drop == 1, "credit: block next+8 is outside the ring");
+}
+
+/* The controller sees a first-attempt success as zero missing DATA shares,
+ * not as the tail still in flight. At 0% loss the wire sends the whole
+ * block, yet an early decode leaves ~50 DATA shares in flight; feeding that
+ * tail made .92 grow parity from 128 to 150 at 0% loss. */
+static void init_adaptive_down(void)
+{
+    clear_engine();
+    set_downlink_shape();
+    e.cfg.cfg.adaptive = 1;
+    f.ctl_ready = !tbt_fec_adapt_sclc_init(
+        &f.ctl, 256, 1, tbt_fec_sclc_wake_extra_down(128), 128,
+        TBT_FEC_SCLC_DOWN);
+    f.ctl_n = 128;
+    f.ctl_m = 128;
+    f.ctl_change_ns = now_ns();
+}
+
+static void feed_ctl_sample(u16 wake_e, u16 wake_s, bool ok, u16 real)
+{
+    struct rx_group g;
+    struct rx_block b;
+
+    memset(&g, 0, sizeof(g));
+    memset(&b, 0, sizeof(b));
+    g.n = 128;
+    g.m = 128;
+    g.wake_e = wake_e;
+    g.wake_s = wake_s;
+    flow_sample_first(&f, &b, &g, ok, real);
+}
+
+static u16 ctl_tick_once(void)
+{
+    struct tbt_fec_adapt_sclc_out out;
+
+    memset(&out, 0, sizeof(out));
+    tbt_fec_adapt_sclc_tick(&f.ctl, now_ns(), 1, 1000000, 256, 0, 0, &out);
+    return out.m_target;
+}
+
+static void test_adaptive_sample_policy(void)
+{
+    u16 relaxed;
+    u16 raised;
+    int i;
+
+    init_adaptive_down();
+    CHECK(f.ctl_ready, "sample: controller starts");
+    /* 48 covered blocks: every first attempt succeeded, so every sample is
+     * E=0 even though 60 DATA shares were in flight at the wake line. */
+    for (i = 0; i < 48; i++)
+        feed_ctl_sample(60, 16, true, 128);
+    relaxed = ctl_tick_once();
+    CHECK(relaxed <= f.ctl.m_min,
+          "sample: 0% loss relaxes parity to the minimum");
+    CHECK(f.ctl.q_q16 < (8u << 16),
+          "sample: the quantile stayed near zero");
+
+    /* Eight first failures in a row: the safety backup must add parity. */
+    for (i = 0; i < 8; i++)
+        feed_ctl_sample(60, 16, false, 128);
+    raised = ctl_tick_once();
+    CHECK(raised >= relaxed, "sample: a failure burst never lowers parity");
+    CHECK(f.ctl.q_q16 > (32u << 16),
+          "sample: a failure burst raises the quantile");
+    CHECK(f.ctl.backup_off >= 2, "sample: the backup added shares");
 }
 
 /* A local FIN whose peer FIN never arrives used to occupy a flow slot
@@ -3014,6 +3114,8 @@ int main(void)
     test_tx_encode_failure();
     test_tx_replay_alloc_failure();
     test_fbk_commit();
+    test_credit_headroom();
+    test_adaptive_sample_policy();
     test_half_open_reclaim();
     test_flow_table_refusal();
     test_hello_reincarnation();

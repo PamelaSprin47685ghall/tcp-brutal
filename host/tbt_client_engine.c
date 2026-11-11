@@ -73,6 +73,14 @@
  * must not freeze repair for the rest of the connection. */
 #define TBT_NACK_RTT_HOLD_MAX_NS (4000ull * 1000 * 1000)
 #define TBT_FBK_NS (100ull * 1000 * 1000)
+/* A wire shape change rebuilds a codec and moves every share's slot. The
+ * controller's own noise is ~sigma shares, so a small improvement waits for
+ * the deadband and one extra feedback period; a loss response goes at once.
+ * Measured on .92: 1,448 commits in 480 s at 20% loss without this. */
+#define TBT_FBK_M_DEADBAND 4u
+#define TBT_FBK_M_UP 2u
+#define TBT_FBK_SHAPE_NS (200ull * 1000 * 1000)
+#define TBT_FBK_SHAPE_FAST 16u
 #define TBT_ACK_NS (10ull * 1000 * 1000)
 #define TBT_FLOW_IDLE_NS (30ull * 1000 * 1000 * 1000)
 #define TBT_FLOW_CLOSE_NS (10ull * 1000 * 1000 * 1000)
@@ -150,6 +158,11 @@ struct rx_group
     bool sampled;
     u16 ndata;
     u16 nparity;
+    /* The first decode attempt, before the codec changes anything. The
+     * controller must see the shares that were still missing then, and
+     * whether the code recovered them without a repair round trip. */
+    u16 wake_e;
+    u16 wake_s;
     u8 present[TBT_FEC_MAX_SHARES];
     u16 plen[TBT_FEC_MAX_SHARES];
     u8 *buf; /* (n + m) * TBT_FEC_S */
@@ -262,6 +275,10 @@ struct flow
     /* feedback controller */
     struct tbt_fec_adapt_sclc_ctl ctl;
     bool ctl_ready;
+    u16 ctl_n;       /* the split the last FBK asked the peer to send */
+    u16 ctl_m;
+    u32 ctl_blocks;  /* ctl.blocks at the previous tick, for d */
+    u64 ctl_change_ns;
     u64 last_fbk_ns;
 
     /* application output */
@@ -1628,13 +1645,17 @@ static int flow_send_cfg(struct flow *f)
 }
 
 /* One ring slot holds a whole block: n + m shares, DATA and PARITY alike.
- * The grant is slots-1 blocks of shares, leaving one slot for the block
- * under delivery. A short block still occupies the slot, so the grant does
- * not shrink with its real share count. */
+ * The grant is slots-2 blocks of shares, the same K_eff-2 policy the module
+ * uses: one slot is the block under delivery, the other is the sender's
+ * documented one-block headroom (a started block must finish) plus the ACK
+ * in flight. slots-1 let the sender open the slot past the ring, so a whole
+ * block arrived as rx_window_drop and needed a full replay (measured .92:
+ * 18,826 dropped shares at 20% loss, all at block id next+8). A short block
+ * still occupies its slot, so the grant does not shrink with real. */
 static u32 flow_rx_credit_update(struct flow *f)
 {
     u64 block = (u64)f->rx_groups * ((u32)f->rx_n + f->rx_m);
-    u64 credit = (u64)(TBT_RX_SLOTS - 1) * block;
+    u64 credit = (u64)(TBT_RX_SLOTS - 2) * block;
     u64 cap = (u64)TBT_RX_SLOTS * block;
 
     if (!block || credit < block || credit > cap ||
@@ -1714,26 +1735,27 @@ static struct tbt_fec_grouped *flow_rx_codec(struct flow *f, u16 n, u16 m)
     return codec;
 }
 
-/* Adopt one n/m as this receiver's current expectation. The FBK target is a
- * commitment: the ACK credit and the expected shape move with it, even while
- * older blocks of the previous split are still draining. */
-static bool flow_commit_shape(struct flow *f, u16 n, u16 m)
+/* Remember one n/m as the split the next FBK asks the peer to send. The
+ * receiver does not adopt it: the peer switches at a block boundary, and
+ * every block header states its own shape. Moving the local expectation
+ * first counted every share still in flight as a mismatch (measured .92:
+ * 631,585 at 20% loss) and echoed the previous block's shape back into the
+ * next target. */
+static bool flow_set_target(struct flow *f, u16 n, u16 m)
 {
     if (!n || !m || (u16)(n + m) != f->rx_shares)
         return false;
     if (!tbt_fec_block_shape_ok(n, m, 0, 0, f->rx_shares, f->rx_groups,
                                true))
         return false;
-    if (f->rx_n != n || f->rx_m != m)
+    if (f->ctl_n != n || f->ctl_m != m)
     {
-        f->rx_n = n;
-        f->rx_m = m;
         logmsg(f->e, "tbt_client: flow %llu cfg rx n=%u m=%u (fbk)\n",
                (unsigned long long)f->sid, n, m);
-        (void)flow_rx_credit_update(f);
+        f->ctl_n = n;
+        f->ctl_m = m;
+        f->ctl_change_ns = now_ns();
     }
-    if (f->rx_shape_block < f->rx_next_block)
-        f->rx_shape_block = f->rx_next_block;
     return true;
 }
 
@@ -1752,23 +1774,43 @@ static int flow_send_fbk(struct flow *f, u8 flags, u32 epoch)
         return 0;
     if (f->ctl_ready && !(flags & TBT_FEC_FBK_F_DIRECTED))
     {
+        u32 blocks = f->ctl.blocks - f->ctl_blocks;
+        u16 d = blocks ? (u16)(blocks > 0xffffu ? 0xffffu : blocks) : 1u;
+        u32 w_ppm = (u32)d * 1000000u;
+        u16 target;
         u16 n_new;
+        bool send;
 
-        tbt_fec_adapt_sclc_tick(&f->ctl, now, 2, 1000000, e->up_count, 0, 0,
+        if (w_ppm > 10000000u)
+            w_ppm = 10000000u;
+        tbt_fec_adapt_sclc_tick(&f->ctl, now, d, w_ppm, e->up_count, 0, 0,
                                 &out);
-        if (out.m_target >= f->rx_shares)
+        f->ctl_blocks = f->ctl.blocks;
+        if (e->cfg.verbose >= 2)
+            logmsg(e,
+                   "DBG fbk block=%llu k=%u q=%u qraw=%u delta=%u off=%d burst=%u eps=%u sigma=%u backup=%u reason=%u mt=%u n=%u/%u\n",
+                   (unsigned long long)f->rx_next_block, blocks,
+                   out.q_q16, out.q_raw_q16, out.delta_q16,
+                   out.delta_off_q16, out.burst_q16, out.eps_q16,
+                   out.sigma_q16, out.backup, out.reason, out.m_target,
+                   f->rx_n, f->rx_m);
+        target = out.m_target;
+        /* Raise at once when the change is worth a switch; the next block
+         * needs the margin. Lower only after the deadband, and a large
+         * recovery at once. */
+        send = target >= f->ctl_m + TBT_FBK_M_UP ||
+               (target + TBT_FBK_SHAPE_FAST <= f->ctl_m) ||
+               (target + TBT_FBK_M_DEADBAND <= f->ctl_m &&
+                now - f->ctl_change_ns >= TBT_FBK_SHAPE_NS);
+        if (target && target != f->ctl_m && send)
         {
-            f->rx_shape_bad++;
-        }
-        else
-        {
-            n_new = (u16)(f->rx_shares - out.m_target);
-            if (!flow_commit_shape(f, n_new, (u16)out.m_target))
+            n_new = (u16)(f->rx_shares - target);
+            if (!flow_set_target(f, n_new, target))
                 f->rx_shape_bad++;
         }
     }
     fb.m_current = (u8)f->rx_m;
-    fb.m_target = (u8)f->rx_m;
+    fb.m_target = (u8)f->ctl_m;
     fb.n_current = (u8)f->rx_n;
     fb.expected_shares = (u16)(f->rx_groups * f->rx_shares);
     fb.received_shares = fb.expected_shares;
@@ -1777,7 +1819,8 @@ static int flow_send_fbk(struct flow *f, u8 flags, u32 epoch)
     fb.block = f->rx_shape.block;
     fb.rate_ppm_current =
         (u32)(((u64)f->rx_n * 1000000u + f->rx_shares - 1u) / f->rx_shares);
-    fb.rate_ppm_target = fb.rate_ppm_current;
+    fb.rate_ppm_target =
+        (u32)(((u64)f->ctl_n * 1000000u + f->rx_shares - 1u) / f->rx_shares);
     {
         u16 i;
 
@@ -1836,6 +1879,12 @@ static struct rx_block *rx_block_get(struct flow *f,
     if (id >= f->rx_next_block + TBT_RX_SLOTS)
     {
         f->rx_window_drop++;
+        if (f->e->cfg.verbose >= 2)
+            logmsg(f->e,
+                   "DBG drop block=%llu next=%llu n=%u m=%u type=%u share=%u seq=%llu\n",
+                   (unsigned long long)id,
+                   (unsigned long long)f->rx_next_block, h->n, h->m, h->type,
+                   share, (unsigned long long)h->seq);
         return NULL;
     }
     /* n/m are per block: the 0.8 sender may move the split every block.
@@ -1977,19 +2026,34 @@ static int flow_out_append(struct flow *f, const u8 *data, size_t len)
     return 0;
 }
 
-static void flow_sample_block(struct flow *f, struct rx_group *g, u16 real)
+/* Feed the controller the first decode attempt of one group.
+ *
+ * E is the DATA shares missing when the wake line was first crossed. A
+ * first-attempt success means the parity recovered every one of them, so it
+ * is not evidence that the channel lost anything: at 0% loss a streaming
+ * sender still has a tail in flight, and counting that tail made the .92
+ * controller read ~50 missing shares at 0% loss and grow parity to 150.
+ * Only a first-attempt failure proves the margin was short, and its E sizes
+ * the next m. A later success does not re-sample: the evidence belongs to
+ * the first attempt, as in tbt_fec_rx_try_decode().
+ */
+static void flow_sample_first(struct flow *f, struct rx_block *b,
+                              struct rx_group *g, bool first_ok, u16 real)
 {
     u16 e;
     u16 s;
-    bool ok = g->decoded;
 
     if (g->sampled || !f->ctl_ready)
         return;
     g->sampled = true;
-    e = g->ndata >= real ? 0 : (u16)(real - g->ndata);
-    s = (u16)(g->ndata + g->nparity > real ? g->ndata + g->nparity - real
-                                           : 0);
-    tbt_fec_adapt_sclc_block_sample(&f->ctl, e, s, ok, real);
+    e = first_ok ? 0 : g->wake_e;
+    s = g->wake_s;
+    tbt_fec_adapt_sclc_block_sample(&f->ctl, e, s, first_ok, real);
+    if (f->e->cfg.verbose >= 2)
+        logmsg(f->e,
+               "DBG sample block=%llu n=%u m=%u real=%u ndata=%u nparity=%u e=%u s=%u ok=%d\n",
+               (unsigned long long)b->id, g->n, g->m, real, g->ndata,
+               g->nparity, e, s, first_ok);
 }
 
 static void rx_group_try(struct flow *f, struct rx_block *b, u16 group)
@@ -2017,7 +2081,11 @@ static void rx_group_try(struct flow *f, struct rx_block *b, u16 group)
         g->decoded = true;
         g->real = real;
         g->real_set = true;
-        flow_sample_block(f, g, real);
+        g->wake_e = 0;
+        g->wake_s = (u16)(g->ndata + g->nparity > real
+                              ? g->ndata + g->nparity - real
+                              : 0);
+        flow_sample_first(f, b, g, true, real);
         return;
     }
     if (!g->real_set)
@@ -2033,6 +2101,11 @@ static void rx_group_try(struct flow *f, struct rx_block *b, u16 group)
 
         if (!codec)
             return;
+        /* Snapshot before the codec changes a share's known state. */
+        g->wake_e = (u16)(real > g->ndata ? real - g->ndata : 0);
+        g->wake_s = (u16)(g->ndata + g->nparity > real
+                              ? g->ndata + g->nparity - real
+                              : 0);
         for (i = 0; i < n; i++)
         {
             data_ptrs[i] = g->buf + (size_t)i * TBT_FEC_S;
@@ -2056,7 +2129,6 @@ static void rx_group_try(struct flow *f, struct rx_block *b, u16 group)
         g->real = real;
         g->real_set = true;
         g->epoch = g->present[real - 1] ? g->plen[real - 1] : g->epoch;
-        flow_sample_block(f, g, real);
     }
     else
     {
@@ -2065,6 +2137,7 @@ static void rx_group_try(struct flow *f, struct rx_block *b, u16 group)
          * is one the codec cannot finish from the shares that arrive. */
         f->rx_decode_fail++;
     }
+    flow_sample_first(f, b, g, ok, real);
 }
 
 static void rx_bitmap_str(const u8 *present, u16 start, u16 count, char *out,
@@ -2801,6 +2874,11 @@ static int handle_cfg(struct flow *f, const u8 *body)
     variant = sh.groups > 1 ? TBT_FEC_SCLC_UP : TBT_FEC_SCLC_DOWN;
     extra = sh.groups > 1 ? TBT_FEC_SCLC_WAKE_EXTRA_UP
                           : tbt_fec_sclc_wake_extra_down(sh.n);
+    f->ctl_ready = false;
+    f->ctl_n = sh.n;
+    f->ctl_m = sh.m;
+    f->ctl_blocks = 0;
+    f->ctl_change_ns = now_ns();
     if (e->cfg.cfg.adaptive &&
         !tbt_fec_adapt_sclc_init(&f->ctl, (u16)(sh.n + sh.m), sh.groups,
                                  extra, sh.n, variant))

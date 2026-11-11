@@ -287,6 +287,7 @@ host/test_fec_out
 host/test_fec_out_san
 host/test_batch
 host/tbt_client
+host/test_client_args
 host/test_client_loopback
 host/test_client_loopback_san
 host/test_client_wire

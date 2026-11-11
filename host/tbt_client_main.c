@@ -9,11 +9,16 @@
  *              crypto=on drop_ppm=100000
  *
  * role defaults to near. A line without the `tunnel <id>` prefix gets
- * `tunnel 1` in front of it.
+ * `tunnel 1` in front of it. Four keys belong to this process and are
+ * removed before the line parses: drop_ppm, run_ms, local_queue_bytes and
+ * verbose. With `--config FILE` the tunnel line comes from the file, the
+ * PSKs stay in the file, and only those four keys may follow on the command
+ * line; any other token is an error rather than a silent ignore.
  */
 #define _GNU_SOURCE
 
 #include "tbt_client_engine.h"
+#include "tbt_client_args.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -27,155 +32,88 @@ static void usage(const char *argv0)
             "       keys: listen= target= peer= n= m= mode= carriers= crypto=\n"
             "             w= L= profile= adaptive= keepalive_ms=\n"
             "       userspace: drop_ppm= run_ms= local_queue_bytes= verbose=1\n"
-            "       --config FILE reads the first tunnel line of FILE\n",
+            "       --config FILE reads the first tunnel line of FILE and\n"
+            "       accepts only userspace keys after it\n",
             argv0);
-}
-
-/* Remove a userspace-only key from a token stream. Returns true when the
- * token was consumed. */
-static bool take_u32_key(const char *tok, const char *key, u32 *out)
-{
-    size_t n = strlen(key);
-
-    if (strncmp(tok, key, n) || tok[n] != '=')
-        return false;
-    *out = (u32)strtoul(tok + n + 1, NULL, 0);
-    return true;
-}
-
-static int build_line(int argc, char **argv, char *line, size_t cap,
-                      struct tbt_engine_cfg *ec)
-{
-    char raw[TBT_LINE_MAX * 4];
-    size_t used = 0;
-    int i;
-
-    memset(raw, 0, sizeof(raw));
-    for (i = 1; i < argc; i++)
-    {
-        size_t n;
-
-        if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h"))
-        {
-            usage(argv[0]);
-            exit(0);
-        }
-        n = strlen(argv[i]);
-        if (used + n + 2 >= sizeof(raw))
-        {
-            fprintf(stderr, "tbt_client: command line too long\n");
-            return -E2BIG;
-        }
-        if (used)
-            raw[used++] = ' ';
-        memcpy(raw + used, argv[i], n);
-        used += n;
-    }
-    raw[used] = '\0';
-    /* A userspace key must not reach the kernel grammar. */
-    {
-        char clean[TBT_LINE_MAX * 4];
-        char *save = NULL;
-        char *tok;
-        size_t out = 0;
-        bool first = true;
-
-        memset(clean, 0, sizeof(clean));
-        for (tok = strtok_r(raw, " \t\r\n", &save); tok;
-             tok = strtok_r(NULL, " \t\r\n", &save))
-        {
-            if (take_u32_key(tok, "drop_ppm", &ec->drop_ppm) ||
-                take_u32_key(tok, "run_ms", &ec->run_ms) ||
-                take_u32_key(tok, "local_queue_bytes",
-                             &ec->local_queue_bytes) ||
-                take_u32_key(tok, "verbose", (u32 *)&ec->verbose))
-                continue;
-            if (!first && out + 1 < sizeof(clean))
-                clean[out++] = ' ';
-            first = false;
-            if (out + strlen(tok) + 1 >= sizeof(clean))
-            {
-                fprintf(stderr, "tbt_client: line too long\n");
-                return -E2BIG;
-            }
-            memcpy(clean + out, tok, strlen(tok));
-            out += strlen(tok);
-        }
-        clean[out] = '\0';
-        if (!strncmp(clean, "tunnel ", 7) || !strncmp(clean, "tunnel\t", 7))
-            snprintf(line, cap, "%s", clean);
-        else
-            snprintf(line, cap, "tunnel 1 %s", clean);
-    }
-    return 0;
 }
 
 int main(int argc, char **argv)
 {
     struct tbt_engine_cfg ec;
     struct tbt_parse_error perr = { 0 };
+    struct tbt_client_us us;
     struct tbt_cmd cmd;
     char line[TBT_LINE_MAX];
+    char bad[64];
     int err;
+    int bad_arg;
+    int i;
 
     memset(&ec, 0, sizeof(ec));
     ec.cfg.id = 1;
     ec.cfg.role = TBT_ROLE_NEAR;
     ec.local_queue_bytes = TBT_LOCAL_QUEUE_DEFAULT;
-
     if (argc < 2)
     {
         usage(argv[0]);
         return 2;
     }
+    for (i = 1; i < argc; i++)
+        if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h"))
+        {
+            usage(argv[0]);
+            return 0;
+        }
+    memset(&us, 0, sizeof(us));
+    /* An absent key keeps the value the engine had before this change. */
+    us.local_queue_bytes = TBT_LOCAL_QUEUE_DEFAULT;
     if (!strcmp(argv[1], "--config"))
     {
-        FILE *f;
-        char file_line[TBT_LINE_MAX];
-
         if (argc < 3)
         {
             usage(argv[0]);
             return 2;
         }
-        f = fopen(argv[2], "r");
-        if (!f)
+        err = tbt_client_config_read(argv[2], line, sizeof(line));
+        if (err)
         {
             fprintf(stderr, "tbt_client: %s: %s\n", argv[2],
-                    strerror(errno));
+                    err == -ENODATA ? "no tunnel line" : strerror(-err));
             return 1;
         }
-        memset(file_line, 0, sizeof(file_line));
-        while (fgets(file_line, sizeof(file_line), f))
+        if (tbt_client_us_strip(line, sizeof(line), &us, bad, sizeof(bad)))
         {
-            char *p = file_line;
-            size_t n;
-
-            while (*p == ' ' || *p == '\t')
-                p++;
-            if (*p == '\0' || *p == '\n' || *p == '#')
-                continue;
-            n = strlen(p);
-            while (n && (p[n - 1] == '\n' || p[n - 1] == '\r'))
-                p[--n] = '\0';
-            if (snprintf(line, sizeof(line), "%s", p) >= (int)sizeof(line))
-            {
-                fclose(f);
-                fprintf(stderr, "tbt_client: config line too long\n");
-                return 1;
-            }
-            fclose(f);
-            goto parsed;
+            fprintf(stderr, "tbt_client: %s: bad userspace value %s\n",
+                    argv[2], bad[0] ? bad : "in the tunnel line");
+            return 1;
         }
-        fclose(f);
-        fprintf(stderr, "tbt_client: %s: no tunnel line\n", argv[2]);
-        return 1;
+        bad_arg = tbt_client_us_argv(argc, argv, 3, &us);
+        if (bad_arg >= 0)
+        {
+            fprintf(stderr,
+                    "tbt_client: %s: not a userspace key\n"
+                    "       after --config only drop_ppm= run_ms=\n"
+                    "       local_queue_bytes= verbose= may follow\n",
+                    argv[bad_arg]);
+            return 1;
+        }
     }
-    err = build_line(argc, argv, line, sizeof(line), &ec);
-    if (err)
-        return 1;
+    else
+    {
+        err = tbt_client_line_build(argc, argv, 1, line, sizeof(line), &us);
+        if (err)
+        {
+            fprintf(stderr, "tbt_client: %s\n",
+                    err == -E2BIG ? "command line too long"
+                                  : "bad userspace key value");
+            return 1;
+        }
+    }
+    ec.drop_ppm = us.drop_ppm;
+    ec.run_ms = us.run_ms;
+    ec.local_queue_bytes = us.local_queue_bytes;
+    ec.verbose = (int)us.verbose;
 
-parsed:
     memset(&cmd, 0, sizeof(cmd));
     err = tbt_parse_line(line, &cmd, &perr);
     if (err)
