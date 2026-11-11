@@ -1216,6 +1216,48 @@ static void case_frozen_sample(void)
        "frozen sample: an unfrozen block samples again");
 }
 
+/* A saturated clamp may freeze only the direction that deepens it. At
+ * m_max a real surplus must still lower delta_off and walk m back down;
+ * at m_min a deficit must still raise it. */
+static void case_anti_windup(void)
+{
+    struct tbt_fec_adapt_sclc_ctl c;
+    struct tbt_fec_adapt_sclc_out out;
+    u64 now = SEC;
+    u32 i;
+    u16 m0;
+
+    init_up_n(&c, 1);
+    run(&c, &now, 16, 20, 3, true, 32, &out);
+    run(&c, &now, 100, 20, 3, true, 32, &out);
+    eq_u32(out.m_target, c.m_max, "anti-windup: starts at m_max");
+    m0 = out.m_target;
+    for (i = 0; i < 1000; i++)
+    {
+        feed(&c, 2, 20, true, c.n_cur);
+        tick(&c, &now, &out);
+    }
+    ok(out.m_target < m0,
+       "anti-windup: a large surplus lowers m from m_max");
+    ok((u64)out.m_target << 16 >=
+           (u64)c.q_act_q16 + out.delta_q16 + out.burst_q16 +
+               ((u64)out.backup << 16),
+       "anti-windup: the recovered m is a fixed point");
+    ok(out.delta_q16 <= 2u * TBT_FEC_ADAPT_SCLC_ONE,
+       "anti-windup: delta_off learned down to about two shares");
+
+    init_up_n(&c, 30);
+    run(&c, &now, 16, 0, 3, true, 32, &out);
+    eq_u32(out.m_target, c.m_min, "anti-windup: starts at m_min");
+    m0 = out.m_target;
+    for (i = 0; i < 200; i++)
+    {
+        feed(&c, 0, 1, true, c.n_cur);
+        tick(&c, &now, &out);
+    }
+    ok(out.m_target > m0, "anti-windup: a deficit raises m from m_min");
+}
+
 /* ------------------------------------------------------------------ *
  * Least buildable fixed point
  * ------------------------------------------------------------------ */
@@ -1885,6 +1927,7 @@ int main(void)
     case_backup();
     case_freeze();
     case_frozen_sample();
+    case_anti_windup();
     case_fixed_point();
     case_buildable_output();
     case_n_sweep();
