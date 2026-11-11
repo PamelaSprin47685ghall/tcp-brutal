@@ -49,6 +49,7 @@ static struct tbt_fec_grouped *tbt_fec_codec_new(
     const struct tbt_fec_sclc_shape *sclc, u16 groups, u16 n, u16 m, u16 k,
     u16 w, u8 d, u64 nonce);
 static void tbt_fec_tx_init_tick(struct tbt_session *sess, struct tbt_fec_tx *tx);
+static void tbt_fec_tx_sent_clear(struct tbt_fec_tx *tx);
 static struct workqueue_struct *tbt_fec_free_wq;
 static void tbt_fec_rx_blk_attach_locked(struct tbt_fec_rx *rx,
                                          struct tbt_fec_blk *b);
