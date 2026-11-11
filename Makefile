@@ -855,8 +855,8 @@ $(HOST_CLIENT_WIRE): $(HOST_CLIENT_WIRE_SRCS) $(HOST_CLIENT_WIRE_HDRS)
 host/test_client_wire_san: $(HOST_CLIENT_WIRE_SRCS) $(HOST_CLIENT_WIRE_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_CLIENT_WIRE_SRCS)
 
-$(HOST_CLIENT_RX): $(HOST_CLIENT_RX_SRCS) $(HOST_CLIENT_HDRS)
+$(HOST_CLIENT_RX): $(HOST_CLIENT_RX_SRCS) host/tbt_client_engine.c $(HOST_CLIENT_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -Wno-unused-function -Wno-unused-variable -I tbtun -I host -o $@ $(HOST_CLIENT_RX_SRCS)
 
-host/test_client_rx_san: $(HOST_CLIENT_RX_SRCS) $(HOST_CLIENT_HDRS)
+host/test_client_rx_san: $(HOST_CLIENT_RX_SRCS) host/tbt_client_engine.c $(HOST_CLIENT_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -Wno-unused-function -Wno-unused-variable -I tbtun -I host -o $@ $(HOST_CLIENT_RX_SRCS)

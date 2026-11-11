@@ -53,6 +53,7 @@
 #define TBT_FLOW_MAX 8
 #define TBT_RX_SLOTS 8
 #define TBT_REPLAY_BLOCKS 8
+#define TBT_RX_CODECS 4
 #define TBT_CAR_RBUF 65536
 #define TBT_CAR_WBUF 131072
 #define TBT_APP_RBUF 65536
@@ -141,6 +142,14 @@ struct rx_group
     u8 *buf; /* (n + m) * TBT_FEC_S */
 };
 
+struct rx_codec_entry
+{
+    bool used;
+    u16 n, m;
+    u64 last_ns;
+    struct tbt_fec_grouped *codec;
+};
+
 struct rx_block
 {
     bool used;
@@ -193,13 +202,17 @@ struct flow
     struct replay_block replay[TBT_REPLAY_BLOCKS];
 
     /* RX */
-    struct tbt_fec_grouped *rx_codec;
     struct tbt_fec_sclc_shape rx_shape;
     bool rx_shape_set;
     u32 cfg_epoch;
     u8 peer_m_target;
     u8 peer_n_target;
-    u16 rx_n, rx_m, rx_groups;
+    u16 rx_n, rx_m, rx_groups, rx_shares;
+    u64 rx_seed;
+    u64 rx_shape_block;
+    struct rx_codec_entry rx_codec[TBT_RX_CODECS];
+    u64 rx_codec_clock;
+    u64 rx_shape_bad;
     struct rx_block rx[TBT_RX_SLOTS];
     u64 rx_next_block;
     u64 rx_next_deliver;
@@ -929,8 +942,12 @@ static void flow_free(struct engine *e, struct flow *f)
     free(f->tx_plane);
     if (f->tx_codec)
         tbt_fec_grouped_free(f->tx_codec);
-    if (f->rx_codec)
-        tbt_fec_grouped_free(f->rx_codec);
+    for (i = 0; i < TBT_RX_CODECS; i++)
+    {
+        if (f->rx_codec[i].used)
+            tbt_fec_grouped_free(f->rx_codec[i].codec);
+        memset(&f->rx_codec[i], 0, sizeof(f->rx_codec[i]));
+    }
     free(f->out);
     free(f);
 }
@@ -1281,6 +1298,76 @@ static int flow_send_ack(struct flow *f)
     return send_ctl_record(e, f, TBT_FEC_ACK, f->sid, 0, 0, body, sizeof(body));
 }
 
+/* A codec for one block's n/m, not the session default. The 0.8 sender may
+ * move the split per block, so the cache is keyed by (n, m); block, L and the
+ * seed stay fixed for the direction. Four entries cover a transition. */
+static struct tbt_fec_grouped *flow_rx_codec(struct flow *f, u16 n, u16 m)
+{
+    struct tbt_fec_sclc_shape sh;
+    struct tbt_fec_grouped *codec;
+    u16 shares = (u16)(n + m);
+    int slot = -1;
+    int i;
+
+    if (!f->rx_shape_set || !n || !m || shares != f->rx_shares)
+        return NULL;
+    for (i = 0; i < TBT_RX_CODECS; i++)
+    {
+        if (f->rx_codec[i].used && f->rx_codec[i].n == n &&
+            f->rx_codec[i].m == m)
+            return f->rx_codec[i].codec;
+        if (!f->rx_codec[i].used && slot < 0)
+            slot = i;
+    }
+    if (slot < 0)
+    {
+        u64 oldest = ~0ull;
+
+        for (i = 0; i < TBT_RX_CODECS; i++)
+        {
+            if (f->rx_codec[i].last_ns < oldest)
+            {
+                oldest = f->rx_codec[i].last_ns;
+                slot = i;
+            }
+        }
+        tbt_fec_grouped_free(f->rx_codec[slot].codec);
+        memset(&f->rx_codec[slot], 0, sizeof(f->rx_codec[slot]));
+    }
+    sh = f->rx_shape;
+    sh.n = n;
+    sh.m = m;
+    sh.groups = f->rx_groups;
+    sh.rate_ppm = (u32)(((u64)n * 1000u) / shares);
+    sh.rate_256 = (u16)(((u32)n * 256u) / shares);
+    codec = client_sclc_new(&sh, TBT_FEC_S, f->rx_seed);
+    if (!codec)
+        return NULL;
+    f->rx_codec[slot].used = true;
+    f->rx_codec[slot].n = n;
+    f->rx_codec[slot].m = m;
+    f->rx_codec[slot].last_ns = ++f->rx_codec_clock;
+    f->rx_codec[slot].codec = codec;
+    return codec;
+}
+
+/* Adopt one n/m as this receiver's current expectation. The FBK target is a
+ * commitment: the ACK credit and the expected shape move with it, even while
+ * older blocks of the previous split are still draining. */
+static bool flow_commit_shape(struct flow *f, u16 n, u16 m)
+{
+    if (!n || !m || (u16)(n + m) != f->rx_shares)
+        return false;
+    if (!tbt_fec_block_shape_ok(n, m, 0, 0, f->rx_shares, f->rx_groups,
+                               true))
+        return false;
+    f->rx_n = n;
+    f->rx_m = m;
+    if (f->rx_shape_block < f->rx_next_block)
+        f->rx_shape_block = f->rx_next_block;
+    return true;
+}
+
 static int flow_send_fbk(struct flow *f, u8 flags, u32 epoch)
 {
     struct engine *e = f->e;
@@ -1290,27 +1377,35 @@ static int flow_send_fbk(struct flow *f, u8 flags, u32 epoch)
     u64 now = now_ns();
 
     memset(&fb, 0, sizeof(fb));
-    fb.m_current = (u8)f->rx_m;
-    fb.m_target = (u8)f->rx_m;
-    fb.n_current = (u8)f->rx_n;
-    fb.expected_shares = (u16)(f->rx_groups * (f->rx_n + f->rx_m));
-    fb.received_shares = fb.expected_shares;
     tbt_fec_fbk_set_epoch(&fb, epoch);
     fb.flags = flags;
     if (f->ctl_ready && !flags)
     {
+        u16 n_new;
+
         tbt_fec_adapt_sclc_tick(&f->ctl, now, 2, 1000000, e->up_count, 0, 0,
                                 &out);
-        fb.m_target = (u8)out.m_target;
-        fb.n_current = (u8)out.n_target;
+        if (out.m_target >= f->rx_shares)
+        {
+            f->rx_shape_bad++;
+        }
+        else
+        {
+            n_new = (u16)(f->rx_shares - out.m_target);
+            if (!flow_commit_shape(f, n_new, (u16)out.m_target))
+                f->rx_shape_bad++;
+        }
     }
+    fb.m_current = (u8)f->rx_m;
+    fb.m_target = (u8)f->rx_m;
+    fb.n_current = (u8)f->rx_n;
+    fb.expected_shares = (u16)(f->rx_groups * f->rx_shares);
+    fb.received_shares = fb.expected_shares;
     fb.codec_variant = 2;
     fb.L = (u8)f->rx_shape.L;
     fb.block = f->rx_shape.block;
     fb.rate_ppm_current =
-        (u32)(((u64)f->rx_shape.n * 1000000u +
-               (f->rx_shape.n + f->rx_shape.m) - 1u) /
-              (f->rx_shape.n + f->rx_shape.m));
+        (u32)(((u64)f->rx_n * 1000000u + f->rx_shares - 1u) / f->rx_shares);
     fb.rate_ppm_target = fb.rate_ppm_current;
     {
         u16 i;
@@ -1370,8 +1465,16 @@ static struct rx_block *rx_block_get(struct flow *f,
         f->rx_window_drop++;
         return NULL;
     }
-    if (h->n != f->rx_n || h->m != f->rx_m || h->reserved >= f->rx_groups)
+    /* n/m are per block: the 0.8 sender may move the split every block.
+     * Only the share count and the group count are session-fixed. */
+    if (!h->n || !h->m || (u16)(h->n + h->m) != f->rx_shares ||
+        h->reserved >= f->rx_groups ||
+        !tbt_fec_block_shape_ok(h->n, h->m, 0, 0, f->rx_shares,
+                                f->rx_groups, true))
+    {
+        f->rx_shape_bad++;
         return NULL;
+    }
     if (h->type == TBT_FEC_DATA)
     {
         if (!tbt_fec_data_seq0(h->seq, group, h->n, share, &seq0))
@@ -1406,10 +1509,12 @@ static struct rx_block *rx_block_get(struct flow *f,
             b->g[g].m = h->m;
         }
     }
-    else if (b->seq0 != seq0)
+    else if (b->seq0 != seq0 || b->n != h->n || b->m != h->m)
     {
-        /* A block id is a stream-local identity; a second origin for the
-         * same id is a protocol error, not a reason to rewrite history. */
+        /* A block id is a stream-local identity and one block has one
+         * split; a second origin or a different n/m for the same id is a
+         * protocol error, not a reason to rewrite history. */
+        f->rx_shape_bad++;
         return NULL;
     }
     return b;
@@ -1515,14 +1620,16 @@ static void rx_group_try(struct flow *f, struct rx_block *b, u16 group)
     u8 *parity_ptrs[TBT_FEC_MAX_SHARES];
     u8 dp[TBT_FEC_MAX_SHARES];
     u8 pp[TBT_FEC_MAX_SHARES];
+    u16 n = b->n;
+    u16 m = b->m;
     u16 real;
     u16 i;
     bool ok = true;
 
     if (g->decoded || g->marker)
         return;
-    real = g->real_set ? g->real : f->rx_n;
-    if (!real || real > f->rx_n)
+    real = g->real_set ? g->real : n;
+    if (!real || real > n)
         return;
     if (g->ndata >= real)
     {
@@ -1539,28 +1646,32 @@ static void rx_group_try(struct flow *f, struct rx_block *b, u16 group)
     {
         u16 extra = f->rx_groups > 1
                         ? TBT_FEC_SCLC_WAKE_EXTRA_UP
-                        : tbt_fec_sclc_wake_extra_down(f->rx_n);
+                        : tbt_fec_sclc_wake_extra_down(n);
 
         if ((u32)g->ndata + g->nparity < (u32)real + extra)
             return;
     }
-    if (!f->rx_codec)
-        return;
-    for (i = 0; i < f->rx_n; i++)
     {
-        data_ptrs[i] = g->buf + (size_t)i * TBT_FEC_S;
-        dp[i] = g->present[i] ? 1 : 0;
+        struct tbt_fec_grouped *codec = flow_rx_codec(f, n, m);
+
+        if (!codec)
+            return;
+        for (i = 0; i < n; i++)
+        {
+            data_ptrs[i] = g->buf + (size_t)i * TBT_FEC_S;
+            dp[i] = g->present[i] ? 1 : 0;
+        }
+        for (i = 0; i < m; i++)
+        {
+            parity_ptrs[i] = g->buf + (size_t)(n + i) * TBT_FEC_S;
+            pp[i] = g->present[n + i] ? 1 : 0;
+        }
+        (void)tbt_fec_grouped_decode(codec, group, data_ptrs, parity_ptrs, dp,
+                                     pp, n);
+        for (i = 0; i < real; i++)
+            if (!tbt_fec_grouped_is_known(codec, group, i))
+                ok = false;
     }
-    for (i = 0; i < f->rx_m; i++)
-    {
-        parity_ptrs[i] = g->buf + (size_t)(f->rx_n + i) * TBT_FEC_S;
-        pp[i] = g->present[f->rx_n + i] ? 1 : 0;
-    }
-    (void)tbt_fec_grouped_decode(f->rx_codec, group, data_ptrs, parity_ptrs,
-                                 dp, pp, f->rx_n);
-    for (i = 0; i < real; i++)
-        if (!tbt_fec_grouped_is_known(f->rx_codec, group, i))
-            ok = false;
     if (ok)
     {
         g->decoded = true;
@@ -1598,7 +1709,7 @@ static void flow_rx_check(struct flow *f)
         for (group = 0; group < b->groups; group++)
         {
             struct rx_group *g = &b->g[group];
-            u16 real = g->marker ? 0 : (g->real_set ? g->real : f->rx_n);
+            u16 real = g->marker ? 0 : (g->real_set ? g->real : b->n);
             u16 s;
 
             blk_pkts += real;
@@ -1646,6 +1757,12 @@ static void flow_rx_store(struct flow *f, const struct tbt_fec_hdr *h,
     b = rx_block_get(f, h, group, share);
     if (!b)
         return;
+    if (b->id >= f->rx_shape_block)
+    {
+        f->rx_shape_block = b->id;
+        f->rx_n = b->n;
+        f->rx_m = b->m;
+    }
     g = &b->g[group];
     if (share >= shares)
         return;
@@ -1691,7 +1808,7 @@ static void flow_send_nack_group(struct flow *f, struct rx_block *b,
     struct tbt_fec_nack n;
     struct rx_group *g = &b->g[group];
     u8 body[TBT_FEC_NACK_LEN];
-    u16 real = g->real_set ? g->real : f->rx_n;
+    u16 real = g->real_set ? g->real : b->n;
     u16 s;
     bool any = false;
 
@@ -1717,7 +1834,7 @@ static void flow_send_nack_group(struct flow *f, struct rx_block *b,
     {
         /* The parity that names win_len is missing: ask for every parity
          * share so the real length and the epoch arrive. */
-        for (s = f->rx_n; s < f->rx_n + f->rx_m; s++)
+        for (s = b->n; s < b->n + b->m; s++)
         {
             if (!g->present[s])
             {
@@ -2050,28 +2167,35 @@ static int handle_cfg(struct flow *f, const u8 *body)
         (void)flow_send_fbk(f, TBT_FEC_FBK_F_CFG_NACK, c.epoch);
         return -EPROTO;
     }
-    if (f->rx_codec)
     {
-        tbt_fec_grouped_free(f->rx_codec);
-        f->rx_codec = NULL;
-    }
-    f->rx_codec = client_sclc_new(&sh, TBT_FEC_S, c.seed);
-    if (!f->rx_codec)
-    {
-        logmsg(e, "tbt_client: cfg codec build failed n=%u m=%u groups=%u L=%u block=%u\n",
-               sh.n, sh.m, sh.groups, sh.L, sh.block);
-        (void)flow_send_fbk(f, TBT_FEC_FBK_F_CFG_NACK, c.epoch);
-        return -ENOMEM;
+        int i;
+
+        for (i = 0; i < TBT_RX_CODECS; i++)
+        {
+            if (f->rx_codec[i].used)
+                tbt_fec_grouped_free(f->rx_codec[i].codec);
+            memset(&f->rx_codec[i], 0, sizeof(f->rx_codec[i]));
+        }
     }
     logmsg(e, "tbt_client: flow %llu cfg rx n=%u m=%u groups=%u block=%u L=%u\n",
            (unsigned long long)f->sid, sh.n, sh.m, sh.groups, sh.block,
            sh.L);
     f->rx_shape = sh;
     f->rx_shape_set = true;
+    f->rx_seed = c.seed;
     f->rx_n = sh.n;
     f->rx_m = sh.m;
     f->rx_groups = sh.groups;
+    f->rx_shares = (u16)(sh.n + sh.m);
+    f->rx_shape_block = 0;
     f->cfg_epoch = c.epoch;
+    if (!flow_rx_codec(f, sh.n, sh.m))
+    {
+        logmsg(e, "tbt_client: cfg codec build failed n=%u m=%u groups=%u L=%u block=%u\n",
+               sh.n, sh.m, sh.groups, sh.L, sh.block);
+        (void)flow_send_fbk(f, TBT_FEC_FBK_F_CFG_NACK, c.epoch);
+        return -ENOMEM;
+    }
     variant = sh.groups > 1 ? TBT_FEC_SCLC_UP : TBT_FEC_SCLC_DOWN;
     extra = sh.groups > 1 ? TBT_FEC_SCLC_WAKE_EXTRA_UP
                           : tbt_fec_sclc_wake_extra_down(sh.n);

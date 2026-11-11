@@ -1,19 +1,19 @@
 /* test_client_rx.c - the near-side receive state machine under markers,
- * short blocks and an 8-slot window.
+ * short blocks, per-block n/m and an 8-slot window.
  *
  * The engine's receive functions are static, so this test includes the
  * translation unit directly and drives flow_rx_store()/flow_rx_check() with
- * synthetic 0.8 records. The shapes are the uplink 8x32 GF(16) block, but no
- * codec is needed: every data share of a block is present, so the fast path
- * marks the group decoded without a parity solve.
+ * synthetic 0.8 records. A full-data block needs no codec; a missing-share
+ * block uses the per-shape codec cache, which the test exercises directly.
  *
- * It pins the three fixes that a real .92 near side needed:
+ * It pins the fixes a real .92 near side needed:
  *   - NACK anchors on rx_next_block, never on a delivery frontier that marker
  *     blocks leave behind;
  *   - rx_next_deliver advances by real packets: marker 0, short sum(win_len);
- *   - ACK credit is TBT_RX_SLOTS * n, not the 8192-packet session ceiling.
- * A counter/guard checks that a stale slot below rx_next_block can never be
- * NACKed and that a late replay is counted instead of silently wedging.
+ *   - ACK credit is TBT_RX_SLOTS * the current rx_n;
+ *   - n/m are read from every block header, not from the session's first CFG.
+ * Counters check that a stale slot below rx_next_block can never be NACKed
+ * and that a late replay is counted instead of silently wedging.
  */
 #define _GNU_SOURCE
 
@@ -40,6 +40,18 @@ static int failures;
         }                                 \
     } while (0)
 
+static void release_codecs(void)
+{
+    int i;
+
+    for (i = 0; i < TBT_RX_CODECS; i++)
+    {
+        if (f.rx_codec[i].used)
+            tbt_fec_grouped_free(f.rx_codec[i].codec);
+        memset(&f.rx_codec[i], 0, sizeof(f.rx_codec[i]));
+    }
+}
+
 static void release_blocks(void)
 {
     int i;
@@ -62,15 +74,26 @@ static void clear_engine(void)
 {
     free(f.out);
     release_blocks();
+    release_codecs();
     memset(&f, 0, sizeof(f));
     memset(&e, 0, sizeof(e));
     f.e = &e;
     f.sid = 1;
     f.app_fd = -1;
     f.rx_shape_set = true;
+    f.rx_shape.variant = TBT_FEC_SCLC_UP;
+    f.rx_shape.n = 8;
+    f.rx_shape.m = 24;
+    f.rx_shape.groups = 8;
+    f.rx_shape.block = TBT_FEC_SCLC_BLOCK_UP;
+    f.rx_shape.L = TBT_FEC_SCLC_L_UP;
+    f.rx_shape.rate_ppm = 250;
+    f.rx_shape.rate_256 = 64;
+    f.rx_seed = 1;
+    f.rx_groups = 8;
+    f.rx_shares = 32;
     f.rx_n = 8;
     f.rx_m = 24;
-    f.rx_groups = 8;
     e.n_car = 0;
     e.tx_n = 8;
     e.crypto_on = false;
@@ -82,8 +105,8 @@ static void clear_pending(void)
     e.npending = 0;
 }
 
-static void send_data(u64 block, u64 seq0, u16 group, u16 share, u16 len,
-                      bool padded)
+static void send_data(u64 block, u64 seq0, u16 n, u16 m, u16 group,
+                      u16 share, u16 len, bool padded)
 {
     struct tbt_fec_hdr h;
 
@@ -91,10 +114,10 @@ static void send_data(u64 block, u64 seq0, u16 group, u16 share, u16 len,
     h.type = TBT_FEC_DATA;
     h.flags = padded ? TBT_FEC_FF_PADDED : 0;
     h.share_index = share;
-    h.n = 8;
-    h.m = 24;
+    h.n = (u8)n;
+    h.m = (u8)m;
     h.block_id = block;
-    h.seq = seq0 + (u64)group * 8u + share;
+    h.seq = seq0 + (u64)group * n + share;
     h.payload_len = padded ? TBT_FEC_S : len;
     h.win_len = padded ? len : 0;
     h.conv = TBT_FEC_CONV;
@@ -103,16 +126,16 @@ static void send_data(u64 block, u64 seq0, u16 group, u16 share, u16 len,
     flow_rx_store(&f, &h, payload);
 }
 
-static void send_parity(u64 block, u64 seq0, u16 group, u16 win_len,
-                        u16 epoch)
+static void send_parity(u64 block, u64 seq0, u16 n, u16 m, u16 group,
+                        u16 win_len, u16 epoch)
 {
     struct tbt_fec_hdr h;
 
     memset(&h, 0, sizeof(h));
     h.type = TBT_FEC_PARITY;
-    h.share_index = 8;
-    h.n = 8;
-    h.m = 24;
+    h.share_index = n;
+    h.n = (u8)n;
+    h.m = (u8)m;
     h.block_id = block;
     h.seq = seq0;
     h.win_len = win_len;
@@ -124,15 +147,15 @@ static void send_parity(u64 block, u64 seq0, u16 group, u16 win_len,
     flow_rx_store(&f, &h, payload);
 }
 
-static void send_marker(u64 block, u64 seq0, u16 group)
+static void send_marker(u64 block, u64 seq0, u16 n, u16 m, u16 group)
 {
     struct tbt_fec_hdr h;
 
     memset(&h, 0, sizeof(h));
     h.type = TBT_FEC_PARITY;
-    h.share_index = 8;
-    h.n = 8;
-    h.m = 24;
+    h.share_index = n;
+    h.n = (u8)n;
+    h.m = (u8)m;
     h.block_id = block;
     h.seq = seq0;
     h.conv = TBT_FEC_CONV;
@@ -141,35 +164,35 @@ static void send_marker(u64 block, u64 seq0, u16 group)
     flow_rx_store(&f, &h, payload);
 }
 
-static void full_block(u64 block, u64 seq0)
+static void full_block(u64 block, u64 seq0, u16 n, u16 m)
 {
     u16 g, s;
 
-    for (g = 0; g < 8; g++)
-        for (s = 0; s < 8; s++)
-            send_data(block, seq0, g, s, TBT_FEC_S, false);
+    for (g = 0; g < f.rx_groups; g++)
+        for (s = 0; s < n; s++)
+            send_data(block, seq0, n, m, g, s, TBT_FEC_S, false);
 }
 
 /* Two real shares per group: the last one is PADDED, and the parity states
- * win_len=2. The block therefore contributes 16 packets, not 64. */
-static void short_block(u64 block, u64 seq0)
+ * win_len=2. The block therefore contributes 2 * groups packets. */
+static void short_block(u64 block, u64 seq0, u16 n, u16 m)
 {
     u16 g;
 
-    for (g = 0; g < 8; g++)
+    for (g = 0; g < f.rx_groups; g++)
     {
-        send_data(block, seq0, g, 0, TBT_FEC_S, false);
-        send_data(block, seq0, g, 1, 784, true);
-        send_parity(block, seq0, g, 2, 784);
+        send_data(block, seq0, n, m, g, 0, TBT_FEC_S, false);
+        send_data(block, seq0, n, m, g, 1, 784, true);
+        send_parity(block, seq0, n, m, g, 2, 784);
     }
 }
 
-static void marker_block(u64 block, u64 seq0)
+static void marker_block(u64 block, u64 seq0, u16 n, u16 m)
 {
     u16 g;
 
-    for (g = 0; g < 8; g++)
-        send_marker(block, seq0, g);
+    for (g = 0; g < f.rx_groups; g++)
+        send_marker(block, seq0, n, m, g);
 }
 
 static int count_nacks(u64 *ids, int max)
@@ -206,11 +229,11 @@ static void test_marker_short_sequence(void)
     int i;
 
     clear_engine();
-    full_block(0, 0);
-    short_block(1, 64);
+    full_block(0, 0, 8, 24);
+    short_block(1, 64, 8, 24);
     for (i = 2; i <= 5; i++)
-        marker_block((u64)i, (u64)i * 64);
-    full_block(6, 6 * 64);
+        marker_block((u64)i, (u64)i * 64, 8, 24);
+    full_block(6, 6 * 64, 8, 24);
 
     CHECK(f.rx_next_block == 7, "sequence: next block is 7");
     CHECK(f.rx_next_deliver == 144, "sequence: frontier counts real packets");
@@ -221,10 +244,9 @@ static void test_marker_short_sequence(void)
     CHECK(last_ack_credit() == (int)(TBT_RX_SLOTS * 8u),
           "sequence: ACK credit is 8 slots * n");
     CHECK(f.rx_stale_nack == 0 && f.rx_late_share == 0 &&
-              f.rx_window_drop == 0,
+              f.rx_window_drop == 0 && f.rx_shape_bad == 0,
           "sequence: no stale request or late drop");
 
-    /* A delivered marker block must not be resurrected by a NACK pass. */
     clear_pending();
     flow_rx_nack(&f, now_ns() + TBT_NACK_FIRST_NS + 1000000u);
     CHECK(count_nacks(ids, 16) == 0, "sequence: no NACK for delivered blocks");
@@ -240,12 +262,11 @@ static void test_window_and_nack_base(void)
     int i;
 
     clear_engine();
-    send_data(0, 0, 0, 0, TBT_FEC_S, false);
+    send_data(0, 0, 8, 24, 0, 0, TBT_FEC_S, false);
     for (i = 1; i < TBT_RX_SLOTS; i++)
-        marker_block((u64)i, (u64)i * 64);
+        marker_block((u64)i, (u64)i * 64, 8, 24);
 
-    /* The ninth block is outside the 8-slot ring. */
-    send_data(8, 8 * 64, 0, 0, TBT_FEC_S, false);
+    send_data(8, 8 * 64, 8, 24, 0, 0, TBT_FEC_S, false);
     CHECK(f.rx_window_drop == 1, "window: block 8 refused");
     CHECK(f.rx_next_block == 0, "window: head still block 0");
 
@@ -257,8 +278,7 @@ static void test_window_and_nack_base(void)
         CHECK(ids[i] == 0, "nack: only the window head is named");
     CHECK(f.rx_stale_nack == 0, "nack: no stale request counter");
 
-    /* A stale head below the delivery cursor must not be NACKed. Block 0
-     * is still resident but the cursor is moved past it for this probe. */
+    /* A stale head below the delivery cursor must not be NACKed. */
     f.rx_next_block = 1;
     clear_pending();
     flow_rx_nack(&f, now_ns() + TBT_NACK_FIRST_NS + 2000000u);
@@ -268,34 +288,131 @@ static void test_window_and_nack_base(void)
     /* Complete block 0: share 0 is present, parity says win_len=1, and the
      * other seven groups are markers. */
     clear_pending();
-    send_parity(0, 0, 0, 1, 0);
+    send_parity(0, 0, 8, 24, 0, 1, 0);
     for (i = 1; i < 8; i++)
-        send_marker(0, 0, (u16)i);
+        send_marker(0, 0, 8, 24, (u16)i);
     CHECK(f.rx_next_block == 8, "window: blocks 0..7 drained");
     CHECK(f.rx_next_deliver == 1, "window: frontier is the one real share");
     CHECK(f.rx_deliver_bytes == TBT_FEC_S, "window: delivered one share");
     CHECK(last_ack_credit() == (int)(TBT_RX_SLOTS * 8u),
           "window: ACK credit follows the ring");
 
-    /* The refused block 8 now fits and advances the frontier by a full
-     * block; the eight slots never held more than eight blocks. */
-    full_block(8, 8 * 64);
+    full_block(8, 8 * 64, 8, 24);
     CHECK(f.rx_next_block == 9, "window: block 8 accepted after drain");
     CHECK(f.rx_next_deliver == 65, "window: full block adds 64 packets");
 
-    /* A replay older than the delivery window is counted, not reinterpreted. */
-    send_data(0, 0, 0, 0, TBT_FEC_S, false);
+    send_data(0, 0, 8, 24, 0, 0, TBT_FEC_S, false);
     CHECK(f.rx_late_share == 1, "late: old replay counted");
     CHECK(f.rx_next_block == 9, "late: cursor unchanged");
+}
+
+/* Consecutive blocks use different n/m; the cursor must follow real packets
+ * and the ACK credit must follow the newest rx_n. */
+static void test_multishape_sequence(void)
+{
+    clear_engine();
+    full_block(0, 0, 8, 24);      /* 64 packets */
+    short_block(1, 64, 9, 23);    /* 16 packets */
+    marker_block(2, 128, 10, 22); /* 0 packets */
+    full_block(3, 192, 12, 20);   /* 96 packets */
+    marker_block(4, 384, 9, 23);  /* 0 packets, current n becomes 9 */
+
+    CHECK(f.rx_next_block == 5, "shape: five blocks delivered");
+    CHECK(f.rx_next_deliver == 176, "shape: frontier sums real packets");
+    CHECK(f.rx_deliver_bytes == 64u * TBT_FEC_S +
+                                    8u * (TBT_FEC_S + 784u) +
+                                    96u * TBT_FEC_S,
+          "shape: delivered bytes");
+    CHECK(f.rx_n == 9 && f.rx_m == 23,
+          "shape: current split follows the newest block");
+    CHECK(last_ack_credit() == (int)(TBT_RX_SLOTS * 9u),
+          "shape: credit follows the current rx_n");
+    CHECK(f.rx_shape_bad == 0, "shape: all per-block splits accepted");
+    CHECK(flow_rx_codec(&f, 9, 23) != NULL, "shape: 9/23 codec builds");
+    CHECK(flow_rx_codec(&f, 12, 20) != NULL, "shape: 12/20 codec builds");
+}
+
+/* The downlink split may move without a new CFG; drive the user's observed
+ * 132/124 and 146/110 shapes through the same receive path. */
+static void test_downlink_shapes(void)
+{
+    clear_engine();
+    f.rx_shape.variant = TBT_FEC_SCLC_DOWN;
+    f.rx_shape.n = 128;
+    f.rx_shape.m = 128;
+    f.rx_shape.groups = 1;
+    f.rx_shape.block = 256;
+    f.rx_shape.L = 8;
+    f.rx_groups = 1;
+    f.rx_shares = 256;
+    f.rx_n = 128;
+    f.rx_m = 128;
+
+    send_marker(0, 0, 132, 124, 0);
+    CHECK(f.rx_next_block == 1 && f.rx_next_deliver == 0,
+          "down: 132/124 marker accepted");
+    CHECK(f.rx_n == 132 && f.rx_m == 124,
+          "down: current split follows the marker");
+    CHECK(last_ack_credit() == (int)(TBT_RX_SLOTS * 132u),
+          "down: credit is 8 * 132");
+
+    full_block(1, 146, 146, 110);
+    CHECK(f.rx_next_block == 2 && f.rx_next_deliver == 146,
+          "down: 146/110 full block delivered");
+    CHECK(f.rx_n == 146 && f.rx_m == 110,
+          "down: current split follows the full block");
+    CHECK(last_ack_credit() == (int)(TBT_RX_SLOTS * 146u),
+          "down: credit is 8 * 146");
+    CHECK(flow_rx_codec(&f, 132, 124) != NULL,
+          "down: 132/124 codec builds");
+    CHECK(flow_rx_codec(&f, 146, 110) != NULL,
+          "down: 146/110 codec builds");
+    CHECK(!flow_commit_shape(&f, 200, 56),
+          "down: a split above 192 is refused");
+}
+
+/* The FBK target is a commitment: the reported m_current/m_target and
+ * n_current are the split this receiver just adopted, not a suggestion that
+ * its RX ignores. */
+static void test_fbk_commit(void)
+{
+    int i;
+    int found = 0;
+
+    clear_engine();
+    f.ctl_ready = false;
+    CHECK(flow_commit_shape(&f, 9, 23), "fbk: commit 9/23");
+    clear_pending();
+    CHECK(flow_send_fbk(&f, 0, 1) == 0, "fbk: send");
+    for (i = 0; i < e.npending; i++)
+    {
+        const u8 *rec = e.pending[i].rec;
+
+        if (rec[0] != TBT_FEC_FBK)
+            continue;
+        found++;
+        CHECK(rec[TBT_FEC_HDR_LEN + TBT_FEC_FBK_M_CURRENT] == 23,
+              "fbk: m_current is the committed m");
+        CHECK(rec[TBT_FEC_HDR_LEN + TBT_FEC_FBK_M_TARGET] == 23,
+              "fbk: m_target is the committed m");
+        CHECK(rec[TBT_FEC_HDR_LEN + TBT_FEC_FBK_N_CURRENT] == 9,
+              "fbk: n_current is the committed n");
+    }
+    CHECK(found == 1, "fbk: one report queued");
+    CHECK(f.rx_n == 9 && f.rx_m == 23, "fbk: RX expectation moves with it");
 }
 
 int main(void)
 {
     test_marker_short_sequence();
     test_window_and_nack_base();
+    test_multishape_sequence();
+    test_downlink_shapes();
+    test_fbk_commit();
 
     printf("test_client_rx: %d checks, %d failures\n", checks, failures);
     free(f.out);
     release_blocks();
+    release_codecs();
     return failures ? 1 : 0;
 }
