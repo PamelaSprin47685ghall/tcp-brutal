@@ -177,6 +177,7 @@ struct flow
     bool fin_recv;
     bool app_eof;
     bool tx_finished;
+    u64 tx_activity_ns; /* last byte fed into the current FEC block */
     bool dead;
     bool target_connecting;
     u64 created_ns;
@@ -845,6 +846,7 @@ static void flow_out_flush(struct flow *f);
 static void flow_fin_maybe(struct flow *f);
 static void flow_app_close(struct flow *f);
 static void flow_tx_finish(struct flow *f);
+static void flow_tx_seal_block(struct flow *f, bool force);
 static int flow_send_fin(struct flow *f);
 static void flow_tick(struct flow *f, u64 now);
 static int flow_target_connect(struct flow *f, u16 port);
@@ -1154,11 +1156,17 @@ static void flow_tx_advance(struct flow *f)
         f->tx_group = 0;
         f->tx_block++;
         f->tx_blk_seq0 += (u64)f->groups * f->n;
+        /* The next block starts from zero: an unused share left over from
+         * this one would corrupt that block's parity. */
+        memset(f->tx_plane, 0,
+               (size_t)f->groups * (f->n + f->m) * TBT_FEC_S);
     }
 }
 
 static int flow_tx_feed(struct flow *f, const u8 *data, size_t len)
 {
+    if (len)
+        f->tx_activity_ns = now_ns();
     while (len)
     {
         size_t room = TBT_FEC_S - f->tx_cur_len;
@@ -2382,48 +2390,67 @@ static int flow_target_connect(struct flow *f, u16 port)
 
 static void flow_tx_finish(struct flow *f)
 {
-    u16 g;
-
     if (f->tx_finished)
         return;
-    f->tx_finished = true;
     logmsg(f->e, "tbt_client: flow %llu finish cur=%zu group=%u share=%u last=%llu\n",
            (unsigned long long)f->sid, f->tx_cur_len, f->tx_group,
            f->tx_share, (unsigned long long)f->tx_last_len);
+    flow_tx_seal_block(f, true);
+    f->tx_finished = true;
+}
 
+/* Seal the current block before the application fills it. A request that
+ * waits for a reply (a TLS ClientHello, a VLESS header) never reaches a
+ * whole block, so without this the peer sees fewer shares than it needs to
+ * decode and both directions stall. The short share carries PADDED and its
+ * real length; the parity names the valid share count; the remaining groups
+ * of a multi-group block get empty markers. The block then advances so a
+ * later write uses a fresh id. */
+static void flow_tx_seal_block(struct flow *f, bool force)
+{
+    u16 g;
+    bool pending = f->tx_cur_len || f->tx_share;
+
+    if (f->tx_finished)
+        return;
+    if (!pending && !force)
+        return;
     if (f->tx_cur_len)
     {
         u8 *plane = f->tx_plane +
                     ((size_t)f->tx_group * (f->n + f->m) + f->tx_share) *
                         TBT_FEC_S;
+        u16 len = (u16)f->tx_cur_len;
 
-        memcpy(plane, f->tx_cur, f->tx_cur_len);
+        memcpy(plane, f->tx_cur, len);
         (void)flow_send_data(f, f->tx_group, f->tx_share,
-                             (u16)f->tx_cur_len, true);
+                             len, true);
         f->tx_cur_len = 0;
         f->tx_share++;
-        if (f->tx_share == f->n)
-        {
-            (void)flow_send_parity(f, f->tx_group, f->n, 0);
-            f->tx_share = 0;
-            f->tx_group++;
-        }
-        else
-        {
-            (void)flow_send_parity(f, f->tx_group, f->tx_share,
-                                   f->tx_last_len);
-            f->tx_share = 0;
-            f->tx_group++;
-        }
+    }
+    if (f->tx_share == f->n)
+    {
+        (void)flow_send_parity(f, f->tx_group, f->n, 0);
+        f->tx_share = 0;
+        f->tx_group++;
     }
     else if (f->tx_share)
     {
-        (void)flow_send_parity(f, f->tx_group, f->tx_share, 0);
+        (void)flow_send_parity(f, f->tx_group, f->tx_share,
+                               f->tx_last_len);
         f->tx_share = 0;
         f->tx_group++;
     }
     for (g = f->tx_group; g < f->groups; g++)
         (void)flow_send_marker(f, g);
+    f->tx_group = 0;
+    f->tx_block++;
+    f->tx_blk_seq0 += (u64)f->groups * f->n;
+    f->tx_last_len = 0;
+    /* The parity covers the whole plane, so an unused share from the old
+     * block would make it agree with bytes the peer never received. */
+    memset(f->tx_plane, 0,
+           (size_t)f->groups * (f->n + f->m) * TBT_FEC_S);
 }
 
 static int flow_tx_ready(struct flow *f, u64 now)
@@ -2568,6 +2595,10 @@ static void flow_tick(struct flow *f, u64 now)
                              EPOLLIN | EPOLLOUT | EPOLLRDHUP, &f->ep);
         }
     }
+    if (!f->tx_finished && (f->tx_cur_len || f->tx_share) &&
+        f->tx_activity_ns &&
+        now - f->tx_activity_ns >= 25ull * 1000 * 1000)
+        flow_tx_seal_block(f, false);
     if (f->rx_shape_set)
     {
         flow_rx_nack(f, now);
