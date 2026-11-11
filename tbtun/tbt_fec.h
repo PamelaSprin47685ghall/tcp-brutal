@@ -640,6 +640,8 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
  * A shape that cannot hold K=1 gets no ring; the credit cap follows the
  * effective K. */
 #define TBT_FEC_REPLAY_K_MAX 66
+/* A pending FEC TX ring older than this is re-armed by the close tick. */
+#define TBT_FEC_PUMP_REARM_MS 20u
 #define TBT_FEC_REPLAY_BUDGET (20u * 1024 * 1024)
 /* The sliding window is 64 super-blocks of source data. A super-block
  * holds groups*n DATA packets, not n+m shares: only DATA shares carry

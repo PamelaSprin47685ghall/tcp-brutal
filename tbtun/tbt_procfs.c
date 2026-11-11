@@ -1196,7 +1196,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_credit_midblock_wait),
                            tbt_stat_read(&s->fec_tx_block_complete),
                            tbt_stat_read(&s->fec_tx_block_partial),
-                           tbt_stat_read(&s->fec_replay_evicted_before_nack));
+                           tbt_stat_read(&s->fec_replay_evicted_before_nack),
+                           tbt_stat_read(&s->fec_tx_pump_rearm));
                 /* Every way a share or a block can be lost. Without these a
                  * stalled FEC stream reports zero errors: the counters that
                  * name the loss were simply not exported. */

@@ -876,6 +876,11 @@ struct tbt_fec_tx
     u8 *rec; /* TBT_FEC_REC_MAX: one complete record */
     u16 fill;
     u64 seq; /* next global packet seq */
+    /* Pump self-heal: the last time the FEC TX pump ran and the packet seq it
+     * saw. If the ring has data, credit is open, and this pair has not moved
+     * for TBT_FEC_PUMP_REARM_MS, the close path re-arms the work. */
+    u64 last_pump_ns;
+    u64 last_pump_seq;
     /* Flow control, from the peer's ACK: the delivered packet frontier and the
      * credit it grants beyond it. The receiver buffers `slots` super-blocks, so
      * a sender that stays inside the credit cannot outrun that buffer. */
@@ -1828,6 +1833,7 @@ struct tbt_session
     atomic64_t fec_tx_block_complete;
     atomic64_t fec_tx_block_partial;
     atomic64_t fec_replay_evicted_before_nack;
+    atomic64_t fec_tx_pump_rearm;
     /* FEC sender scheduling. fec_flush_pass counts accepted DATA records.
      * fec_flush_skip and fec_hol_wait are kept for the old per-carrier queue
      * accounting; the session FIFO never queues a record behind one socket,
@@ -2473,6 +2479,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
                          const u8 *body, u16 len);
 void tbt_stream_put(struct tbt_stream *st);
 void tbt_stream_detach_from_session(struct tbt_stream *st);
+void tbt_tx_fec_rearm_if_pending(struct tbt_session *sess, struct tbt_stream *st);
 void tbt_stream_maybe_detach(struct tbt_stream *st);
 void tbt_stream_kill(struct tbt_stream *st, u8 reason);
 void tbt_stream_kill_by_sid(struct tbt_session *sess, u64 sid, u8 reason);

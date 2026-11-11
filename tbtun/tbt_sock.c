@@ -382,6 +382,7 @@ static void tbt_drain_body(struct tbt_stream *st)
                                     READ_ONCE(st->rx_fin_done) ? 1 : 0,
                                     (unsigned long long)READ_ONCE(st->tx_ack),
                                     (unsigned long long)READ_ONCE(st->tx_seq));
+                tbt_tx_fec_rearm_if_pending(st->sess, st);
                 break;
             }
             tbt_stream_kill(st, TBT_ST_DEAD);
@@ -451,6 +452,7 @@ static void tbt_drain_body(struct tbt_stream *st)
     if (eof)
     {
         tbt_sock_shutdown_wr(st);
+        tbt_tx_fec_rearm_if_pending(st->sess, st);
         /* rx_fin_done is half of the detach gate; the FBK tick owns the
          * other half (tx_fin_written) and the close bound. Wake it even when
          * the session had no stream while it stopped. */
@@ -524,6 +526,7 @@ static void tbt_ctrl_body(struct tbt_stream *st)
                                 READ_ONCE(st->rx_fin_done) ? 1 : 0,
                                 (unsigned long long)READ_ONCE(st->tx_ack),
                                 (unsigned long long)READ_ONCE(st->tx_seq));
+            tbt_tx_fec_rearm_if_pending(st->sess, st);
             return;
         }
         tbt_tx_rst_retry(st->sess, st);

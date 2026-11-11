@@ -2038,8 +2038,7 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
                                     (unsigned long long)st->sid, ack,
                                     READ_ONCE(st->tx_seq),
                                     (now - start) / NSEC_PER_USEC);
-            if (sess->fec)
-                tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+            tbt_tx_fec_rearm_if_pending(sess, st);
             start = now;
             would_kill = false;
         }
@@ -2106,6 +2105,47 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
  * but progressing drain is never cut at the budget; only no progress is. Once
  * all data is acked the only remaining wait is the FIN copy itself, and that
  * is bounded from the request. */
+void tbt_tx_fec_rearm_if_pending(struct tbt_session *sess, struct tbt_stream *st)
+{
+    struct tbt_fec_tx *tx;
+    u64 ring, now, peer, seq;
+    u32 credit;
+
+    if (!sess || !sess->fec)
+        return;
+    rcu_read_lock();
+    tx = rcu_dereference(sess->fec_tx);
+    if (!tx)
+    {
+        rcu_read_unlock();
+        return;
+    }
+    ring = (u64)(READ_ONCE(tx->head) - READ_ONCE(tx->tail)) +
+           READ_ONCE(tx->fill);
+    credit = READ_ONCE(tx->credit);
+    peer = READ_ONCE(tx->peer_pkts);
+    seq = READ_ONCE(tx->seq);
+    now = ktime_get_ns();
+    if (ring && !tbt_fec_credit_waiting(peer, seq, credit) &&
+        READ_ONCE(tx->last_pump_seq) == seq &&
+        (!READ_ONCE(tx->last_pump_ns) ||
+         (now > READ_ONCE(tx->last_pump_ns) &&
+          now - READ_ONCE(tx->last_pump_ns) >
+              (u64)TBT_FEC_PUMP_REARM_MS * NSEC_PER_MSEC)))
+    {
+        atomic64_inc(&sess->fec_tx_pump_rearm);
+        if (debug >= 2)
+            pr_info_ratelimited("tbtun: FEC pump rearm sid=%llu ring=%llu credit=%u lead=%llu seq=%llu armed=%d\n",
+                                (unsigned long long)st->sid,
+                                (unsigned long long)ring, credit,
+                                (unsigned long long)(seq > peer ? seq - peer : 0),
+                                (unsigned long long)seq,
+                                test_bit(TBT_SW_FEC_TX, &sess->sched));
+        tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+    }
+    rcu_read_unlock();
+}
+
 static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
 {
     u64 since = READ_ONCE(st->close_since_ns);
@@ -2116,6 +2156,7 @@ static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
 
     budget = tbt_tx_wait_budget_ns(sess, st);
     bound = tbt_tx_close_bound(peer_fin && !fin_written, budget);
+    tbt_tx_fec_rearm_if_pending(sess, st);
 
     /* The peer's FIN reached the application but the target never closed its
      * half, so our FIN was never requested or written. Without this bound the
