@@ -276,6 +276,7 @@ void tbt_fec_adapt_sclc_est_sample(const struct tbt_fec_adapt_sclc_est *e,
 /* All continuous quantities are Q16.16 shares (or fractions for eps). */
 #define TBT_FEC_ADAPT_SCLC_ONE 65536u
 #define TBT_FEC_ADAPT_SCLC_COLD_BLOCKS 16u
+#define TBT_FEC_ADAPT_SCLC_BACKUP_MIN_FAILS 8u
 #define TBT_FEC_ADAPT_SCLC_BACKUP_RUN 8u
 #define TBT_FEC_ADAPT_SCLC_BACKUP_WIN 32u  /* minimum failure window */
 #define TBT_FEC_ADAPT_SCLC_BACKUP_MAX 128u /* history depth */

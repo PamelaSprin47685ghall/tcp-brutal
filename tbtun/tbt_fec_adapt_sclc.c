@@ -1051,6 +1051,7 @@ void tbt_fec_adapt_sclc_block_sample(struct tbt_fec_adapt_sclc_ctl *c,
         u32 fails = tbt_fec_adapt_sclc_hist_count(c->fail_hist, win);
         bool trip = c->fail_run >= TBT_FEC_ADAPT_SCLC_BACKUP_RUN ||
                     (c->fail_hist_n >= win &&
+                     fails >= TBT_FEC_ADAPT_SCLC_BACKUP_MIN_FAILS &&
                      (fails << 16) > (u32)(2u * win) * c->eps_q16);
 
         if (trip)
@@ -1278,6 +1279,14 @@ void tbt_fec_adapt_sclc_tick(struct tbt_fec_adapt_sclc_ctl *c, u64 now_ns,
         c->n_cur = (u16)best_n;
         c->m_cur = (u16)best_m;
         m_req = (best_rhs + 32768u) >> 16;
+        /* One-share deadband and one-share slew: an integer m does not
+         * chatter when q moves by a fraction of a share. */
+        if (m_req > (u32)c->m_cur + 1u)
+            m_req = (u32)c->m_cur + 1u;
+        else if (m_req + 1u < (u32)c->m_cur)
+            m_req = (u32)c->m_cur - 1u;
+        else
+            m_req = c->m_cur;
         c->sat_max = best_m >= c->m_max ? 1 : 0;
         c->sat_min = best_m <= c->m_min ? 1 : 0;
     }

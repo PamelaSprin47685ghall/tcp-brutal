@@ -1105,6 +1105,33 @@ static void case_delta_online(void)
     ok(held, "delta: saturation stops the surplus integrator");
 }
 
+static void case_low_loss_stability(void)
+{
+    struct tbt_fec_adapt_sclc_ctl c;
+    struct tbt_fec_adapt_sclc_out out;
+    u64 now = SEC;
+    u32 i, lo = 0xffffu, hi = 0;
+
+    init_down(&c);
+    run(&c, &now, 64, 0, 17, true, 256, &out);
+    for (i = 0; i < 200; i++)
+    {
+        bool ok = (i % 20) != 0;
+        u16 e = ok ? 0 : 2;
+
+        feed(&c, e, 17, ok, 256);
+        tick(&c, &now, &out);
+        if (i >= 100)
+        {
+            if (out.m_target < lo)
+                lo = out.m_target;
+            if (out.m_target > hi)
+                hi = out.m_target;
+        }
+    }
+    ok(hi - lo <= 4, "5% loss: m stays inside a four-share band");
+}
+
 static void case_backup(void)
 {
     struct tbt_fec_adapt_sclc_ctl c;
@@ -1128,19 +1155,21 @@ static void case_backup(void)
     run(&c, &now, 20, 2, 3, true, 32, &out);
     eq_u32(out.backup, 0, "backup: decays after 20 good blocks");
 
-    /* Downlink: the first-failure window is max(32, ceil(1/(2*eps))) = 128
-     * blocks at the 1/256 floor. One failure in 128 is exactly the 2*eps
-     * threshold and must not trip; two must. */
+    /* Downlink: the first-failure window is 128 blocks at the 1/256 floor.
+     * Seven failures in 128 stay below the absolute floor; eight trip. */
     init_down(&c);
     run(&c, &now, 16, 2, 9, true, 256, &out);
-    run(&c, &now, 127, 2, 9, true, 256, &out);
-    feed(&c, 2, 9, false, 256);
-    tick(&c, &now, &out);
+    run(&c, &now, 120, 2, 9, true, 256, &out);
+    for (i = 0; i < 7; i++)
+    {
+        feed(&c, 2, 9, false, 256);
+        tick(&c, &now, &out);
+    }
     eq_u32(out.backup, 0,
-           "backup: one downlink failure in 128 blocks is not enough");
+           "backup: seven downlink failures in 128 are not enough");
     feed(&c, 2, 9, false, 256);
     tick(&c, &now, &out);
-    ok(out.backup > 0, "backup: two downlink failures in 128 blocks");
+    ok(out.backup > 0, "backup: eight downlink failures in 128");
 }
 
 static void case_freeze(void)
@@ -1998,6 +2027,7 @@ int main(void)
     case_low_sample();
     case_delta_online();
     case_backup();
+    case_low_loss_stability();
     case_freeze();
     case_frozen_sample();
     case_anti_windup();
