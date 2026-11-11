@@ -3,6 +3,24 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [Unreleased]
+
+### Fixed
+
+- Host carrier sockets use a 15 s / 5 s x 3 TCP keepalive and a 30 s
+  `TCP_USER_TIMEOUT`. The 2 h kernel default left a near socket half-open
+  ESTABLISHED after the far side reaped its carrier and the FIN was lost on a
+  lossy WAN (HKG0 V6: 256 carriers decayed to 98).
+- The client NACK hold adds four RTT deviations (`tcpi_rttvar`) to the sampled
+  RTT, capped at 4 s. On the HKG0 V6 path (149 ms mean, 212 ms deviation) the
+  mean alone re-requested in-flight shares four to eight times. ACKs still
+  report the mean.
+- `tbt_cc.c` guards `TBT_CC_HAVE_CONG_CTRL_ACK` with `#ifdef`, removing the
+  `-Wundef` warning on 6.8 kernels.
+- `deploy/090`: `far.yaml.in` sets `ipv6: true` (mihomo defaults it off, which
+  broke IPv6-only egress), and the far unit `Wants=` mihomo instead of
+  `Requires=`, so restarting the listener leaves the tunnel running.
+
 ## [0.9.0] - 2026-11-11
 
 ### Added

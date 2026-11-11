@@ -282,7 +282,7 @@ static void tbt_cc_ack(struct sock *sk, const struct rate_sample *rs, u32 acked)
     tbt_cc_cwnd(sk, tp, st, acked);
 }
 
-#if TBT_CC_HAVE_CONG_CTRL_ACK
+#ifdef TBT_CC_HAVE_CONG_CTRL_ACK
 static void tbt_cc_cong_control(struct sock *sk, u32 ack, int flag,
                                 const struct rate_sample *rs)
 {
@@ -428,7 +428,7 @@ bool tbt_cc_snapshot(struct sock *sk, struct tbt_cc_info *out)
 #define TBT_CC_NAME "tbtcc"
 
 static struct tcp_congestion_ops tbt_cc_ops = {
-#if TBT_CC_HAVE_CONG_CTRL_ACK
+#ifdef TBT_CC_HAVE_CONG_CTRL_ACK
     .cong_control = tbt_cc_cong_control,
 #else
     .cong_avoid = tbt_cc_cong_avoid,

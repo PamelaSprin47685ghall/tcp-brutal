@@ -568,6 +568,135 @@ static void test_nack_hold_follows_rtt(void)
     CHECK(flow_send_ack(&f) == 0, "rtt: ACK sent");
     CHECK(last_ack_rtt() == 200000,
           "rtt: ACK carries the measured RTT, not 1000 us");
+
+    /* HKG0 V6: 149 ms mean and 212 ms deviation. The mean alone released a
+     * NACK while the replay was still crossing the pool, so the same share
+     * was re-requested four to eight times. Four deviations must widen the
+     * hold, and the ACK still carries the mean. */
+    clear_engine();
+    e.rtt_us = 150000;
+    e.rttvar_us = 200000;
+    send_data(0, 0, 8, 24, 0, 0, TBT_FEC_S, false);
+    t0 = now_ns();
+    f.rx[0].first_ns = t0;
+    f.rx[0].last_nack_ns = 0;
+    f.rx[0].nack_tries = 0;
+
+    clear_pending();
+    flow_rx_nack(&f, t0 + TBT_NACK_FIRST_NS + 150000000ull + 10000000ull);
+    CHECK(count_nacks(ids, 16) == 0,
+          "rttvar: 30 ms + the mean is still too early at 200 ms deviation");
+
+    clear_pending();
+    flow_rx_nack(&f, t0 + TBT_NACK_FIRST_NS + 150000000ull +
+                         4ull * 200000000ull + 1000000ull);
+    CHECK(count_nacks(ids, 16) >= 1,
+          "rttvar: 30 ms + RTT + 4 * rttvar releases");
+
+    clear_pending();
+    CHECK(flow_send_ack(&f) == 0, "rttvar: ACK sent");
+    CHECK(last_ack_rtt() == 150000,
+          "rttvar: ACK still reports the mean, not the widened hold");
+
+    /* A 1 s / 1 s sample would hold 5 s without a cap; one loss spike must
+     * not freeze repair, so the hold stops at TBT_NACK_RTT_HOLD_MAX_NS. */
+    clear_engine();
+    e.rtt_us = 1000000;
+    e.rttvar_us = 1000000;
+    send_data(0, 0, 8, 24, 0, 0, TBT_FEC_S, false);
+    t0 = now_ns();
+    f.rx[0].first_ns = t0;
+    f.rx[0].last_nack_ns = 0;
+    f.rx[0].nack_tries = 0;
+
+    clear_pending();
+    flow_rx_nack(&f, t0 + TBT_NACK_FIRST_NS +
+                         TBT_NACK_RTT_HOLD_MAX_NS - 1000000ull);
+    CHECK(count_nacks(ids, 16) == 0,
+          "rttvar: the hold is capped at 4 s");
+
+    clear_pending();
+    flow_rx_nack(&f, t0 + TBT_NACK_FIRST_NS +
+                         TBT_NACK_RTT_HOLD_MAX_NS + 1000000ull);
+    CHECK(count_nacks(ids, 16) >= 1,
+          "rttvar: the cap releases on time");
+}
+
+/* The far side reaps a stall-dead carrier, and on a lossy WAN its FIN can be
+ * lost. Only TCP keepalive then closes the near socket; the 2 h default left
+ * HKG0 carriers half-open ESTABLISHED (256 -> 98). Pin the options the
+ * kernel actually reports on a connected carrier socket. */
+static void test_carrier_keepalive_sockopts(void)
+{
+    struct sockaddr_in sin;
+    socklen_t slen = sizeof(sin);
+    int lfd, cfd, afd;
+    int v;
+    socklen_t vlen;
+
+    lfd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    CHECK(lfd >= 0, "keepalive: listen socket");
+    if (lfd < 0)
+        return;
+    memset(&sin, 0, sizeof(sin));
+    sin.sin_family = AF_INET;
+    sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    CHECK(bind(lfd, (struct sockaddr *)&sin, sizeof(sin)) == 0,
+          "keepalive: bind loopback");
+    CHECK(listen(lfd, 1) == 0, "keepalive: listen");
+    CHECK(getsockname(lfd, (struct sockaddr *)&sin, &slen) == 0,
+          "keepalive: learn the bound port");
+    cfd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    CHECK(cfd >= 0, "keepalive: carrier socket");
+    if (cfd < 0)
+    {
+        close(lfd);
+        return;
+    }
+    CHECK(connect(cfd, (struct sockaddr *)&sin, sizeof(sin)) == 0,
+          "keepalive: loopback connect");
+    afd = accept(lfd, NULL, NULL);
+    CHECK(afd >= 0, "keepalive: accept");
+    close(lfd);
+
+    set_carrier_sockopts(cfd);
+
+    v = 0;
+    vlen = sizeof(v);
+    CHECK(getsockopt(cfd, SOL_SOCKET, SO_KEEPALIVE, &v, &vlen) == 0 &&
+              v != 0,
+          "keepalive: SO_KEEPALIVE is on");
+#ifdef TCP_KEEPIDLE
+    v = 0;
+    vlen = sizeof(v);
+    CHECK(getsockopt(cfd, IPPROTO_TCP, TCP_KEEPIDLE, &v, &vlen) == 0 &&
+              v == TBT_CARRIER_KEEPIDLE_S,
+          "keepalive: TCP_KEEPIDLE is 15 s");
+#endif
+#ifdef TCP_KEEPINTVL
+    v = 0;
+    vlen = sizeof(v);
+    CHECK(getsockopt(cfd, IPPROTO_TCP, TCP_KEEPINTVL, &v, &vlen) == 0 &&
+              v == TBT_CARRIER_KEEPINTVL_S,
+          "keepalive: TCP_KEEPINTVL is 5 s");
+#endif
+#ifdef TCP_KEEPCNT
+    v = 0;
+    vlen = sizeof(v);
+    CHECK(getsockopt(cfd, IPPROTO_TCP, TCP_KEEPCNT, &v, &vlen) == 0 &&
+              v == TBT_CARRIER_KEEPCNT,
+          "keepalive: TCP_KEEPCNT is 3");
+#endif
+#ifdef TCP_USER_TIMEOUT
+    v = 0;
+    vlen = sizeof(v);
+    CHECK(getsockopt(cfd, IPPROTO_TCP, TCP_USER_TIMEOUT, &v, &vlen) == 0 &&
+              v == TBT_CARRIER_USER_TIMEOUT_MS,
+          "keepalive: TCP_USER_TIMEOUT is 30 s");
+#endif
+    if (afd >= 0)
+        close(afd);
+    close(cfd);
 }
 
 /* Consecutive blocks use different n/m; the cursor must follow real packets
@@ -2408,6 +2537,7 @@ int main(void)
     test_credit_inflight();
     test_window_and_nack_base();
     test_nack_hold_follows_rtt();
+    test_carrier_keepalive_sockopts();
     test_multishape_sequence();
     test_16m_boundary();
     test_downlink_shapes();

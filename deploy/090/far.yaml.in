@@ -14,6 +14,8 @@
 mixed-port: 0
 mode: rule
 log-level: info
+# Must stay true: the default false breaks IPv6-only egress on the far side.
+ipv6: true
 
 listeners:
   - name: vless-in

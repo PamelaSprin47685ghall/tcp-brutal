@@ -69,6 +69,9 @@
 #define TBT_TX_IDLE_SEAL_NS (25ull * 1000 * 1000)
 #define TBT_NACK_FIRST_NS (30ull * 1000 * 1000)
 #define TBT_NACK_RETRY_NS (20ull * 1000 * 1000)
+/* Ceiling on the RTT + 4 * rttvar part of a NACK hold. A single loss spike
+ * must not freeze repair for the rest of the connection. */
+#define TBT_NACK_RTT_HOLD_MAX_NS (4000ull * 1000 * 1000)
 #define TBT_FBK_NS (100ull * 1000 * 1000)
 #define TBT_ACK_NS (10ull * 1000 * 1000)
 #define TBT_FLOW_IDLE_NS (30ull * 1000 * 1000 * 1000)
@@ -337,9 +340,11 @@ struct engine
     u64 rx_unknown_sid;
 
     /* The carrier RTT as the kernel sees it. The ACK carries it to the peer
-     * and the NACK hold uses it: a request for a share that is still in
-     * flight only buys a duplicate. */
+     * and the NACK hold uses it, together with its deviation: a request for
+     * a share that is still in flight only buys a duplicate, and a lossy
+     * path's mean alone understates how long a replay can take. */
     u32 rtt_us;
+    u32 rttvar_us;
     u64 rtt_sample_ns;
 
     struct pending_ctl pending[TBT_CTL_PENDING];
@@ -442,6 +447,19 @@ static int addr_to_ss(const struct tbt_addr *a, u16 port_be,
     return -EAFNOSUPPORT;
 }
 
+/* Keepalive cadence for a carrier. The module uses 30 s / 10 s / 3; the
+ * client is stricter because it has no poll of its own to reap a dead
+ * carrier. The far side reaps a stall-dead carrier, and when its FIN is lost
+ * on a lossy WAN nothing else closes the near socket: it stays half-open
+ * ESTABLISHED for the 2 h default, which is how one HKG0 session decayed
+ * from 256 carriers to 98. 15 s idle plus 5 s x 3 probes closes one in
+ * ~30 s. TCP_USER_TIMEOUT bounds a stalled write the same way; without it
+ * the kernel retransmits for 15+ minutes before the write fails. */
+#define TBT_CARRIER_KEEPIDLE_S 15
+#define TBT_CARRIER_KEEPINTVL_S 5
+#define TBT_CARRIER_KEEPCNT 3
+#define TBT_CARRIER_USER_TIMEOUT_MS 30000
+
 static void set_carrier_sockopts(int fd)
 {
     int one = 1;
@@ -455,6 +473,34 @@ static void set_carrier_sockopts(int fd)
     setsockopt(fd, IPPROTO_TCP, TCP_NOTSENT_LOWAT, &lowat, sizeof(lowat));
 #endif
     setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof(one));
+#ifdef TCP_KEEPIDLE
+    {
+        int idle = TBT_CARRIER_KEEPIDLE_S;
+
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+    }
+#endif
+#ifdef TCP_KEEPINTVL
+    {
+        int intvl = TBT_CARRIER_KEEPINTVL_S;
+
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
+    }
+#endif
+#ifdef TCP_KEEPCNT
+    {
+        int cnt = TBT_CARRIER_KEEPCNT;
+
+        setsockopt(fd, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
+    }
+#endif
+#ifdef TCP_USER_TIMEOUT
+    {
+        unsigned int uto = TBT_CARRIER_USER_TIMEOUT_MS;
+
+        setsockopt(fd, IPPROTO_TCP, TCP_USER_TIMEOUT, &uto, sizeof(uto));
+    }
+#endif
 }
 
 static int ep_add(struct engine *e, int fd, uint32_t events,
@@ -2188,12 +2234,27 @@ static void flow_send_nack_group(struct flow *f, struct rx_block *b,
     (void)send_ctl_record(e, f, TBT_FEC_NACK, f->sid, 0, b->id, body, sizeof(body));
 }
 
+/* One hold shared by the first NACK and every retry: the worst carrier round
+ * trip plus four deviations, the same sizing RFC 6298 gives an RTO. On the
+ * HKG0 V6 path (149 ms mean, 212 ms deviation) the mean alone released the
+ * NACK while the replay was still crossing the pool, so the same share was
+ * requested four to eight times. The cap stops a transient spike from
+ * freezing repair. */
+static u64 nack_rtt_hold_ns(const struct engine *e)
+{
+    u64 hold_ns = (u64)e->rtt_us * 1000ull +
+                  4ull * (u64)e->rttvar_us * 1000ull;
+
+    return hold_ns < TBT_NACK_RTT_HOLD_MAX_NS ? hold_ns :
+                                                 TBT_NACK_RTT_HOLD_MAX_NS;
+}
+
 static void flow_rx_nack(struct flow *f, u64 now)
 {
     struct engine *e = f->e;
-    u64 rtt_ns = (u64)e->rtt_us * 1000ull;
-    u64 first_ns = TBT_NACK_FIRST_NS + rtt_ns;
-    u64 retry_ns = TBT_NACK_RETRY_NS + rtt_ns;
+    u64 hold_ns = nack_rtt_hold_ns(e);
+    u64 first_ns = TBT_NACK_FIRST_NS + hold_ns;
+    u64 retry_ns = TBT_NACK_RETRY_NS + hold_ns;
     u32 off;
 
     /* The window head is the only NACK anchor. Scanning by slot let a stale
@@ -3375,15 +3436,18 @@ static void engine_accept_carrier(struct engine *e)
     }
 }
 
-/* Sample the carrier RTT once per half second. The NACK hold and the ACK's
- * rtt field both need one carrier round trip: a NACK sent before the first
- * copy could arrive asks for a share still in flight, and the replay it
- * buys then competes with the DATA it was meant to repair. The maximum keeps
- * the hold safe on a skewed pool; zero leaves the 30 ms floor in place. */
+/* Sample the carrier RTT and its mean deviation once per half second. The
+ * NACK hold and the ACK's rtt field both need one carrier round trip: a NACK
+ * sent before the first copy could arrive asks for a share still in flight,
+ * and the replay it buys then competes with the DATA it was meant to repair.
+ * The deviation widens that hold because a lossy path's mean says little
+ * about its tail. The maximum keeps both safe on a skewed pool; zero leaves
+ * the 30 ms floor in place. */
 static void engine_sample_rtt(struct engine *e, u64 now)
 {
     u16 i;
     u32 max_us = 0;
+    u32 max_var_us = 0;
 
     if (e->rtt_sample_ns && now - e->rtt_sample_ns < 500ull * 1000 * 1000)
         return;
@@ -3397,12 +3461,17 @@ static void engine_sample_rtt(struct engine *e, u64 now)
         if (!c || c->fd < 0 || c->dead || !c->up)
             continue;
         memset(&ti, 0, sizeof(ti));
-        if (!getsockopt(c->fd, IPPROTO_TCP, TCP_INFO, &ti, &len) &&
-            ti.tcpi_rtt > max_us)
+        if (getsockopt(c->fd, IPPROTO_TCP, TCP_INFO, &ti, &len))
+            continue;
+        if (ti.tcpi_rtt > max_us)
             max_us = ti.tcpi_rtt;
+        if (ti.tcpi_rttvar > max_var_us)
+            max_var_us = ti.tcpi_rttvar;
     }
     if (max_us)
         e->rtt_us = max_us < 2000000u ? max_us : 2000000u;
+    if (max_var_us)
+        e->rttvar_us = max_var_us < 2000000u ? max_var_us : 2000000u;
 }
 
 static void engine_tick(struct engine *e)

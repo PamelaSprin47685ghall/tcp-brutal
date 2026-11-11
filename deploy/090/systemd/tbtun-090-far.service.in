@@ -2,12 +2,13 @@
 # Rendered by deploy/090/Makefile for tbtun @TBTUN_COMMIT@.
 # Far side. The unit loads the module and applies the tunnel line once; the
 # module keeps its state after the unit reaches active (RemainAfterExit=yes).
-# Requires= makes a stopped mihomo VLESS listener stop this tunnel too: a
-# tunnel without its target listener cannot carry a stream.
+# Wants= keeps the start order without coupling lifetimes: the tunnel needs a
+# live VLESS listener first (After=), but stopping or restarting mihomo must
+# not stop the tunnel.
 [Unit]
 Description=tbtun 0.9.0 kernel tunnel (far side)
 After=mihomo-090-far.service
-Requires=mihomo-090-far.service
+Wants=mihomo-090-far.service
 
 [Service]
 Type=oneshot
