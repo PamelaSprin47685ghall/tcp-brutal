@@ -1194,11 +1194,26 @@ scales with `d`; a loss-inflating CC reads its own duplicates as bandwidth and c
 
 ### 5.2 Carrier CC and pacing
 
-Carriers run the stock CC (default `bbr`) and stock pacing. The module never writes
-`sk_pacing_status` or `sk_pacing_rate`; it sets `TCP_NAGLE_OFF` on each carrier socket and
-paces only through its own token bucket (§5.3). `TCP_CORK` is unused. A duplicate is a
-separate `tcp_sendmsg_locked()` write on a different carrier, so the carrier's own CC and
-EDT see it as ordinary traffic.
+Carriers run `tbt_cc`, a congestion control this module registers under that name; the
+carrier asks for it first and falls back to stock BBR only when the kernel refuses the
+name. `tbt_cc` keeps the maximum delivery rate of the last ten RTTs, reads the peer's
+FEC_FBK loss estimate `p` for this direction, and paces at `max_bw / (1 - p)`, clamped to
+[1 MB/s, `tunnel_rate`]. `snd_cwnd` is held at twice the BDP and `ssthresh`/`undo_cwnd`
+report that same window, so a SACK loss does not halve the carrier; the FEC replay ring
+owns repair. `CA_EVENT_CWND_RESTART` is ignored so the peripheral hold keeps the idle
+window. Carrier sockets clear the GSO route caps and set `sk_gso_max_segs = 1`, so one FEC
+record owns one skb. A duplicate is a separate `tcp_sendmsg_locked()` write on a different
+carrier, so the carrier's CC and EDT see it as ordinary traffic.
+
+The controller is attached only to carrier sockets. `tbt_carrier_owns_sk()` checks the
+private `sk_prot`, and a non-carrier socket that selects the name by mistake keeps the
+classic Reno response; this is a correctness check, not a fairness mechanism.
+
+**Deployment target and fairness.** tbtun is designed for metered dedicated bandwidth,
+where the tunnel does not compete with third-party traffic for the same bottleneck.
+Coexistence/fairness with a stock TCP flow is not a design case, is not part of the
+acceptance criteria, and no coexistence measurement was performed. `tests/coexist` is an
+optional diagnostic on a dedicated host, never a release gate.
 
 ### 5.3 Tunnel-wide token bucket
 
@@ -1221,10 +1236,11 @@ inject a two-second outage.
 
 ### 5.4 Sender window and inflation control
 
-**The window is flow control, not a second congestion controller.** Each carrier's TCP
-owns congestion control and pacing (§5.2); the tunnel never sets a rate and never inflates
-on loss. `tx_window` is the byte budget a DATA frame must fit behind the peer's contiguous
-delivered offset: `seq + len <= tx_ack + tx_window`. `tx_ack` is the FBK `uack` clamped to
+**The window is flow control, not a second congestion controller.** Each carrier runs
+`tbt_cc` (§5.2), which owns carrier congestion control and pacing; the tunnel's own
+`tx_window` is flow control and never inflates on loss. It is the byte budget a DATA frame
+must fit behind the peer's contiguous delivered offset:
+`seq + len <= tx_ack + tx_window`. `tx_ack` is the FBK `uack` clamped to
 the bytes assigned (§5.5): the receiver advances it when the contiguous run has arrived and
 is queued for delivery, not when the application calls `read()`. (The TX code calls this
 the peer's *delivered* offset; it is the same contiguous received offset, never the

@@ -191,9 +191,11 @@ out:
     read_unlock_bh(&sk->sk_callback_lock);
 }
 
-/* A socket that selected tbt_cc without being a carrier (for example a
- * system-wide default) must keep the classic AIMD behaviour. tbt_cc is a
- * carrier controller; it must never change third-party traffic. */
+/* Defensive: a socket that selected tbt_cc without carrying the private
+ * carrier proto is not a tunnel carrier. Keep the classic AIMD response so an
+ * accidental system-wide selection cannot apply the carrier control law to an
+ * ordinary socket. tbt_carrier_owns_sk() is a correctness gate, not a
+ * fairness mechanism. */
 static void tbt_cc_foreign_avoid(struct sock *sk, const struct rate_sample *rs)
 {
     struct tcp_sock *tp = tcp_sk(sk);

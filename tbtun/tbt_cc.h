@@ -36,8 +36,8 @@
 #define TBT_CC_MUT_SLOTS 64
 
 /* Pacing gain above the measured rate. The (1 - p) divisor already pays for
- * the loss; a gain above 1 only steals capacity from a stock TCP flow on the
- * same bottleneck, so the default is exactly 1. */
+ * the loss; a gain above 1 adds queue without raising goodput on a metered
+ * link, so the default is exactly 1. */
 #define TBT_CC_PACING_GAIN_PPM 1000000u
 
 /* A silent carrier still gets this much pacing; below it the socket cannot

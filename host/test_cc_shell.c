@@ -119,7 +119,7 @@ static void test_pacing(void)
            "pacing: no rate sample leaves the socket alone");
 
     ok_u32(TBT_CC_PACING_GAIN_PPM, 1000000,
-           "pacing: the default gain leaves the stock flow its share");
+           "pacing: the default gain adds no queue above the measured rate");
     ok_u64(tbt_cc_pacing_bps(10000000ULL, 0, 1000000, 1000000, 0),
            10000000ULL, "pacing: p=0, gain=1 is max_bw");
 

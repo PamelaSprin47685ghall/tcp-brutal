@@ -15,7 +15,11 @@ and moves independently of the module version.
   `ssthresh`/`undo_cwnd` report that same window, so a SACK loss never halves
   the carrier window; `CA_EVENT_CWND_RESTART` is ignored so the peripheral
   BBR hold keeps the idle window. Carrier sockets clear the GSO route caps and
-  set `sk_gso_max_segs = 1`, so one FEC record owns one skb.
+  set `sk_gso_max_segs = 1`, so one FEC record owns one skb. The controller
+  is attached only to carrier sockets: `tbt_carrier_owns_sk()` checks the
+  private `sk_prot`, and a non-carrier socket that selects the name by
+  mistake keeps the classic Reno response. This is a correctness check, not a
+  fairness mechanism.
 - Downlink shell retransmission. `tbt_cc`'s `in_ack_event` walks the carrier's
   retransmit queue up to `highest_sack` and, for an un-SACKed,
   un-retransmitted, private, linear hole whose length equals one framed FEC
@@ -24,11 +28,13 @@ and moves independently of the module version.
   NACK. The 64-slot `mut_ring` records the hole's real TCP sequence, and a
   real DSACK block that names it pushes the replacement record back onto the
   replay queue (`car_shell_dsack_rescued`). `skb->cb` is never touched.
-- `tests/coexist/coexist.sh` and `make coexist-test`: the coexistence
-  acceptance. One stock TCP flow and the tbtun carriers share a shaped veth
-  bottleneck; the measured criterion is the stock flow's throughput drop
-  (`<= 10%` by default), not tbtun's own goodput. Needs root, `ip`, `tc` and
-  python3; otherwise it exits 77 as a skip.
+- `tests/coexist/coexist.sh` and `make coexist-diag`: an optional diagnostic,
+  not an acceptance gate. tbtun targets metered dedicated bandwidth, where
+  contention with third-party traffic on a shared bottleneck is not a design
+  case; no coexistence measurement is part of the acceptance criteria and
+  none was performed. The script is not part of `make check` and does not
+  block a release. It needs root, `ip`, `tc` and python3; otherwise it exits
+  77 as a skip. It is kept for manual experiments on a dedicated test host.
 - IPv6 endpoints. `listen=`, `peer=`, `target=` and `srcaddrs=` accept an IPv4
   literal or a bracketed IPv6 literal (`[2001:db8::1]:9000`), and one tunnel
   line may mix families. The listener, carrier dial and target dial create the

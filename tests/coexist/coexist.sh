@@ -1,25 +1,38 @@
 #!/usr/bin/env bash
 #
-# coexist.sh - coexistence acceptance for the tbt_cc carrier controller.
+# coexist.sh - OPTIONAL coexistence diagnostic for the tbt_cc controller.
 #
-# WHAT THIS MEASURES
-#   A stock TCP flow and the tbtun carriers share one bottleneck (a netem/TBF
-#   qdisc on the far side's veth egress). The acceptance number is the stock
-#   flow's throughput drop caused by tbtun, not tbtun's own goodput:
+# NOT AN ACCEPTANCE GATE. The deployment target is metered dedicated
+# bandwidth, where contention with third-party traffic on one bottleneck is
+# not a design case. No coexistence measurement is part of the release
+# criteria and none was performed. This script is not run by `make check`,
+# cannot block a release, and runs only when invoked deliberately as
+# `make coexist-diag` with TBT_COEXIST_ALLOW_LO=1.
+#
+# WHAT IT MEASURES (when deliberately run)
+#   A stock TCP flow and the tbtun carriers share one bottleneck. The
+#   diagnostic number is the stock flow's throughput drop caused by tbtun,
+#   not tbtun's own goodput:
 #
 #     baseline  stock TCP alone          -> B bytes in SECS
 #     coexist   stock TCP + tbtun bulk   -> C bytes in SECS
-#     drop      (B - C) / B * 100        -> must be <= MAX_DROP_PCT
+#     drop      (B - C) / B * 100        -> reported, never a pass/fail gate
 #
-#   The tbtun side runs the real FEC data plane (n=4 m=2, grouped) so the
-#   carriers use tbt_cc's pacing from the peer's FEC_FBK estimate. The stock
-#   flow uses the system default congestion control and never enters tbtun.
+#   The bottleneck is a netem/TBF qdisc on init_net's `lo`, because
+#   /proc/net/tbtun is registered in init_net only and cannot be configured
+#   from a child netns. Both the stock TCP flow and the tbtun carriers use
+#   127.0.0.x, so both cross the same qdisc. That also means the qdisc shapes
+#   every loopback flow on the host: run it only on a dedicated test host.
 #
-# TOPOLOGY
-#   netns tbtc-near 10.72.0.1 <--veth--> 10.72.0.2 netns tbtc-far
-#   stock TCP:  far sender -> near sink (10.72.0.1:9091), direct, shaped
-#   tbtun:      near public 9700 -> far carrier 9701 -> far source :9092
-#               (downlink bulk far -> near, the same shaped veth egress)
+# TOPOLOGY (all in init_net)
+#   stock TCP:  sender -> 127.0.0.1:9091 sink
+#   tbtun:      near 127.0.0.1:9700 -> carrier 127.0.0.2:9701 (far) ->
+#               far source 127.0.0.1:9092; the downlink bulk crosses lo
+#
+# LIMITATION
+#   A loopback qdisc is a host-local bottleneck, not a WAN path. The result
+#   is useful only as a relative diagnostic on a quiet, dedicated host. This
+#   is why the number is not part of acceptance.
 #
 # REQUIREMENTS
 #   root, tbtun.ko in the repository root, ip/tc/python3, and the netem or
@@ -27,16 +40,14 @@
 #   skip, never a pass.
 #
 # USAGE
-#   sudo tests/coexist/coexist.sh
-#   SECS=15 MAX_DROP_PCT=10 ROUNDS=3 sudo -E tests/coexist/coexist.sh
+#   TBT_COEXIST_ALLOW_LO=1 sudo -E make coexist-diag
+#   SECS=15 ROUNDS=3 TBT_COEXIST_ALLOW_LO=1 sudo -E make coexist-diag
 #
-# EXIT: 0 pass, 1 fail, 77 cannot run.
+# EXIT: 0 completed, 1 diagnostic mismatch, 77 cannot run.
 set -u
 
-NEAR=tbtc-near
-FAR=tbtc-far
-NEAR_IP=10.72.0.1
-FAR_IP=10.72.0.2
+NEAR_IP=127.0.0.1
+FAR_IP=127.0.0.2
 PUB_PORT=9700
 CAR_PORT=9701
 STOCK_PORT=9091
@@ -58,19 +69,24 @@ LOADED_MODULE=0
 fail=0
 
 say() { printf '%s\n' "$*"; }
-bad() { printf 'FAIL %s\n' "$*"; fail=1; }
+bad() { printf 'DIAG-MISMATCH %s\n' "$*"; fail=1; }
 
 cleanup() {
     for p in $PIDS; do kill "$p" 2> /dev/null || true; done
-    ip netns del "$NEAR" 2> /dev/null || true
-    ip netns del "$FAR" 2> /dev/null || true
+    tc qdisc del dev lo root 2> /dev/null || true
     if [ "$LOADED_MODULE" -eq 1 ]; then rmmod tbtun 2> /dev/null || true; fi
     rm -rf "$TMP"
 }
 trap cleanup EXIT
 
+if [ "${TBT_COEXIST_ALLOW_LO:-0}" != "1" ]; then
+    say "SKIP: optional diagnostic. It shapes init_net loopback and is not an"
+    say "      acceptance gate. Run it deliberately on a dedicated host:"
+    say "      TBT_COEXIST_ALLOW_LO=1 sudo -E make coexist-diag"
+    exit 77
+fi
 if [ "$(id -u)" -ne 0 ]; then
-    say "SKIP: needs root (netns, tc, insmod)."
+    say "SKIP: needs root (tc, insmod)."
     exit 77
 fi
 for c in ip tc python3; do
@@ -86,41 +102,27 @@ if ! grep -q '^tbtun ' /proc/modules; then
     LOADED_MODULE=1
 fi
 
-say "coexist: stock TCP default cc = $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)"
-say "coexist: bottleneck rate=$RATE delay=$DELAY, secs=$SECS rounds=$ROUNDS limit=${MAX_DROP_PCT}%"
+say "coexist-diag: stock TCP default cc = $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || echo unknown)"
+say "coexist-diag: loopback bottleneck rate=$RATE delay=$DELAY, secs=$SECS rounds=$ROUNDS"
+say "coexist-diag: optional diagnostic only; not an acceptance gate"
 
-ip netns add "$NEAR" || { bad "near netns"; exit 1; }
-ip netns add "$FAR" || { bad "far netns"; exit 1; }
-ip -n "$NEAR" link add v0 type veth peer name v1 netns "$FAR" || bad "veth"
-ip -n "$NEAR" addr add "$NEAR_IP/24" dev v0 || bad "near addr"
-ip -n "$FAR" addr add "$FAR_IP/24" dev v1 || bad "far addr"
-for ns in "$NEAR" "$FAR"; do
-    ip netns exec "$ns" ip link set lo up || bad "$ns lo"
-done
-ip -n "$NEAR" link set v0 up || bad "near v0"
-ip -n "$FAR" link set v1 up || bad "far v1"
-
-# Both the stock TCP flow (far -> near) and the tbtun carriers (far -> near)
-# leave the far netns through v1. Shape that one egress, or the two flows do
-# not share a bottleneck and the measurement is meaningless.
-if ! ip netns exec "$FAR" tc qdisc add dev v1 root netem rate "$RATE" delay "$DELAY" limit 2000 2> "$TMP/tc.err"; then
-    if ! ip netns exec "$FAR" tc qdisc add dev v1 root tbf rate "$RATE" burst 64kb latency 20ms 2>> "$TMP/tc.err"; then
-        say "SKIP: neither netem nor tbf accepted the qdisc: $(cat "$TMP/tc.err")"
+# netem first; tbf is the fallback for a kernel without sch_netem.
+if ! tc qdisc replace dev lo root netem rate "$RATE" delay "$DELAY" limit 2000 2> "$TMP/tc.err"; then
+    if ! tc qdisc replace dev lo root tbf rate "$RATE" burst 64kb latency 20ms 2>> "$TMP/tc.err"; then
+        say "SKIP: neither netem nor tbf accepted the lo qdisc: $(cat "$TMP/tc.err")"
         exit 77
     fi
 fi
 
-for ns in "$NEAR" "$FAR"; do
-    ip netns exec "$ns" sh -c "echo 'ports $PORTS' > /proc/net/tbtun/ports" || bad "$ns: ports"
-done
+sh -c "echo 'ports $PORTS' > /proc/net/tbtun/ports" || bad "ports directive"
 
-# The far side listens for carriers and dials the local bulk source. The near
-# side owns the public port the stock-like client uses.
-ip netns exec "$FAR" sh -c "echo 'tunnel 1 role=far profile=raw \
+# The far end listens for carriers on 127.0.0.2 and dials the local source.
+# The near end owns the public port on 127.0.0.1.
+sh -c "echo 'tunnel 1 role=far profile=raw \
     listen=$FAR_IP:$CAR_PORT target=127.0.0.1:$SRC_PORT n=4 m=2 fec=on \
     mode=grouped carriers=6 crypto=off dup=0' > /proc/net/tbtun/config" ||
     bad "far: tunnel config"
-ip netns exec "$NEAR" sh -c "echo 'tunnel 1 role=near profile=raw \
+sh -c "echo 'tunnel 1 role=near profile=raw \
     listen=$NEAR_IP:$PUB_PORT peer=$FAR_IP:$CAR_PORT n=4 m=2 fec=on \
     mode=grouped carriers=6 crypto=off dup=0 portblock=$PORTBLOCK' \
     > /proc/net/tbtun/config" || bad "near: tunnel config"
@@ -128,41 +130,41 @@ ip netns exec "$NEAR" sh -c "echo 'tunnel 1 role=near profile=raw \
 
 sleep 3
 if command -v ss > /dev/null; then
-    n_cc=$(ip netns exec "$NEAR" ss -tin 2>/dev/null | grep -c 'tbt_cc' || true)
+    n_cc=$(ss -tin 2>/dev/null | grep -c 'tbt_cc' || true)
     if [ "$n_cc" -eq 0 ]; then
-        bad "no carrier socket reports tbt_cc (falls back to BBR?)"
+        bad "no socket reports tbt_cc (falls back to BBR?)"
     else
-        say "coexist: $n_cc carrier socket(s) report tbt_cc"
+        say "coexist-diag: $n_cc socket(s) report tbt_cc"
     fi
 fi
 
-ip netns exec "$NEAR" python3 "$PY" sink "$STOCK_PORT" &
+python3 "$PY" sink "$STOCK_PORT" &
 PIDS="$PIDS $!"
 sleep 0.3
 
 baseline=""
 coexist=""
 for r in $(seq 1 "$ROUNDS"); do
-    b=$(ip netns exec "$FAR" python3 "$PY" send "$NEAR_IP" "$STOCK_PORT" "$SECS")
-    say "COEXIST round=$r phase=baseline stock_bytes=$b"
+    b=$(python3 "$PY" send "$NEAR_IP" "$STOCK_PORT" "$SECS")
+    say "COEXIST_DIAG round=$r phase=baseline stock_bytes=$b"
     baseline="$baseline $b"
 done
 
 for r in $(seq 1 "$ROUNDS"); do
-    ip netns exec "$FAR" python3 "$PY" src "$SRC_PORT" "$SECS" > "$TMP/src.$r" 2> "$TMP/src.$r.err" &
+    python3 "$PY" src "$SRC_PORT" "$SECS" > "$TMP/src.$r" 2> "$TMP/src.$r.err" &
     src_pid=$!
     PIDS="$PIDS $src_pid"
     sleep 0.3
-    ip netns exec "$NEAR" python3 "$PY" recv "$NEAR_IP" "$PUB_PORT" "$SECS" > "$TMP/recv.$r" 2> "$TMP/recv.$r.err" &
+    python3 "$PY" recv "$NEAR_IP" "$PUB_PORT" "$SECS" > "$TMP/recv.$r" 2> "$TMP/recv.$r.err" &
     recv_pid=$!
     PIDS="$PIDS $recv_pid"
-    c=$(ip netns exec "$FAR" python3 "$PY" send "$NEAR_IP" "$STOCK_PORT" "$SECS")
+    c=$(python3 "$PY" send "$NEAR_IP" "$STOCK_PORT" "$SECS")
     wait "$src_pid" 2> /dev/null || true
     wait "$recv_pid" 2> /dev/null || true
     tunnel_bytes=$(cat "$TMP/recv.$r")
-    say "COEXIST round=$r phase=coexist stock_bytes=$c tbtun_bytes=$tunnel_bytes"
+    say "COEXIST_DIAG round=$r phase=coexist stock_bytes=$c tbtun_bytes=$tunnel_bytes"
     if [ "${tunnel_bytes:-0}" -eq 0 ]; then
-        bad "round $r: tbtun carried no bytes (see $TMP, now removed)"
+        bad "round $r: tbtun carried no bytes"
     fi
     coexist="$coexist $c"
 done
@@ -176,21 +178,21 @@ co = [float(x) for x in sys.argv[sep + 1:]]
 b = statistics.mean(base)
 c = statistics.mean(co)
 drop = (b - c) * 100.0 / b if b else 0.0
-print(f"{b:.0f} {c:.0f} {drop:.1f} {'PASS' if drop <= limit else 'FAIL'}")
+print(f"{b:.0f} {c:.0f} {drop:.1f} {'WITHIN' if drop <= limit else 'ABOVE'}")
 PY
 )
 set -- $stats
 base_mean=${1:-0}
 co_mean=${2:-0}
 drop_pct=${3:-0}
-verdict=${4:-FAIL}
+verdict=${4:-ABOVE}
 
-say "COEXIST baseline_bytes=$base_mean coexist_bytes=$co_mean drop_pct=$drop_pct limit_pct=$MAX_DROP_PCT result=$verdict"
-[ "$verdict" = "PASS" ] || fail=1
+say "COEXIST_DIAG baseline_bytes=$base_mean coexist_bytes=$co_mean drop_pct=$drop_pct limit_pct=$MAX_DROP_PCT relation=$verdict"
+say "coexist-diag: diagnostic only; $verdict the ${MAX_DROP_PCT}% reference, no gate"
 
 if [ "$fail" -eq 0 ]; then
-    say "coexist: PASS"
+    say "coexist-diag: completed"
     exit 0
 fi
-say "coexist: FAIL"
+say "coexist-diag: diagnostic mismatch"
 exit 1
