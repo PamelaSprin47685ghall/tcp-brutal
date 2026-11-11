@@ -1,3 +1,0 @@
-23:26:05Z evidence: /home/kunweiz/Desktop/vibe/tcp-brutal/review/wan-experiment/arm64/controlled-c8-20261106T232605Z
-23:28:07Z lock: 无法取得 /tmp/tbtun-rk3588.lock on root@192.168.123.65: lock busy (another holder) 
-23:28:07Z FATAL: near 锁忙: /tmp/tbtun-rk3588.lock

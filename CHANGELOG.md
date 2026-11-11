@@ -5,6 +5,21 @@ and moves independently of the module version.
 
 ## [Unreleased]
 
+### Removed
+
+- Repository slimming on 2026-11-12. Dropped 2,234 tracked files (about
+  40 MB): the raw console, journal, dmesg and `/proc` dumps under
+  `review/wan-experiment/` and `review/hnd0-hang/`; the `review/fec-prototype/`
+  tree that `tbtun/tbt_sc_ldpc*.c` superseded; the seven one-off QEMU
+  console logs at the `review/` root; and `tests/golden_v080/`. The golden
+  generator had no reader, ran against the live tree, and still claimed
+  `0.8.0` while `TBT_VERSION` is `0.10.0`, so it could not certify the 0.8
+  wire. Conclusions, scripts, JSON/CSV data and design documents stay. No
+  wire change: `TBT_CONV` is still `0x000d`.
+- `tbt_mux.c`, `tbt_mux.h` and `host/test_mux.c` are gone. The module and
+  client had no caller for the 0.8 subframe multiplexer; 0.9 leaves
+  multiplexing to mihomo, so the object no longer ships in `tbtun.ko`.
+
 ### Fixed
 
 - Restarting `host/tbt_client` inside the far's 2 s tombstone window no

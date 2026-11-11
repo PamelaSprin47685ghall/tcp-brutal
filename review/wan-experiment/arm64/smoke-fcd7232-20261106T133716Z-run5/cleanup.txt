@@ -1,5 +1,0 @@
-near_module=0
-?
-far_module=0
-?
-near_proc=absent

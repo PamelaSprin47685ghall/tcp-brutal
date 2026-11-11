@@ -283,7 +283,8 @@ The module's real limit is one FEC flow per session:
 pending path aborts the socket (`tbt_sock.c:1090-1099`). So with a module far side the second
 concurrent stream already fails; the 9th is never reached.
 
-The mux exists but is not wired:
+At the time of this audit the mux existed but was not wired (0.9 removed
+`tbt_mux.c`, `tbt_mux.h` and its host test; this section is kept as history):
 
 - `tbtun/tbt_mux.h:1-82` defines an 8-byte subframe (`cmd`, `slot`, big-endian
   `u16 len`, big-endian `u32 stream_id`), `TBT_MUX_STREAMS 64`

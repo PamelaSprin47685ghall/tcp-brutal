@@ -1,3 +1,0 @@
-# block 31000-31015 (16 ports)
-# configured
-ports 31000-31015

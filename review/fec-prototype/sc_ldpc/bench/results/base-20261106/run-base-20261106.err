@@ -1,2 +1,0 @@
-batch=base-20261106 rounds=7 trials=2000 codes=4 block=256 L=16
-points=0.30:0.50 0.40:0.40 0.50:0.30 0.50:0.25 threads=1 2 seed_base=1 v1=base v2=ctl

@@ -1,4 +1,0 @@
-local: ./hnd0_enc_ab.sh --tag enc-smoke --rounds 1 --threads 1
-remote: sh /tmp/sclc-bench/batch/remote-enc64.sh
-conf: /tmp/sclc-bench/batch/run-enc64.conf
-summarize: python3 summarize_enc.py runs-enc-enc-smoke.csv . enc-smoke

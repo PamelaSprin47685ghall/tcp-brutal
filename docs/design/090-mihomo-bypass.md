@@ -354,7 +354,8 @@ mux；“写 mux”也不会多开一个端口。
 
 ### 2.9 near 生产机的隔离
 
-near 上已有生产 mihomo 监听 `127.0.0.1:7890`（见 `review/arm64-v6/.../pre-near.txt`）。
+near 上已有生产 mihomo 监听 `127.0.0.1:7890`（当时的快照见 `review/arm64-v6/`；
+原始日志已随仓库精简移除）。
 本设计额外起一个**独立** mihomo 进程，端口 7899；两者互不 reload、互不共享
 配置目录。tbtun 的 carrier 拨号必须绕开生产 mihomo 的 TUN，否则 carrier 会被
 自己的 TUN 抓走形成环路。仓库已有做法是主机策略路由：

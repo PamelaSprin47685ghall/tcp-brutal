@@ -1,7 +1,0 @@
-{
-  "note": "CRC32C Castagnoli, reflected, init ~0, final xor. seed=0 for a fresh CRC.",
-  "check_123456789": 3808858755,
-  "empty": 0,
-  "pattern1024_seed5a_crc": 32107809,
-  "chained": {"first": 4131058926, "next": 3808858755}
-}

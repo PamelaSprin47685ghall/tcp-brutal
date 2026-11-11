@@ -1,2 +1,0 @@
-tag=bs-2t5-8c64ccf rounds=1 rounds_b2=1 rounds_2t=5
-trials=2048 codes=4 batch=512 batch2=1024 points=256:16:0.30:0.50 256:16:0.40:0.40 256:16:0.50:0.30

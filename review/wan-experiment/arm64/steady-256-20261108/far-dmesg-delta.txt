@@ -1,3 +1,0 @@
-[154123.345436] tbtun: carrier 49 stalled: repath paused, new frames avoid it
-[154123.396426] tbtun: carrier 94 recovered after 153 ms: back in the stripe
-[154123.447263] tbtun: carrier 49 recovered after 101 ms: back in the stripe

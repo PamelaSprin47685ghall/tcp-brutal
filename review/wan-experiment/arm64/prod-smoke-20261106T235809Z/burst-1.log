@@ -1,3 +1,0 @@
-burst: connected to 127.0.0.1:9001, 1 MiB each way, strict send-then-read first
-burst: interleaved phase passed: 1048576 sent, 1048576 back, byte for byte
-burst: 1 MiB crossed each way (interleaved)

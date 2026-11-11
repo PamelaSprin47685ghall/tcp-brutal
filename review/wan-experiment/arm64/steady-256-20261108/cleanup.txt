@@ -1,7 +1,0 @@
-rc=0
-gone
-0:	from all lookup local
-9000:	from all to 198.18.0.0/30 lookup 2022
-9001:	not from all dport 53 lookup main suppress_prefixlength 0
-45.11.1.62 via 198.18.0.2 dev Meta table 2022 src 198.18.0.1 uid 0 
-    cache 

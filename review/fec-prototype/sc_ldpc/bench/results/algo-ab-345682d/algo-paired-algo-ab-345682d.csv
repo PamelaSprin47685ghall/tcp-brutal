@@ -1,4 +1,0 @@
-tag,cand,base,n,dec_ratio_median,dec_ratio_min,dec_ratio_max,base_dec_median,cand_dec_median
-algo-ab-345682d,algo_fast,algo_base,20,1.3279,0.8890,1.8709,3.224,4.083
-algo-ab-345682d,algo_opt,algo_base,20,1.4079,1.0114,1.8136,3.224,4.234
-algo-ab-345682d,algo_opt,algo_fast,20,1.0077,0.7840,1.4761,4.083,4.234

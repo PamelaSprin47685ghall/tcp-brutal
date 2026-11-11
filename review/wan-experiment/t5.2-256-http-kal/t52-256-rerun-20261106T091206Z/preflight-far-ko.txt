@@ -1,3 +1,0 @@
-far ko 131de6223dcc62a9ae4848806247a018fcd677d941719bcee1b2d5a4ff6d3c4f  /home/tbtun-t52-e7d1c83/tbtun.ko
-far srcversion 45CA11A5B8CA63534A2207E
-far vermagic 7.0.0-42-generic SMP preempt mod_unload modversions 

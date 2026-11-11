@@ -1,2 +1,0 @@
-tag,block,L,rate,p,seeds,trials,recovered,recovery,wilson99_lo,wilson99_hi,seed_min,seed_median,ge_0.999,ge_0.999_lo
-local-b512-p040,512,16,0.40,0.40,8,160000,159879,0.999244,0.999045,0.999401,0.998250,0.999600,1,1

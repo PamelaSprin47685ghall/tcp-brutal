@@ -1,1 +1,0 @@
-curl: (28) Operation too slow. Less than 65536 bytes/sec transferred the last 120 seconds

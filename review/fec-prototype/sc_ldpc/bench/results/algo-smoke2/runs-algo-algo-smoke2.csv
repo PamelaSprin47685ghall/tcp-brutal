@@ -1,7 +1,0 @@
-BIN,algo_base,d4e03c6436b2cb3da6a71ad39c22324ec6b00126f30a70409cfd278702e1ae01,50792,ymm_zmm_refs=0,vex_xmm_refs=0
-BIN,algo_opt,40480b4258fb7370462060ecc91a0feef734b7afb52b37d3ef302445cae9702e,54928,ymm_zmm_refs=0,vex_xmm_refs=0
-BIN,algo_fast,e6a1c576bdae086efef42ae2e9d149fdf4f1af26caa11f77c9ae8e6c2951ede0,54808,ymm_zmm_refs=0,vex_xmm_refs=0
-round,variant,block,L,rate,p,seed,load1,trials,recovery,ci99,iter,enc,dec,latency_ms,mem_bytes
-1,algo_base,256,16,0.50,0.30,1,0.43,200,1.000000,0.016055,7.58,5.236,2.457,1.048576,167088
-1,algo_fast,256,16,0.50,0.30,1,0.43,200,1.000000,0.016055,7.58,7.569,4.105,1.048576,167136
-1,algo_opt,256,16,0.50,0.30,1,0.48,200,1.000000,0.016055,7.58,7.434,3.773,1.048576,167136

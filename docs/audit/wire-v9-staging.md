@@ -380,8 +380,10 @@ Therefore:
 - Every FEC record a data carrier can see is exactly 1079 B, and the first
   non-DATA byte after the prefix never appears.
 - If A or B is chosen, a mixed-version pair fails at the first HELLO with a
-  counted reason, and the 0.8 golden vectors are regenerated in the same
-  commit (the repository keeps them under `tests/golden_v080/`).
+  counted reason, and the golden vectors are regenerated from the frozen
+  release tag. (`tests/golden_v080/` was dropped on 2026-11-12: it had no
+  reader, the generator ran against the live tree, and the tree had moved
+  from 0.8.0 to 0.10.0, so it could no longer certify the 0.8 wire.)
 
 ## 4. Deterministic pinning versus dynamic dispatch: the quantified trade
 

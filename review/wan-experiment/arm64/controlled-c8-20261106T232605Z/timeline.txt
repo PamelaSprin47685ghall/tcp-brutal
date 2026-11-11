@@ -1,4 +1,0 @@
-2026-11-06T23:26:05Z	1794007565	start | single-shot c8; evidence=/home/kunweiz/Desktop/vibe/tcp-brutal/review/wan-experiment/arm64/controlled-c8-20261106T232605Z
-2026-11-06T23:26:07Z	1794007567	precheck_ssh | near=aarch64/6.1.172 far=7.0.0-42-generic boot_id=0a91d2eb-3122-41eb-913c-024a4e1fe724
-2026-11-06T23:28:07Z	1794007687	cleanup_start | exit_rc=4
-2026-11-06T23:28:08Z	1794007688	cleanup_done | clean_fail=0

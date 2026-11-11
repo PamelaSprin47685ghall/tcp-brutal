@@ -2,6 +2,9 @@
 
 2026-11-06 的真实 WAN 实验：JYSZ（Manjaro 7.2.9，near）↔ HND0（45.11.1.62，Ubuntu 7.0.0，far），RTT 约 218 ms。只新增本目录，未改代码。
 
+2026-11-12 仓库精简：原始 console/log/dump（`.txt`、`.log`、`.err` 等）已移除，
+保留结论文档、脚本与 JSON/CSV 数据；需要原始字节时从 git 历史取。
+
 ## 目录
 
 | 路径 | 内容 |

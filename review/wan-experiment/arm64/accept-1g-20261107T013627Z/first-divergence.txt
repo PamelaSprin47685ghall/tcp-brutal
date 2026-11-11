@@ -1,7 +1,0 @@
-near chunk 18 (offset 18874368) vs far chunk 18: identical for the first 81722 bytes,
-first difference at near absolute offset 18956090 (0-based).
-near[18956090 .. ] == far[18964282 .. ]  -> exactly 8192 source bytes are absent.
-Near partial size: 57671482 bytes.
-near partial sha256 : 17ecbda3f6b2ca70f6cf3776c5032d412f540b072b8f6894a1ed2afa7ee41d1f
-far first 57671482B : 43956378c45cc9a2dcdc12b4e2b5f1a0bb787b261dbf3b96ee66e1301fdec076
-far full file sha256: c6a256153f71328c987129abfd68d610d0da04834259b66c3addffbba7a79a93

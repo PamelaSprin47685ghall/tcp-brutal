@@ -1,3 +1,0 @@
-== tbt_ping 37B 2026-11-06T09:00:26Z
-tbt_ping: 0/37 bytes back after 5 s
-rc=1 wall=5.007s

@@ -1,8 +1,0 @@
-2026-11-06T23:25:18Z	1794007518	start | single-shot c8; evidence=/home/kunweiz/Desktop/vibe/tcp-brutal/review/wan-experiment/arm64/controlled-c8-20261106T232518Z
-2026-11-06T23:25:19Z	1794007519	precheck_ssh | near=aarch64/6.1.172 far=7.0.0-42-generic boot_id=0a91d2eb-3122-41eb-913c-024a4e1fe724
-2026-11-06T23:25:20Z	1794007520	load | near=0.02 far=0.20 limit=4
-2026-11-06T23:25:20Z	1794007520	precheck_visibility | panic_on_oops=1 panic=10 oops_limit=2 panic_on_rcu_stall=1 oops_all_cpu_backtrace=1 pstore_empty=yes ramoops=yes
-2026-11-06T23:25:22Z	1794007522	precheck_far_early | srcversion=332759AF31AB0DD875E0EE7 expected=332759AF31AB0DD875E0EE7
-2026-11-06T23:25:22Z	1794007522	precheck_receiver | pid=599898 log=/home/kunweiz/tbtun-forensics/netconsole-6666.log lines=5519 relay=active sampler=active rx=active-user
-2026-11-06T23:25:27Z	1794007527	cleanup_start | exit_rc=2
-2026-11-06T23:25:28Z	1794007528	cleanup_done | clean_fail=0

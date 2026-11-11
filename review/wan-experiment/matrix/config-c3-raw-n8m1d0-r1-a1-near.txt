@@ -1,1 +1,0 @@
-tunnel 1 role=near listen=127.0.0.1:9001 peer=45.11.1.62:9000 n=8 m=1 dup=0 profile=raw keepalive=2000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=30000 rx_reorder_bytes=262144 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=30500-30599 nonce=00112233445566778899aabbccddeeff

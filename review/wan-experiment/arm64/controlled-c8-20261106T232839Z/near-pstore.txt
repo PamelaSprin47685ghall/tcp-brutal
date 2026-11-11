@@ -1,8 +1,0 @@
-=== /sys/fs/pstore ===
-total 0
-drwxr-x---  2 root root 0 Nov  7 06:59 .
-drwxr-xr-x 10 root root 0 Nov  7 07:02 ..
-=== /var/lib/systemd/pstore ===
-total 8
-drwxr-xr-x  2 root root 4096 Oct 22 07:47 .
-drwxr-xr-x 11 root root 4096 Oct 17 15:56 ..

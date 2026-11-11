@@ -1,5 +1,0 @@
-ko=/root/tbtun-0.2.0-fix19-20261107T074843Z/tbtun.ko
-0.2.0
-C0346E98476A3A31EF512A4
-7.0.0-42-generic SMP preempt mod_unload modversions 
-loaded_srcversion=C0346E98476A3A31EF512A4

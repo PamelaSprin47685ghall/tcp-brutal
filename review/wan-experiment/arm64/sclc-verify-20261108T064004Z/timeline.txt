@@ -1,3 +1,0 @@
-2026-11-08T06:40:04Z	run-start
-2026-11-08T06:40:16Z	preflight-done
-2026-11-08T06:40:45Z	steady-start

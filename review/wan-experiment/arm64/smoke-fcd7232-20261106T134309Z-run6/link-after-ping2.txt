@@ -1,6 +1,0 @@
-[ 6282.011212] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Down
-[ 6289.105730] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Up - 1Gbps/Full - flow control rx/tx
-[ 7327.759231] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Down
-[ 7330.800578] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Up - 1Gbps/Full - flow control rx/tx
-[ 7340.932342] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Down
-[ 7348.027002] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Up - 1Gbps/Full - flow control rx/tx

@@ -1,4 +1,0 @@
-local: ./hnd0_algo_ab.sh --tag algo-ab-345682d --rounds 20 --trials 2000
-remote: sh /tmp/sclc-bench/batch/remote-algo.sh
-conf: /tmp/sclc-bench/batch/run-algo.conf
-summarize: python3 summarize_algo.py runs-algo-algo-ab-345682d.csv . algo-ab-345682d

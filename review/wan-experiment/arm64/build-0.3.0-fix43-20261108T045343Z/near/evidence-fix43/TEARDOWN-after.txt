@@ -1,2 +1,0 @@
-== lsmod after
-tbtun: NOT LOADED

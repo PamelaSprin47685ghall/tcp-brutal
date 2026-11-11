@@ -1,6 +1,0 @@
-started pid(s):
-347867 bash -c set -e cd /root/tbtun-0.3.0-fix43-20261108T045343Z E=evidence-fix43 if ss -lnt | grep -q "127.0.0.1:5210"; then   echo "5210 already listening; owner:" | tee $E/5210-source.txt   ss -lntp | grep "127.0.0.1:5210" | tee -a $E/5210-source.txt else   mkdir -p /root/tbtun-target   echo fix43-target > /root/tbtun-target/index.html   setsid busybox httpd -f -p 127.0.0.1:5210 -h /root/tbtun-target >/root/tbtun-0.3.0-fix43-20261108T045343Z/httpd-5210.log 2>&1 < /dev/null &   sleep 1   echo "started pid(s):" | tee $E/5210-source.txt   pgrep -af "httpd -f -p 127.0.0.1:5210" | tee -a $E/5210-source.txt   ss -lntp | grep "127.0.0.1:5210" | tee -a $E/5210-source.txt   echo "--- fetch check ---" | tee -a $E/5210-source.txt   curl -sS -m 5 http://127.0.0.1:5210/ | tee -a $E/5210-source.txt fi echo "=== post-5210 state ===" ss -lnt | grep -E ":(5210|9000)\b" || echo "only 5210 expected" 
-347871 busybox httpd -f -p 127.0.0.1:5210 -h /root/tbtun-target
-LISTEN 0      9          127.0.0.1:5210       0.0.0.0:*    users:(("busybox",pid=347871,fd=3))                   
---- fetch check ---
-fix43-target

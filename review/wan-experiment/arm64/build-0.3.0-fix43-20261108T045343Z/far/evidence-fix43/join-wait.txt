@@ -1,9 +1,0 @@
-t=0s up=33
-t=3s up=80
-t=6s up=132
-t=9s up=194
-t=12s up=248
-t=15s up=254
-t=18s up=255
-t=21s up=256
-JOINED at t=21s

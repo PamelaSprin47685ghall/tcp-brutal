@@ -1,3 +1,0 @@
-burst: connected to 127.0.0.1:9001, 16 MiB each way, strict send-then-read first
-burst: strict send-then-read failed: sent=16777216 recvd=0 first_mismatch=-1 errno=11 (Resource temporarily unavailable)
-burst: /proc/net/tbtun/stats: Permission denied

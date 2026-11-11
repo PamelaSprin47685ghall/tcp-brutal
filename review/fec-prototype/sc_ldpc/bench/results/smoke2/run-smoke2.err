@@ -1,2 +1,0 @@
-batch=smoke2 rounds=2 trials=200 codes=4 block=256 L=16
-points=0.50:0.25 threads=1 seed_base=1 v1=base v2=ctl

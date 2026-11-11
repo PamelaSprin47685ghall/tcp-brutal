@@ -1,2 +1,0 @@
-no tbtun module
-ls: cannot access '/proc/net/tbtun': No such file or directory

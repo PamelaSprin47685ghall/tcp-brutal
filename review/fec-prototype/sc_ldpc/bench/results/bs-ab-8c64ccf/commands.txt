@@ -1,5 +1,0 @@
-local: ./hnd0_bs_ab.sh --tag bs-ab-8c64ccf --rounds 5 --rounds-b2 3 --rounds-2t 3
-remote build: TAG=bs-ab-8c64ccf sh /tmp/sclc-bench/batch/remote-build-bs.sh
-remote run:   sh /tmp/sclc-bench/batch/remote-run-bs.sh
-remote conf:  /tmp/sclc-bench/batch/run-bs.conf
-summarize:    python3 summarize_bs.py runs-bs-bs-ab-8c64ccf.csv . bs-ab-8c64ccf

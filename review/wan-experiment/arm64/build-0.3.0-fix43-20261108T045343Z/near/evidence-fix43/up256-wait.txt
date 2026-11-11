@@ -1,1 +1,0 @@
-UP256 elapsed=8s at=2026-11-08T12:55:57+08:00 tunnel up=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0 prov_now=0 prov_peak=0 prov_reject=0 dead_release=0 carrier_retired=17

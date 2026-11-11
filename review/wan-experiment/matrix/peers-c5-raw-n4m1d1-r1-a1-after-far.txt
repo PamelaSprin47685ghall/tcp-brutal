@@ -1,5 +1,0 @@
-# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm
-1 0 9000 171.120.34.226:9629 334 235044 0 up raw 3 0 187512 642 21535 0 0
-1 2 9000 171.120.34.226:40001 0 232468 0 up raw 0 0 188405 79 2626 0 0
-1 3 9000 171.120.34.226:9632 0 227701 0 up raw 0 0 186246 76 2527 0 0
-1 4 9000 171.120.34.226:40006 332 222184 0 up raw 1 0 177792 4251 483081 0 0

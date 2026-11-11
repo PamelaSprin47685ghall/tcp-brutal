@@ -1,3 +1,0 @@
-batch,variant,p,rate,block,L,threads,n,recovery,iter,enc,dec,recovery_min,recovery_max,iter_min,iter_max,enc_min,enc_max,dec_min,dec_max
-smoke2,base,0.50,0.25,256,16,1,2,1.000000,10.20,2.643,0.361,1.000000,1.000000,10.13,10.26,2.191,3.096,0.267,0.455
-smoke2,ctl,0.50,0.25,256,16,1,2,1.000000,10.20,2.899,0.400,1.000000,1.000000,10.13,10.26,2.513,3.286,0.368,0.432

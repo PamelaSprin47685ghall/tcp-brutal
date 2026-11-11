@@ -1,5 +1,0 @@
-== near
-near: module unloaded
-near: procfs gone
-near: 9001 free
-== far

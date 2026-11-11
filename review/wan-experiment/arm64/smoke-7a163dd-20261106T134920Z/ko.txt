@@ -1,7 +1,0 @@
-utc=2026-11-06T13:53:28Z
-near_ko=/root/tbtun-t52-arm64-fcd7232dbe7c/tbtun.ko
-88E99F0159454493E702A85
-ae2185f0e1a121ac00d06cf32e34d659fcecc58b10860bc08e2e8d8e72e9aba3  /root/tbtun-t52-arm64-fcd7232dbe7c/tbtun.ko
-far_ko=/home/tbtun-t52-arm64/tbtun.ko
-17E7F5B5757871F760EA292
-9f97a003a40e091aa4f4088f6e245b8ffe3810a3505a45ca095818c0188d9a59  /home/tbtun-t52-arm64/tbtun.ko

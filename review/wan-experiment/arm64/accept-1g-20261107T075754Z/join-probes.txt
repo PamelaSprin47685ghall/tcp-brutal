@@ -1,9 +1,0 @@
-2026-11-07T07:58:46Z near_up=61 far_up=65
-2026-11-07T07:58:49Z near_up=89 far_up=101
-2026-11-07T07:58:51Z near_up=134 far_up=138
-2026-11-07T07:58:53Z near_up=161 far_up=164
-2026-11-07T07:58:56Z near_up=187 far_up=190
-2026-11-07T07:58:58Z near_up=233 far_up=240
-2026-11-07T07:59:00Z near_up=253 far_up=254
-2026-11-07T07:59:02Z near_up=255 far_up=255
-2026-11-07T07:59:04Z near_up=256 far_up=256

@@ -1,4 +1,0 @@
-frps=active
-caddy=active
-hysteria=inactive
-xray=active

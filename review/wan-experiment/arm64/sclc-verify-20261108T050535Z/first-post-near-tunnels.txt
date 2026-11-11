@@ -1,2 +1,0 @@
-# id role state listen peer target n m streams
-1 near listening 127.0.0.1:9001 45.11.1.62:9000 - 8 24 1

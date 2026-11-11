@@ -1,6 +1,0 @@
-tag=local-r035
-block,L,rate,p,seeds,trials,recovered,recovery,lo99,hi99,seed_min,seed_med,pass_point,pass_lo
-256,16,0.35,0.40,8,160000,159757,0.998481,0.998209,0.998712,0.988800,0.999950,0,0
-256,16,0.40,0.40,8,160000,159838,0.998988,0.998761,0.999173,0.996200,0.999600,0,0
-256,16,0.50,0.30,8,320000,319935,0.999797,0.999721,0.999852,0.999525,0.999850,1,1
-file: /home/kunweiz/tbtun-worktrees/sclc-bench/review/fec-prototype/sc_ldpc/bench/results/local-r035/rec-summary-local-r035.csv

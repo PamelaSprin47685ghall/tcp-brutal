@@ -1,1 +1,0 @@
-near_up=256 far_up=256 polls=6

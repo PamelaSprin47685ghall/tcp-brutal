@@ -1,2 +1,0 @@
-ko=/root/tbtun-0.2.0-fix4-20261107T025938Z/tbtun.ko
-loaded_srcversion=8A6BBE49134ADB5BA741F0E

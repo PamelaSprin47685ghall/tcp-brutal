@@ -1,9 +1,0 @@
-23:58:09Z evidence: /home/kunweiz/Desktop/vibe/tcp-brutal/review/wan-experiment/arm64/prod-smoke-20261106T235809Z
-23:58:09Z config: carriers=256 n=4 m=4 groups=32 w=8 near=30000-30511 far=31000-31511
-23:58:10Z lock: /tmp/tbtun-rk3588.lock 已持有
-23:58:11Z lock: /tmp/tbtun-hnd0.lock 已持有
-23:58:15Z visibility: relay=active sampler=active rx=active-user sampler_lines=49200
-23:58:18Z snapshot: pre
-23:58:43Z evidence: netconsole（burst 后第一份快照）
-23:58:43Z evidence: far
-23:58:53Z evidence: near

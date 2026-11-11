@@ -3042,9 +3042,10 @@ the same value through `mkdkmsconf.sh --version`. A development suffix
 `.r<commits>.<sha>` is opt-in with `TBT_DKMS_GIT_SUFFIX=1`; it is not the default.
 
 **Real-machine DKMS install is validated on `.65`.** The `.65` seven-step run
-produced `review/wan-experiment/arm64/dkms-65-20261107T142840Z/` with
-`DKMS_RESULT PASS` on `dkms 3.2.2-1ubuntu1` / kernel 6.1.172 (install,
-`modprobe`, `rmmod` and `uninstall`, with the config round-trip). The earlier
+reported `DKMS_RESULT PASS` on `dkms 3.2.2-1ubuntu1` / kernel 6.1.172 (install,
+`modprobe`, `rmmod` and `uninstall`, with the config round-trip). Its raw
+console logs were dropped by the 2026-11-12 repository slimming; the result
+stands as recorded history. The earlier
 caveat stands as history: on this development host `sudo` needs a password and
 neither `dkms` nor the matching kernel headers is installed, so no real-machine
 `dkms install` / `modprobe` / `rmmod` was run there; the equivalent `/tmp` build

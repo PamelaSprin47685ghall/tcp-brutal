@@ -1,4 +1,0 @@
-tag,variant,n,dec_median,dec_min,dec_max,enc_median,enc_min,enc_max,recovery_min,iter_median,ge_4.215,ge_4.0,ge_3.5
-algo-ab-345682d,algo_base,20,3.224,2.318,3.654,8.818,5.789,12.799,0.998500,7.57,0,0,2
-algo-ab-345682d,algo_fast,20,4.083,3.010,5.102,9.463,5.521,11.263,0.998500,7.57,10,10,16
-algo-ab-345682d,algo_opt,20,4.234,3.243,5.116,8.967,4.689,11.080,0.998500,7.57,10,10,16

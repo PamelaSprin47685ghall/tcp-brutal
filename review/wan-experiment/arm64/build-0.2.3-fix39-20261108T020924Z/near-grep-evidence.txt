@@ -1,8 +1,0 @@
-# near grep
-=== hold_enable default ===
-51:bool tbt_hold_enable = true;
-53:MODULE_PARM_DESC(hold_enable, "Hold BBR cwnd/pacing across idle periods (default 1; 0=off)");
-=== warnings/errors ===
-1
-warning: the compiler differs from the one used to build the kernel
-0

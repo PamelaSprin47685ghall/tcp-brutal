@@ -1,1 +1,0 @@
-tunnel 1 c13 adaptive=off epoch=0 n=128 m=128 groups=1 class=3 p_ppm=0 p_win_ppm=0 r_fail_ppm=0 sent=0 miss=0 switches=0 aborts=0 rollbacks=0 pauses=0 pause_ns=0 sample_unknown=0 abandoned=0 state=steady reason=off

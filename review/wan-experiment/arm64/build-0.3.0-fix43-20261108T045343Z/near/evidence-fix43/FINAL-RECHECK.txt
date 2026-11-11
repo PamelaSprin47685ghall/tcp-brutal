@@ -1,6 +1,0 @@
-== final re-check at 2026-11-08T12:56:41+08:00
-tbtun                 282624  0
-tunnel 1 c3 n=256 up=256
-1
-256
-1

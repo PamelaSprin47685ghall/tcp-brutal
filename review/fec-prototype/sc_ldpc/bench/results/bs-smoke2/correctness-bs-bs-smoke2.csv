@@ -1,5 +1,0 @@
-tag,phase,threads,batch,block,L,rate,p,runs,cw,recovery_min,unres_mismatch_sum,bit_mismatch_sum
-bs-smoke2,t1b1024,1,512,256,16,0.50,0.30,1,512,1.000000,0,0
-bs-smoke2,t1b1024,1,1024,256,16,0.50,0.30,1,1024,1.000000,0,0
-bs-smoke2,t1b512,1,512,256,16,0.50,0.30,1,512,1.000000,0,0
-bs-smoke2,t2b512,2,512,256,16,0.50,0.30,1,512,1.000000,0,0

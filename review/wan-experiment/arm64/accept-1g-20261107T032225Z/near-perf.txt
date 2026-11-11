@@ -1,7 +1,0 @@
-elapsed_s=567.947534
-speed_bytes_s=251090
-throughput_mbit_s=2.01
-cpu_busy_pct=1.5
-loadavg=0.20 0.13 0.14 1/362 76178
-mem_available_kb=7547360
-slab=
