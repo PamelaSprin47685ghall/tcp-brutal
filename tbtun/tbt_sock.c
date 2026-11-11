@@ -55,6 +55,8 @@
 #include "tbtun.h"
 #include "tbt_map.h"
 
+static bool tbt_sock_half_close_hold(const struct tbt_stream *st);
+
 /* One bit per stream work item; bit 1 means an instance is queued or running
  * and owns exactly one stream reference (review/s2-merged-design.md §1.4).
  * The entry point clears the bit first and puts the reference last, so a wake
