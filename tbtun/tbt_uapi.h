@@ -28,7 +28,7 @@ typedef uint64_t u64;
 #endif
 
 #define TBT_VERSION_MAJOR 0
-#define TBT_VERSION_MINOR 8
+#define TBT_VERSION_MINOR 9
 #define TBT_VERSION_PATCH 0
 #define TBT_VERSION ((TBT_VERSION_MAJOR << 16) | (TBT_VERSION_MINOR << 8) | TBT_VERSION_PATCH)
 
@@ -69,7 +69,7 @@ static inline u16 tbt_port_host16(u16 net)
     return (u16)((u16)u.b[0] << 8 | (u16)u.b[1]);
 }
 
-/* Wire protocol revision: u16 at frame offset +30, 0x000b. Independent of the
+/* Wire protocol revision: u16 at frame offset +30, 0x000c. Independent of the
  * module version (DESIGN.md §11); bump it alone on any wire change.
  * 0x0002 moved body_len into the header (+6) and removed the 4-byte prefix.
  * 0x0003 carries RETIRE (24) and the HELLO profile|gen byte; a 0x0002 peer
@@ -124,8 +124,14 @@ static inline u16 tbt_port_host16(u16 net)
  * 0x100b because the 48-byte header layout and every offset are unchanged;
  * the new PADDED flag bit is what a 0.7.3 receiver refuses. The TBT_CONV
  * bump is the session gate: a 0.7.3 peer fails the first HELLO header
- * (0x000a != 0x000b), so the two revisions never mix. */
-#define TBT_CONV 0x000bu
+ * (0x000a != 0x000b), so the two revisions never mix.
+ * 0x000c (0.9.0) is the re-incarnation cut: the FEC HELLO body grows from 66
+ * to 90 bytes with a boot_epoch (u64 at +66) and a 128-bit PSK tag (at +74),
+ * and HELLO body[0] moves to version 9. TBT_FEC_CONV stays 0x100b because the
+ * 48-byte FEC header and every offset are unchanged, exactly as 0x000b left
+ * it. The TBT_CONV bump is the session gate: a 0.8.x peer fails the first
+ * HELLO header (0x000b != 0x000c), so the two revisions never mix. */
+#define TBT_CONV 0x000cu
 
 /* HELLO body[0]: wire-protocol version, independent of TBT_VERSION. The FEC
  * v6 session uses the extended body below; the old ARQ keeps version 1 and
@@ -152,8 +158,9 @@ static inline u16 tbt_port_host16(u16 net)
  * may restart with a fresh crypto nonce, or continue from a new source
  * address, and only a HELLO that proves the configured `crypto_key=` may do
  * either. A version-8 peer fails tbt_hello_admit() by length and version at
- * the first HELLO, so the two revisions never share a session; TBT_CONV and
- * TBT_FEC_CONV are unchanged because no other record moved. */
+ * the first HELLO, so the two revisions never share a session; TBT_CONV moves
+ * to 0x000c as the session gate, and TBT_FEC_CONV stays 0x100b because no
+ * FEC record moved. */
 #define TBT_WIRE_VERSION 1
 #define TBT_WIRE_VERSION_V6 9
 

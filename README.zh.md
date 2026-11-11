@@ -108,8 +108,8 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.8.0`）。
-线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x000b` 与 FEC 头/FEC 记录的
+`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.9.0`）。
+线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x000c` 与 FEC 头/FEC 记录的
 `TBT_FEC_CONV=0x100b`（48 字节头、64 字节 `FEC_CFG`/`FEC_FBK`），三者都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
 失败，其载体关闭；0x0004 的对端在第一个头部就会因为 conv 不匹配而被拒绝。

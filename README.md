@@ -143,8 +143,8 @@ results and their cost.
 ## Packaging
 
 The module version has one authority: `TBT_VERSION_MAJOR/MINOR/PATCH` in
-`tbtun/tbt_uapi.h` (currently `0.8.0`). The wire
-version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x000b` for the 32-byte frames
+`tbtun/tbt_uapi.h` (currently `0.9.0`). The wire
+version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x000c` for the 32-byte frames
 and `TBT_FEC_CONV=0x100b` for the 48-byte FEC header and the 64-byte
 `FEC_CFG`/`FEC_FBK` records; all three are independent of
 the module version. `TBT_CONV 0x0005` removed the unused PREDICT/CANCEL

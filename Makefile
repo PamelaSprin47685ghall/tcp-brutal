@@ -11,6 +11,7 @@ SRCS            := Makefile \
                    tbtun/tbt_rec.h tbtun/tbt_http.h tbtun/tbt_fec_batch.h \
                    tbtun/tbt_crypto.h tbtun/tbt_mux.h \
                    tbtun/tbt_fec.h tbtun/tbt_fec_adapt.h tbtun/tbt_fec_adapt_sclc.h \
+                   tbtun/tbt_fec_late.h \
                    tbtun/tbt_fec_sclc_delta.h \
                    tbtun/tbt_portmap.h tbtun/tbt_map.h tbtun/tbt_carrier_policy.h \
                    tbtun/tbt_tx_acct.h \

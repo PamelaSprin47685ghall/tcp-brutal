@@ -3003,7 +3003,7 @@ HELLO and the first FEC conv check. The 48-byte FEC header and every offset
 stay unchanged.
 
 **Packaging.** `tbtun/tbt_uapi.h` is the single version authority: the
-`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/7/0`). `scripts/mkdkmsconf.sh`
+`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/9/0`). `scripts/mkdkmsconf.sh`
 parses those macros and emits `PACKAGE_VERSION="<major>.<minor>.<patch>"`; parsing
 failure is fatal and never falls back to an old value. `dkms.conf` is a generated file —
 `make dkms.conf` (or `make dkms-tarball`) writes it, and it must not be hand-edited; the

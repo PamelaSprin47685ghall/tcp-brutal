@@ -32,11 +32,14 @@ and moves independently of the module version.
 
 ### Changed
 
-- `TBT_CONV` stays `0x000b` and `TBT_FEC_CONV` stays `0x100b`: no record other
-  than HELLO moved. A 0.8.x peer sends 66 bytes at version 8, which the v9
-  framing bound accepts, so the version byte is the gate and the first HELLO
-  fails with `-EPROTO`. Both ends must be upgraded together
-  (`host/test_wire_compat.c` pins the 66-byte v8 refusal).
+- `TBT_VERSION` is `0.9.0` and `TBT_CONV` moves to `0x000c`. `TBT_FEC_CONV`
+  stays `0x100b` because the 48-byte FEC header and every offset are
+  unchanged, exactly as the `0x000b` cut left it; the HELLO's own version
+  moves to 9. A 0.8.x peer is refused at its first HELLO header
+  (`0x000b != 0x000c`), and even a 66-byte body that passed framing would
+  fail the version/length gate. Both ends must be upgraded together
+  (`host/test_wire_compat.c` pins the 66-byte v8 refusal;
+  `host/test_client_wire.c` pins the 0.8.x conv refusal).
 - The far side keeps the adopted key rule unchanged: a HELLO naming a
   different key is still refused. Only the nonce, the session name and the
   anchor may be re-named, and only by a PSK holder.
