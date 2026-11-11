@@ -202,6 +202,13 @@ HOST_BENCH_SCLC_PIPE_SRCS := host/bench_sclc_pipe.c tbtun/tbt_fec.c \
                    tbtun/tbt_fec_sclc.c tbtun/tbt_sclc_uplink.c \
                    tbtun/tbt_sc_ldpc.c tbtun/tbt_sc_ldpc_gf16.c \
                    tbtun/tbt_crypto.c tbtun/tbt_proto.c
+HOST_CALIB_SCLC_UP := host/calib_sclc_up
+HOST_CALIB_SCLC_UP_SRCS := host/calib_sclc_up.c tbtun/tbt_sc_ldpc.c \
+                   tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c \
+                   tbtun/tbt_fec_adapt_sclc.c
+HOST_CALIB_SCLC_UP_HDRS := tbtun/tbt_sc_ldpc.h tbtun/tbt_sc_ldpc_gf16.h \
+                   tbtun/tbt_sclc_uplink.h tbtun/tbt_fec_adapt_sclc.h \
+                   tbtun/tbt_fec_adapt.h tbtun/tbt_fec.h tbtun/tbt_uapi.h
 HOST_TSAN       := host/test_tsan_race
 HOST_TSAN_SRCS  := host/test_tsan_race.c tbtun/tbt_crypto.c
 HOST_TSAN_HDRS  := tbtun/tbt_fec.h tbtun/tbt_crypto.h tbtun/tbt_uapi.h
@@ -234,7 +241,7 @@ CFLAGS_tbtun/tbt_crypto.o := -O3
 # block encode on the host and leaves the object the same size class.
 CFLAGS_tbtun/tbt_fec_sclc.o := -O3
 
-.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-tsan host-test-live host-bench-micro host-bench-sclc host-bench-sclc-down host-bench-sclc-sim host-bench-sclc-pipe host-bench-rxpath bench bench-full
+.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-tsan host-test-live host-bench-micro host-bench-sclc host-bench-sclc-down host-bench-sclc-sim host-bench-sclc-pipe host-bench-rxpath host-calib-sclc-up calib-sclc-up bench bench-full
 
 all:
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) modules
@@ -503,6 +510,32 @@ $(HOST_BENCH_SCLC_PIPE): $(HOST_BENCH_SCLC_PIPE_SRCS)
 
 host-bench-sclc-pipe: $(HOST_BENCH_SCLC_PIPE)
 	@./$(HOST_BENCH_SCLC_PIPE)
+
+# Calibration of the uplink 8x32 GF(16) SC-LDPC ladder against the real
+# codec. The binary is a measurement, not a gate, so it is not part of
+# host-test. Six ladder points run in parallel; every sample seeds itself
+# from (section, level, p), so the CSV does not depend on completion order.
+$(HOST_CALIB_SCLC_UP): $(HOST_CALIB_SCLC_UP_SRCS) $(HOST_CALIB_SCLC_UP_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_CALIB_SCLC_UP_SRCS) -lm
+
+host-calib-sclc-up: $(HOST_CALIB_SCLC_UP)
+
+CALIB_LEVELS := 25 30 40 50 60 70
+CALIB_DIR := review/calib
+CALIB_PARTS := $(CALIB_DIR)/.parts
+
+calib-sclc-up: $(HOST_CALIB_SCLC_UP)
+	@mkdir -p $(CALIB_PARTS)
+	@./$(HOST_CALIB_SCLC_UP) header > $(CALIB_PARTS)/00-header.csv
+	@./$(HOST_CALIB_SCLC_UP) construct > $(CALIB_PARTS)/01-construct.csv
+	@set -e; for pct in $(CALIB_LEVELS); do \
+	  ./$(HOST_CALIB_SCLC_UP) analyze --level $$pct > $(CALIB_PARTS)/02-analyze-$$pct.csv & \
+	  ./$(HOST_CALIB_SCLC_UP) spot --level $$pct --trials 1000 > $(CALIB_PARTS)/03-spot-$$pct.csv & \
+	done; wait
+	@./$(HOST_CALIB_SCLC_UP) spot --level 70 --trials 1000 --core 512 > $(CALIB_PARTS)/04-spot-core512-70.csv
+	@cat $(CALIB_PARTS)/*.csv > $(CALIB_DIR)/sclc-up.csv
+	@rm -rf $(CALIB_PARTS)
+	@echo "calib-sclc-up: wrote $(CALIB_DIR)/sclc-up.csv"
 
 # The same tests with ASan and UBSan. A toolchain without the runtimes gets
 # a clear skip, not a build failure.
