@@ -93,6 +93,30 @@ and moves independently of the module version.
 
 ### Fixed
 
+- An in-place SC-LDPC rate switch no longer drops in-flight repair. The
+  switch moves `base_pkt`/`base_block` to the next block boundary while the
+  blocks built before it stay in the replay ring; the NACK handler now treats
+  a block below the new origin as stale only when the ring no longer names
+  it, and the ACK path releases planes by each block's recorded
+  `(seq0, n)` span (`tbt_fec_replay_ack_seq()`) instead of a block-id
+  frontier that reads 0 until the peer's ACK catches up. `host/test_fec`
+  and `host/test_fec_sclc_data` pin both sides.
+- `tbt_session_destroy()` reads the published `fec_rx`/`fec_tx` planes under
+  `rcu_read_lock()`. A concurrent stream detach can unpublish them and drop
+  the last flow reference before the stream sweep, and the free work runs
+  after a grace period; the bare load could write into freed memory.
+- `tbt_chacha8_blocks_xor()` falls back to the scalar cipher when
+  `irq_fpu_usable()` is false, so a call from hardirq/softirq context never
+  enters `kernel_fpu_begin()` over an interrupted task's live FPU state.
+- The mode=3 adaptive default now runs the same buildable predicate as the
+  data plane. The 0.8.0 GF(16) codec caps the uplink at `n=21`, so the old
+  ladder's `20/12` and `24/8` entries are no longer inferred as
+  `adaptive=on` and then refused as an unsupported profile.
+- `Makefile`: `SRCS` lists `tbtun/tbt_fec_late.h`, `tbtun-objs` no longer
+  repeats six object files, and `clean` removes every host test and bench
+  binary, including `test_ack`, `test_fin_tail`, `test_map`,
+  `test_fec_sclc_data`, `test_mux`, their `_san` variants and
+  `bench_sclc_recovery`.
 - The ACK credit is now counted in shares (`groups*(n+m)` per block), not
   DATA packets; it supersedes the 0.8.0 packet-credit model. The cap is
   16384 shares (64 blocks x 256); the host formula is

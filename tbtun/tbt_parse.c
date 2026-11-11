@@ -875,12 +875,25 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         bool ladder = false;
 
         if (cfg->fec && cfg->mode == 3)
-            ladder = (shares == TBT_FEC_MAX_SHARES &&
-                      (cfg->n == 64 || cfg->n == 76 || cfg->n == 102 ||
-                       cfg->n == 128 || cfg->n == 151 || cfg->n == 178)) ||
-                     (shares == 32 &&
-                      (cfg->n == 8 || cfg->n == 16 || cfg->n == 20 ||
-                       cfg->n == 24));
+        {
+            u8 variant = shares == TBT_FEC_MAX_SHARES
+                             ? TBT_FEC_SCLC_DOWN
+                             : TBT_FEC_SCLC_UP;
+            bool shipped =
+                (shares == TBT_FEC_MAX_SHARES &&
+                 (cfg->n == 64 || cfg->n == 76 || cfg->n == 102 ||
+                  cfg->n == 128 || cfg->n == 151 || cfg->n == 178)) ||
+                (shares == 32 &&
+                 (cfg->n == 8 || cfg->n == 16 || cfg->n == 20 ||
+                  cfg->n == 24));
+
+            /* The 0.8.0 GF(16) codec is narrower than the old ladder:
+             * 20/12 and 24/8 do not fit block=64. Inference must agree with
+             * the data plane, or an unbuildable fixed shape defaults to
+             * adaptive and is then refused as an unsupported profile. */
+            ladder = shipped &&
+                     tbt_fec_adapt_sclc_buildable(variant, cfg->n, cfg->m);
+        }
         cfg->adaptive = cfg->fec && (cfg->mode != 3 || ladder);
     }
     if (cfg->adaptive && !cfg->fec)

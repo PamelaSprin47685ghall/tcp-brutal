@@ -2460,6 +2460,11 @@ static void tbt_fec_tx_codec_tick(struct tbt_session *sess,
     tx->blk_m = want_m;
     tx->band = tbt_fec_grouped_band(e->codec, 0);
     tx->rate_ppm = (u32)((((u64)n * 1000000u) + shares - 1u) / shares);
+    /* The new split starts at the next block boundary, and the origin moves
+     * with it. Blocks built under the old split stay in the replay ring and
+     * are identified by their own recorded (seq0, n) interval: they lie
+     * below base_block while still in flight, so the NACK and ACK paths
+     * compare packets, never block ids against the new origin. */
     tx->base_pkt = tx->seq;
     tx->base_block = tx->cur_block;
     tbt_fec_tx_sent_clear(tx);
@@ -6844,14 +6849,21 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
              * block. */
             if (ack_advanced && READ_ONCE(tx->replay))
             {
-                u64 frontier = tbt_fec_block_of_seq_base(
-                    READ_ONCE(tx->peer_pkts), tx->base_pkt, tx->base_block,
-                    tx->groups, tx->n);
+                u64 peer_pkts = READ_ONCE(tx->peer_pkts);
+                bool low_mem =
+                    tbt_mem_avail_kb() < TBT_FEC_REPLAY_MEM_LOW_KB;
 
-                tbt_fec_replay_ack(
-                    tx->replay, frontier,
-                    tbt_mem_avail_kb() < TBT_FEC_REPLAY_MEM_LOW_KB,
-                    &tx->replay_lock);
+                /* An in-place rate switch moves the shape origin to the
+                 * next block boundary. Until the peer's ACK catches up the
+                 * new origin lies past peer_pkts, so a block-id frontier
+                 * would be 0 and every pre-switch plane would stay
+                 * resident. The helper picks the interval form for SCLC. */
+                tbt_fec_replay_ack_peer(tx->replay,
+                                        READ_ONCE(tx->sclc_codec), peer_pkts,
+                                        READ_ONCE(tx->base_pkt),
+                                        READ_ONCE(tx->base_block),
+                                        tx->groups, READ_ONCE(tx->n), low_mem,
+                                        &tx->replay_lock);
             }
             /* Zero credit is not "unlimited": it would stop the packetizer
              * forever if it replaced a real window, and accepting it as a
@@ -6938,18 +6950,21 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
         tbase = tx->base_block;
         tband = tx->band;
         spin_unlock_bh(&tx->shape_lock);
-        if (h.block_id < tbase)
-        {
-            atomic64_inc(&sess->fec_nack_stale_epoch);
-            return 0;
-        }
         /* A block names its own split. The ring stores that split when the
          * block is built, so a NACK is parsed with the requested block's
-         * n/m and seq0, never the sender's current shape. */
+         * n/m and seq0, never the sender's current shape. It is also what
+         * decides staleness: a rate switch advances base_block, and every
+         * block built just before the switch lies below it while still in
+         * flight and resident. Only an identity the ring forgot is stale. */
         spin_lock_bh(&tx->replay_lock);
         have_shape = tbt_fec_replay_shape(tx->replay, h.block_id, &tn, &tm,
                                           &tseq0);
         spin_unlock_bh(&tx->replay_lock);
+        if (tbt_fec_nack_stale(h.block_id, tbase, have_shape))
+        {
+            atomic64_inc(&sess->fec_nack_stale_epoch);
+            return 0;
+        }
         if (!have_shape)
         {
             tn = cur_tn;
@@ -7007,9 +7022,12 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
         /* The block is already delivered: a replay cannot help, and every
          * share of it would be a duplicate on the wire. This races a NACK
          * sent before the ACK reached the peer. */
-        if (tbt_fec_block_delivered_base(
-                h.block_id, READ_ONCE(tx->peer_pkts), tx->base_pkt,
-                tx->base_block, tx->groups, tn))
+        if (have_shape
+                ? tbt_fec_block_delivered_seq0(
+                      tseq0, tg, tn, READ_ONCE(tx->peer_pkts))
+                : tbt_fec_block_delivered_base(
+                      h.block_id, READ_ONCE(tx->peer_pkts), tx->base_pkt,
+                      tx->base_block, tx->groups, tn))
         {
             atomic64_add(tbt_fec_bitmap_count(n.share_mask),
                          &sess->fec_replay_dedup);

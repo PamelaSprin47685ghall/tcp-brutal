@@ -3440,9 +3440,68 @@ static void test_replay_alloc_balance(void)
     }
 }
 
+/* A rate switch moves the TX shape origin to the next block boundary while
+ * blocks built before it are still in flight. The peer's ACK frontier then
+ * lags the new origin; a block-id frontier computed from it is 0 and every
+ * resident plane survives. The per-block interval form releases each plane
+ * whose own (seq0, n) span the frontier covers. */
+static void test_replay_ack_across_switch(void)
+{
+    struct tbt_fec_replay *r;
+    tbt_fec_spinlock_t host_lock = 0;
+    u8 rec[96] = {0};
+    u16 i;
+
+    r = tbt_fec_replay_new(4, 4, 2, 64);
+    ok(r != NULL, "switch ack: ring", NULL);
+    /* Blocks 0..3 at n=4 over 4 groups: span 16, origins 0/16/32/48. */
+    for (i = 0; i < 4; i++)
+    {
+        ok_int(tbt_fec_replay_ensure_block(r, (u64)i, 4, 2, (u64)i * 16, 0,
+                                           &host_lock),
+               0, "switch ack: pre-switch plane");
+        ok_int(tbt_fec_replay_store(r, (u64)i, 0, 0, rec, sizeof(rec)), 0,
+               "switch ack: pre-switch record");
+    }
+    /* The switch happens at seq 64: block 4 starts there at n=2 (span 8),
+     * and tx->base_pkt/base_block move to 64/4. */
+    ok_int(tbt_fec_replay_ensure_block(r, 4, 2, 4, 64, 0, &host_lock), 0,
+           "switch ack: post-switch plane");
+    ok_int(tbt_fec_replay_store(r, 4, 0, 0, rec, sizeof(rec)), 0,
+           "switch ack: post-switch record");
+
+    ok_u64(tbt_fec_block_of_seq_base(50, 64, 4, 4, 2), 0,
+           "switch ack: a frontier computed from the new base is 0");
+    tbt_fec_replay_ack_peer(r, false, 50, 64, 4, 4, 2, false, &host_lock);
+    ok(tbt_fec_replay_has(r, 0, 0, 0),
+       "switch ack: the fixed-shape frontier path releases nothing", NULL);
+
+    /* The peer has delivered through seq 50: blocks 0..2 (ends 16/32/48)
+     * are whole; block 3 (end 64) is not. */
+    tbt_fec_replay_ack_peer(r, true, 50, 64, 4, 4, 2, false, &host_lock);
+    for (i = 0; i < 3; i++)
+        ok(!tbt_fec_replay_has(r, (u64)i, 0, 0),
+           "switch ack: covered pre-switch plane released", NULL);
+    ok(tbt_fec_replay_has(r, 3, 0, 0),
+       "switch ack: in-flight pre-switch plane kept", NULL);
+    ok(tbt_fec_replay_has(r, 4, 0, 0),
+       "switch ack: post-switch plane kept", NULL);
+
+    tbt_fec_replay_ack_peer(r, true, 64, 64, 4, 4, 2, false, &host_lock);
+    ok(!tbt_fec_replay_has(r, 3, 0, 0),
+       "switch ack: plane released at its own span end", NULL);
+    ok(tbt_fec_replay_has(r, 4, 0, 0),
+       "switch ack: shorter post-switch span still in flight", NULL);
+    tbt_fec_replay_ack_peer(r, true, 72, 64, 4, 4, 2, false, &host_lock);
+    ok(!tbt_fec_replay_has(r, 4, 0, 0),
+       "switch ack: post-switch plane released at its span end", NULL);
+    tbt_fec_replay_free(r);
+}
+
 int main(void)
 {
     test_replay_alloc_balance();
+    test_replay_ack_across_switch();
     test_header_roundtrip();
     test_hdr_check();
     test_ack_bytes();

@@ -1200,6 +1200,31 @@ void tbt_fec_replay_reset(struct tbt_fec_replay *r)
 }
 #endif
 
+/* Return detached planes to the hot pool or free them. Both ACK forms drop
+ * under the replay lock and release outside it. */
+static void tbt_fec_replay_drop_planes(struct tbt_fec_replay *r, u8 **drop,
+                                       u32 n, bool low_mem,
+                                       tbt_fec_spinlock_t *lock)
+{
+    u32 i, hot_max = low_mem ? TBT_FEC_REPLAY_HOT_LOW
+                             : TBT_FEC_REPLAY_HOT_MAX;
+
+    for (i = 0; i < n; i++)
+    {
+        bool kept = false;
+
+        tbt_fec_lock(lock);
+        if (r->hot_n < hot_max)
+        {
+            r->hot[r->hot_n++] = drop[i];
+            kept = true;
+        }
+        tbt_fec_unlock(lock);
+        if (!kept)
+            tbt_fec_free(drop[i]);
+    }
+}
+
 /* Release block planes the peer has acknowledged. Blocks below frontier are
  * delivered; keeping their records would only hold memory. The hot pool is
  * capped at 8 (4 under the 220 MiB memory floor). */
@@ -1207,8 +1232,7 @@ void tbt_fec_replay_ack(struct tbt_fec_replay *r, u64 frontier, bool low_mem,
                         tbt_fec_spinlock_t *lock)
 {
     u8 *drop[TBT_FEC_REPLAY_K_MAX];
-    u32 i, n = 0, hot_max = low_mem ? TBT_FEC_REPLAY_HOT_LOW :
-                                      TBT_FEC_REPLAY_HOT_MAX;
+    u32 i, n = 0;
 
     if (!r)
         return;
@@ -1226,20 +1250,46 @@ void tbt_fec_replay_ack(struct tbt_fec_replay *r, u64 frontier, bool low_mem,
         }
     }
     tbt_fec_unlock(lock);
-    for (i = 0; i < n; i++)
-    {
-        bool kept = false;
+    tbt_fec_replay_drop_planes(r, drop, n, low_mem, lock);
+}
 
-        tbt_fec_lock(lock);
-        if (r->hot_n < hot_max)
-        {
-            r->hot[r->hot_n++] = drop[i];
-            kept = true;
-        }
-        tbt_fec_unlock(lock);
-        if (!kept)
-            tbt_fec_free(drop[i]);
+/* Release by each block's own packet interval. A rate switch moves the shape
+ * origin to the next block boundary while the blocks built before it stay
+ * resident; a block-id frontier derived from the new origin is 0 until the
+ * peer's ACK catches up, which stalled eviction for the whole switch-over
+ * window. The recorded (seq0, n) span answers directly, whatever shape built
+ * the block. */
+void tbt_fec_replay_ack_seq(struct tbt_fec_replay *r, u64 peer_pkts,
+                            bool low_mem, tbt_fec_spinlock_t *lock)
+{
+    u8 *drop[TBT_FEC_REPLAY_K_MAX];
+    u32 i, n = 0;
+    u64 floor = 0;
+
+    if (!r)
+        return;
+    tbt_fec_lock(lock);
+    for (i = 0; i < r->k; i++)
+    {
+        u64 id, end;
+
+        if (!r->blk_rec[i] || r->block_start[i] == ~0ULL ||
+            !r->shape_n[i])
+            continue;
+        id = r->block_start[i];
+        end = r->shape_seq0[i] + (u64)r->groups * r->shape_n[i];
+        if (end > peer_pkts)
+            continue;
+        if (id + 1 > floor)
+            floor = id + 1;
+        drop[n++] = r->blk_rec[i];
+        r->blk_rec[i] = NULL;
+        r->block_start[i] = ~0ULL;
     }
+    if (floor > r->ack_floor)
+        r->ack_floor = floor;
+    tbt_fec_unlock(lock);
+    tbt_fec_replay_drop_planes(r, drop, n, low_mem, lock);
 }
 
 /* ------------------------------------------------------------------ *
