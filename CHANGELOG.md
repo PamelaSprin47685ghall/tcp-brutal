@@ -42,8 +42,21 @@ and moves independently of the module version.
   (`recv: Connection reset by peer`). A real `EPOLLERR`, or `EPOLLHUP`
   without a clean read EOF, still aborts. The loopback passed 20 of 20
   consecutive sanitizer runs after the change.
+- A block whose first share never arrived had no ring entry, so the NACK
+  walk skipped it and the delivery frontier waited forever while later
+  blocks filled the ring (measured at 256 MiB, 20% loss: `next=1135`, ring
+  `1136..1142`, no drops). The client now probes parity row 0 of a missing
+  head, as the module does; the reply allocates the block and the next walk
+  names every missing share. Both modes then completed the 256 MiB, 20% loss
+  run byte-exact (268,435,456 B, SHA-256 match) with the default 1 MiB local
+  queue: `adaptive=off` at 0.93 MiB/s and `adaptive=on` at 0.83 MiB/s with
+  zero FBK commits. The queue bound was not the cause.
 - `host/test_client_rx` covers the nine-slot credit headroom, the
-  first-attempt sample policy and the `m_current`/`m_target` split.
+  first-attempt sample policy, the missing-head probe and the
+  `m_current`/`m_target` split. In the userspace client, `adaptive=on`
+  currently keeps `m_target` at the split the CFG shipped; the controller's
+  sampling and ticks are diagnostic only, so nobody should read the client
+  as already switching rates on measured loss.
 
 ## [0.10.0] - 2026-11-11
 

@@ -648,6 +648,33 @@ static void test_nack_short_block_limits(void)
           "nack limits: a delivered block is never named again");
 }
 
+/* A block whose first share never arrived has no ring entry. The normal
+ * NACK walk cannot name it, so the frontier waits forever while later blocks
+ * sit in the ring (measured at 256 MiB: next=1135, ring 1136..1142). Probe
+ * parity row 0 for the missing head, as the module does. */
+static void test_sparse_probe(void)
+{
+    const u8 *nack;
+    u64 t0;
+
+    clear_engine();
+    set_downlink_shape();
+    marker_block(1, 1u * 128, 128, 128);
+    CHECK(f.rx_next_block == 0, "probe: block 0 is the missing head");
+    clear_pending();
+    t0 = now_ns();
+    f.rx_hole_ns = t0;
+    f.rx_probe_ns = 0;
+    flow_rx_nack(&f, t0 + TBT_NACK_FIRST_NS +
+                         2ull * TBT_NACK_RETRY_NS + 1000000ull);
+    nack = nack_for_group(0);
+    CHECK(nack != NULL, "probe: a sparse NACK reaches the head block");
+    if (nack)
+        CHECK(nack_names(nack, 128),
+              "probe: parity row 0 names the block cut");
+    CHECK(f.rx_sparse_probe == 1, "probe: the probe is counted once");
+}
+
 /* A 200 ms carrier RTT: the first NACK waits one trip after the gap first
  * appeared, not the 30 ms floor, and the ACK carries the sampled value
  * instead of the old 1 ms placeholder. The retry interval follows the same
@@ -3249,6 +3276,7 @@ int main(void)
     test_app_eof_sends_fin();
     test_tx_encode_failure();
     test_tx_replay_alloc_failure();
+    test_sparse_probe();
     test_fbk_commit();
     test_credit_headroom();
     test_adaptive_sample_policy();

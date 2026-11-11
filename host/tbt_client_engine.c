@@ -250,6 +250,9 @@ struct flow
     bool rx_deliver_started;
     u64 rx_late_share;
     u64 rx_stale_nack;
+    u64 rx_sparse_probe;
+    u64 rx_hole_ns;   /* the head block has no share yet */
+    u64 rx_probe_ns;  /* last sparse probe */
     u64 rx_window_drop;
     u64 rx_inflight_bad;
     u64 rx_block_stalled;
@@ -1868,7 +1871,15 @@ static struct rx_block *rx_block_get(struct flow *f,
     slot = (u32)(id % TBT_RX_SLOTS);
     b = &f->rx[slot];
     if (b->used && b->id != id)
+    {
+        if (f->e->cfg.verbose >= 2)
+            logmsg(f->e,
+                   "DBG evict slot=%u old=%llu new=%llu next=%llu\n",
+                   slot, (unsigned long long)b->id,
+                   (unsigned long long)id,
+                   (unsigned long long)f->rx_next_block);
         rx_block_release(f, b);
+    }
     if (!b->used)
     {
         f->rx_used++;
@@ -2217,6 +2228,11 @@ static void flow_rx_check(struct flow *f)
          * byte/packet delivery cursor advances only by real packets. */
         f->rx_ack_frontier = b->seq0 + (u64)b->groups * b->n;
         f->rx_next_block = b->id + 1;
+        if (f->e->cfg.verbose >= 2)
+            logmsg(f->e,
+                   "DBG deliver block=%llu next=%llu used=%u\n",
+                   (unsigned long long)b->id,
+                   (unsigned long long)f->rx_next_block, f->rx_used);
         rx_block_release(f, b);
         flow_fin_maybe(f);
         (void)flow_send_ack(f);
@@ -2402,6 +2418,30 @@ static u64 nack_rtt_hold_ns(const struct engine *e)
                                                  TBT_NACK_RTT_HOLD_MAX_NS;
 }
 
+/* A block whose first share never arrived has no ring entry, so the normal
+ * NACK walk cannot name it: the delivery frontier waits forever while later
+ * blocks sit in the ring (measured at 256 MiB, 20% loss: next=1135, ring
+ * 1136..1142). Probe parity row 0 of the missing block, as the module does,
+ * so the sender's replay states the block shape and the next walk can name
+ * every missing share. */
+static void flow_send_nack_probe(struct flow *f, u64 id, u64 now)
+{
+    struct tbt_fec_nack n;
+    u8 body[TBT_FEC_NACK_LEN];
+
+    if (!f->rx_n || f->rx_n >= f->rx_shares)
+        return;
+    memset(&n, 0, sizeof(n));
+    tbt_fec_bitmap_set(n.group_mask, 0);
+    tbt_fec_bitmap_set(n.share_mask, f->rx_n);
+    if (tbt_fec_nack_pack(&n, body) != TBT_FEC_NACK_LEN)
+        return;
+    f->rx_probe_ns = now;
+    f->rx_sparse_probe++;
+    (void)send_ctl_record(f->e, f, TBT_FEC_NACK, f->sid, 0, id, body,
+                          sizeof(body));
+}
+
 static void flow_rx_nack(struct flow *f, u64 now)
 {
     struct engine *e = f->e;
@@ -2432,6 +2472,22 @@ static void flow_rx_nack(struct flow *f, u64 now)
             if (g->decoded || g->marker)
                 continue;
             flow_send_nack_group(f, b, group, now);
+        }
+    }
+    /* The head has no entry at all: every share of it is still missing. */
+    {
+        u64 hid = f->rx_next_block;
+        struct rx_block *hb = &f->rx[hid % TBT_RX_SLOTS];
+
+        if (hb->used && hb->id == hid)
+            f->rx_hole_ns = 0;
+        else
+        {
+            if (!f->rx_hole_ns)
+                f->rx_hole_ns = now;
+            if (now - f->rx_hole_ns >= first_ns &&
+                now - f->rx_probe_ns >= retry_ns)
+                flow_send_nack_probe(f, hid, now);
         }
     }
 }
@@ -2838,6 +2894,9 @@ static int handle_cfg(struct flow *f, const u8 *body)
     f->rx_shares = (u16)(sh.n + sh.m);
     (void)flow_rx_credit_update(f);
     f->rx_shape_block = 0;
+    f->rx_hole_ns = 0;
+    f->rx_probe_ns = 0;
+    f->rx_sparse_probe = 0;
     f->cfg_epoch = c.epoch;
     if (!flow_rx_codec(f, sh.n, sh.m))
     {
@@ -3299,6 +3358,21 @@ static void flow_tick(struct flow *f, u64 now)
             rx_block_shares ? (u32)(f->rx_credit_shares / rx_block_shares) : 0;
 
         f->last_stat_ns = now;
+        if (e->cfg.verbose >= 2)
+        {
+            char ids[TBT_RX_SLOTS * 24];
+            size_t o = 0;
+            u32 k;
+
+            ids[0] = '\0';
+            for (k = 0; k < TBT_RX_SLOTS; k++)
+                if (f->rx[k].used)
+                    o += (size_t)snprintf(ids + o, sizeof(ids) - o,
+                                          "%llu,",
+                                          (unsigned long long)f->rx[k].id);
+            logmsg(e, "DBG ring next=%llu used=%u ids=%s\n",
+                   (unsigned long long)f->rx_next_block, f->rx_used, ids);
+        }
         logmsg(e,
                "tbt_client: flow %llu near=%d tx_seq=%llu ack_next=%llu "
                "rx_next=%llu rx_bytes=%llu rx_used=%u rx_late=%llu "
