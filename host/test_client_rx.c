@@ -29,6 +29,114 @@ static u8 payload[TBT_FEC_S];
 static int checks;
 static int failures;
 
+/* Minimal SHA-256 for the byte-exact shape-switch regression. */
+struct sha256
+{
+    u32 h[8];
+    u64 bits;
+    u8 buf[64];
+    size_t len;
+};
+
+static const u32 sha_k[64] = {
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+    0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+    0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+    0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+    0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+    0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+};
+
+static u32 ror32(u32 x, int n) { return (x >> n) | (x << (32 - n)); }
+
+static void sha_block(struct sha256 *s, const u8 *p)
+{
+    u32 w[64], a, b, c, d, e, f, g, h;
+    int i;
+
+    for (i = 0; i < 16; i++)
+        w[i] = (u32)p[i * 4] << 24 | (u32)p[i * 4 + 1] << 16 |
+               (u32)p[i * 4 + 2] << 8 | p[i * 4 + 3];
+    for (i = 16; i < 64; i++)
+    {
+        u32 s0 = ror32(w[i - 15], 7) ^ ror32(w[i - 15], 18) ^ (w[i - 15] >> 3);
+        u32 s1 = ror32(w[i - 2], 17) ^ ror32(w[i - 2], 19) ^ (w[i - 2] >> 10);
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    }
+    a = s->h[0]; b = s->h[1]; c = s->h[2]; d = s->h[3];
+    e = s->h[4]; f = s->h[5]; g = s->h[6]; h = s->h[7];
+    for (i = 0; i < 64; i++)
+    {
+        u32 s1 = ror32(e, 6) ^ ror32(e, 11) ^ ror32(e, 25);
+        u32 ch = (e & f) ^ (~e & g);
+        u32 t1 = h + s1 + ch + sha_k[i] + w[i];
+        u32 s0 = ror32(a, 2) ^ ror32(a, 13) ^ ror32(a, 22);
+        u32 maj = (a & b) ^ (a & c) ^ (b & c);
+        u32 t2 = s0 + maj;
+        h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+    }
+    s->h[0] += a; s->h[1] += b; s->h[2] += c; s->h[3] += d;
+    s->h[4] += e; s->h[5] += f; s->h[6] += g; s->h[7] += h;
+}
+
+static void sha_init(struct sha256 *s)
+{
+    static const u32 iv[8] = { 0x6a09e667, 0xbb67ae85, 0x3c6ef372,
+                               0xa54ff53a, 0x510e527f, 0x9b05688c,
+                               0x1f83d9ab, 0x5be0cd19 };
+    memcpy(s->h, iv, sizeof(iv));
+    s->bits = 0;
+    s->len = 0;
+}
+
+static void sha_update(struct sha256 *s, const void *data, size_t len)
+{
+    const u8 *p = data;
+
+    s->bits += (u64)len * 8;
+    while (len)
+    {
+        size_t take = 64 - s->len;
+        if (take > len) take = len;
+        memcpy(s->buf + s->len, p, take);
+        s->len += take; p += take; len -= take;
+        if (s->len == 64) { sha_block(s, s->buf); s->len = 0; }
+    }
+}
+
+static void sha_final(struct sha256 *s, u8 out[32])
+{
+    u64 bits = s->bits;
+    u8 pad = 0x80, zero = 0, lenbuf[8];
+    int i;
+
+    sha_update(s, &pad, 1);
+    while (s->len != 56) sha_update(s, &zero, 1);
+    for (i = 0; i < 8; i++) lenbuf[i] = (u8)(bits >> (56 - i * 8));
+    sha_update(s, lenbuf, 8);
+    for (i = 0; i < 8; i++)
+    {
+        out[i * 4] = (u8)(s->h[i] >> 24);
+        out[i * 4 + 1] = (u8)(s->h[i] >> 16);
+        out[i * 4 + 2] = (u8)(s->h[i] >> 8);
+        out[i * 4 + 3] = (u8)s->h[i];
+    }
+}
+
+static void sha_digest(const u8 *p, size_t len, u8 out[32])
+{
+    struct sha256 s;
+    sha_init(&s);
+    sha_update(&s, p, len);
+    sha_final(&s, out);
+}
+
+
 #define CHECK(cond, name)                 \
     do                                    \
     {                                     \
@@ -901,6 +1009,156 @@ static void test_tx_block_credit(void)
     tx_clear_carriers();
 }
 
+/* Shape switches mid-stream with three DATA shares dropped per block: the
+ * old and new n/m must decode from each block header and deliver 4 MiB+
+ * byte-exactly. */
+static void test_shape_switch_stream(void)
+{
+    static const u16 shapes[] = { 128, 139, 146, 160, 163, 152 };
+    const size_t target = 4u * 1024u * 1024u + 65536u;
+    u8 *expected = malloc(target + 512u * 1024u);
+    size_t expected_len = 0;
+    u64 block_id = 0, seq0 = 0, rng = 0x123456789abcdefull;
+    u8 dig_e[32], dig_o[32];
+    int shape_i = 0;
+
+    clear_engine();
+    set_downlink_shape();
+    while (expected_len < target)
+    {
+        u16 n = shapes[shape_i++ % (int)(sizeof(shapes) / sizeof(shapes[0]))];
+        u16 m = (u16)(256 - n);
+        u8 *data = malloc((size_t)n * TBT_FEC_S);
+        u8 *parity = malloc((size_t)m * TBT_FEC_S);
+        u8 *dp[256], *pp[256];
+        struct tbt_fec_grouped *codec;
+        u16 i;
+
+        if (!data || !parity || !expected)
+            abort();
+        for (i = 0; i < (u16)(n * TBT_FEC_S); i++)
+        {
+            rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+            data[i] = (u8)rng;
+        }
+        memcpy(expected + expected_len, data, (size_t)n * TBT_FEC_S);
+        expected_len += (size_t)n * TBT_FEC_S;
+        for (i = 0; i < n; i++) dp[i] = data + (size_t)i * TBT_FEC_S;
+        for (i = 0; i < m; i++) pp[i] = parity + (size_t)i * TBT_FEC_S;
+        codec = flow_rx_codec(&f, n, m);
+        CHECK(codec != NULL, "switch: codec for the block's n/m");
+        if (!codec || tbt_fec_grouped_encode(codec, 0, dp, n, pp))
+        {
+            free(data); free(parity);
+            break;
+        }
+        /* Drop three DATA shares; all parity still arrives. */
+        for (i = 0; i < n; i++)
+        {
+            if (i == 1 || i == (u16)(n / 2) || i == (u16)(n - 2))
+                continue;
+            send_data_payload(block_id, seq0, n, m, 0, i, TBT_FEC_S, false,
+                              dp[i]);
+        }
+        for (i = 0; i < m; i++)
+            send_parity_payload(block_id, seq0, n, m, 0, i, n, 0, pp[i]);
+        CHECK(f.rx_next_block == block_id + 1,
+              "switch: the mixed-shape block decodes");
+        block_id++;
+        seq0 += n;
+        free(data);
+        free(parity);
+    }
+    CHECK(expected_len >= 4u * 1024u * 1024u,
+          "switch: more than 4 MiB transmitted");
+    CHECK(f.rx_deliver_bytes == expected_len,
+          "switch: every expected byte delivered");
+    CHECK(f.out_len == expected_len && f.out_off == 0,
+          "switch: the delivery buffer holds every byte");
+    CHECK(f.rx_shape_bad == 0 && f.rx_window_drop == 0,
+          "switch: no shape rejection or window drop");
+    CHECK(f.rx_credit_bad == 0, "switch: credit invariant holds");
+    if (f.out_len == expected_len)
+    {
+        sha_digest(expected, expected_len, dig_e);
+        sha_digest(f.out, f.out_len, dig_o);
+        CHECK(memcmp(dig_e, dig_o, 32) == 0,
+              "switch: byte-exact SHA over 4 MiB+");
+    }
+    free(expected);
+}
+
+/* adaptive=off must not install the control law and must not emit a
+ * periodic FBK target; CFG_ACK still goes out. */
+static void make_down_cfg(u8 body[TBT_FEC_CFG_LEN], u32 epoch)
+{
+    struct tbt_fec_cfg c;
+
+    memset(&c, 0, sizeof(c));
+    c.epoch = epoch;
+    c.n = 128;
+    c.m = 128;
+    c.groups = 1;
+    c.flags = TBT_FEC_CFG_F_INIT;
+    c.seed = 7;
+    c.codec_variant = 2;
+    c.L = 8;
+    c.block = 256;
+    c.rate_ppm = 500000;
+    CHECK(tbt_fec_cfg_pack(&c, body) == 0, "adaptive: pack CFG");
+}
+
+static void test_adaptive_off(void)
+{
+    u8 body[TBT_FEC_CFG_LEN];
+
+    clear_engine();
+    e.n_car = 256;
+    e.cfg.cfg.adaptive = 0;
+    f.rx_shape_set = false;
+    make_down_cfg(body, 1);
+    CHECK(handle_cfg(&f, body) == 0, "adaptive off: CFG installs");
+    CHECK(!f.ctl_ready, "adaptive off: control law not initialized");
+    CHECK(f.rx_n == 128 && f.rx_m == 128, "adaptive off: shape stays 128/128");
+    clear_pending();
+    CHECK(flow_send_fbk(&f, 0, 1) == 0, "adaptive off: periodic FBK is a no-op");
+    CHECK(e.npending == 0, "adaptive off: no FBK target is queued");
+
+    e.cfg.cfg.adaptive = 1;
+    f.rx_shape_set = false;
+    make_down_cfg(body, 2);
+    CHECK(handle_cfg(&f, body) == 0, "adaptive on: CFG installs");
+    CHECK(f.ctl_ready, "adaptive on: control law is initialized");
+}
+
+/* nonce= on the client is the HELLO session nonce; an unset near generates
+ * one, an unset far adopts the peer's. */
+static void test_session_nonce_config(void)
+{
+    u8 pinned[16];
+
+    memset(pinned, 0xa5, sizeof(pinned));
+    clear_engine();
+    e.near = true;
+    e.cfg.cfg.nonce_set = true;
+    memcpy(e.cfg.cfg.nonce, pinned, sizeof(pinned));
+    engine_init_session_nonce(&e);
+    CHECK(e.session_nonce_set &&
+              memcmp(e.session_nonce, pinned, sizeof(pinned)) == 0,
+          "nonce: configured near nonce is used");
+
+    clear_engine();
+    e.near = true;
+    e.rng = 0x123456789abcdefull;
+    engine_init_session_nonce(&e);
+    CHECK(e.session_nonce_set, "nonce: unset near generates one");
+
+    clear_engine();
+    e.near = false;
+    engine_init_session_nonce(&e);
+    CHECK(!e.session_nonce_set, "nonce: unset far adopts the peer nonce");
+}
+
 /* The stall dump must fire once for an incomplete head and expose both
  * counters: rx_block_stalled and rx_shape_mismatch (a record whose h.n/h.m
  * differs from the committed split). */
@@ -935,6 +1193,7 @@ static void test_fbk_commit(void)
 
     clear_engine();
     f.ctl_ready = false;
+    e.cfg.cfg.adaptive = 1;
     CHECK(flow_commit_shape(&f, 9, 23), "fbk: commit 9/23");
     clear_pending();
     CHECK(flow_send_fbk(&f, 0, 1) == 0, "fbk: send");
@@ -970,6 +1229,9 @@ int main(void)
     test_far_shape_ladder();
     test_downlink_erasure();
     test_shape_rejection();
+    test_shape_switch_stream();
+    test_adaptive_off();
+    test_session_nonce_config();
     test_stall_dump();
     test_tx_idle_empty();
     test_tx_peer_credit();
