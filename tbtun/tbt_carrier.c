@@ -1187,6 +1187,7 @@ static void tbt_session_poll_body(struct tbt_session *sess)
      * and no room to grow reaches it. The check also grows the stripe when
      * it can, so the next pass has capacity without touching the user. */
     tbt_carrier_capacity_check(sess);
+    tbt_tx_fec_poll(sess);
     if (!READ_ONCE(sess->closing))
         tbt_session_arm(sess, TBT_SW_POLL, msecs_to_jiffies(50));
 }

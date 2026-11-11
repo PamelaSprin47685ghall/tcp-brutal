@@ -1834,6 +1834,7 @@ struct tbt_session
     atomic64_t fec_tx_block_partial;
     atomic64_t fec_replay_evicted_before_nack;
     atomic64_t fec_tx_pump_rearm;
+    atomic64_t fec_tx_run_leak;
     /* FEC sender scheduling. fec_flush_pass counts accepted DATA records.
      * fec_flush_skip and fec_hol_wait are kept for the old per-carrier queue
      * accounting; the session FIFO never queues a record behind one socket,
@@ -2480,6 +2481,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
 void tbt_stream_put(struct tbt_stream *st);
 void tbt_stream_detach_from_session(struct tbt_stream *st);
 void tbt_tx_fec_rearm_if_pending(struct tbt_session *sess, struct tbt_stream *st);
+void tbt_tx_fec_poll(struct tbt_session *sess);
 void tbt_stream_maybe_detach(struct tbt_stream *st);
 void tbt_stream_kill(struct tbt_stream *st, u8 reason);
 void tbt_stream_kill_by_sid(struct tbt_session *sess, u64 sid, u8 reason);

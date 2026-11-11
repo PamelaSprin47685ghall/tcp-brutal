@@ -2181,6 +2181,62 @@ void tbt_tx_fec_rearm_if_pending(struct tbt_session *sess, struct tbt_stream *st
     rcu_read_unlock();
 }
 
+void tbt_tx_fec_poll(struct tbt_session *sess)
+{
+    struct tbt_fec_tx *tx;
+    u64 ring, now, last, peer, seq;
+    u32 run, credit;
+    bool sched, credit_ok;
+
+    if (!sess || !sess->fec)
+        return;
+    rcu_read_lock();
+    tx = rcu_dereference(sess->fec_tx);
+    if (!tx)
+    {
+        rcu_read_unlock();
+        return;
+    }
+    ring = (u64)(READ_ONCE(tx->head) - READ_ONCE(tx->tail)) +
+           READ_ONCE(tx->fill);
+    now = ktime_get_ns();
+    last = READ_ONCE(tx->last_pump_ns);
+    run = atomic_read(&sess->fec_tx_run);
+    sched = test_bit(TBT_SW_FEC_TX, &sess->sched);
+    peer = READ_ONCE(tx->peer_pkts);
+    seq = READ_ONCE(tx->seq);
+    credit = READ_ONCE(tx->credit);
+    credit_ok = !tbt_fec_credit_waiting(
+        peer, seq, credit,
+        (u32)READ_ONCE(tx->groups) * READ_ONCE(tx->n));
+    if (tbt_fec_pump_stuck(run, READ_ONCE(tx->last_pump_seq), seq, now,
+                           last, NSEC_PER_SEC))
+    {
+        atomic64_inc(&sess->fec_tx_run_leak);
+        atomic_fetch_and(~1u, &sess->fec_tx_run);
+        atomic_fetch_or(2u, &sess->fec_tx_run);
+        atomic64_inc(&sess->fec_tx_pump_rearm);
+        pr_info_ratelimited("tbtun: FEC pump stuck poll sid=%llu ring=%llu seq=%llu run=%u sched=%d\n",
+                            (unsigned long long)tx->sid,
+                            (unsigned long long)ring,
+                            (unsigned long long)seq, run, sched);
+        tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+    }
+    else if (tbt_fec_pump_rearm_due(ring != 0, credit_ok, run, sched, now,
+                                    last,
+                                    (u64)TBT_FEC_PUMP_REARM_MS *
+                                        NSEC_PER_MSEC))
+    {
+        atomic64_inc(&sess->fec_tx_pump_rearm);
+        pr_info_ratelimited("tbtun: FEC pump rearm poll sid=%llu ring=%llu credit=%u seq=%llu run=%u sched=%d\n",
+                            (unsigned long long)tx->sid,
+                            (unsigned long long)ring, credit,
+                            (unsigned long long)seq, run, sched);
+        tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+    }
+    rcu_read_unlock();
+}
+
 static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
 {
     u64 since = READ_ONCE(st->close_since_ns);

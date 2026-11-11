@@ -3032,7 +3032,9 @@ void tbt_fec_tx_work(struct work_struct *w)
         rcu_read_unlock();
     }
     tbt_fec_tx_work_body(sess);
-    atomic_fetch_and(~(1u << TBT_FEC_RUN_BIT), &sess->fec_tx_run);
+    if (!(atomic_fetch_and(~(1u << TBT_FEC_RUN_BIT), &sess->fec_tx_run) &
+          (1u << TBT_FEC_RUN_BIT)))
+        atomic64_inc(&sess->fec_tx_run_leak);
     if (atomic_fetch_and(~(1u << TBT_FEC_AGAIN_BIT), &sess->fec_tx_run) &
         (1u << TBT_FEC_AGAIN_BIT))
         tbt_session_arm(sess, TBT_SW_FEC_TX, 0);

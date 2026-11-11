@@ -1311,6 +1311,28 @@ static inline bool tbt_fec_credit_waiting(u64 peer_pkts, u64 seq, u32 credit,
            seq - peer_pkts >= (u64)credit + block_pkts;
 }
 
+/* Poll-time decision: the FEC TX work is not running (run bit clear),
+ * nothing is queued (sched clear), the ring has bytes, credit is open, and
+ * the last attempt is older than the rearm threshold. */
+static inline bool tbt_fec_pump_rearm_due(bool ring, bool credit_ok,
+                                          u32 run, bool sched,
+                                          u64 now, u64 last_ns,
+                                          u64 threshold_ns)
+{
+    return ring && credit_ok && !(run & 1u) && !sched && last_ns &&
+           now > last_ns && now - last_ns > threshold_ns;
+}
+
+/* The body has held the run bit without moving the packet seq for the
+ * stuck threshold: release it so the next poll can arm a fresh body. */
+static inline bool tbt_fec_pump_stuck(u32 run, u64 last_seq, u64 seq,
+                                      u64 now, u64 last_ns,
+                                      u64 threshold_ns)
+{
+    return (run & 1u) && last_seq == seq && last_ns && now > last_ns &&
+           now - last_ns > threshold_ns;
+}
+
 /* A stream owns a subset of the session's physical groups. `mask` is the
  * 256-bit set (bit p = physical group p); `map[local]` is the physical group
  * of local index 0..count-1. Bits at or above total_groups are invalid, and
