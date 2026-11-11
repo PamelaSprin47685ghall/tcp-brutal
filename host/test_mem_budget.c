@@ -174,8 +174,9 @@ static void test_carrier_ledger(void)
 }
 
 /* One super-block is groups * (n + m) * S. Near: 8 groups of 8+24 shares.
- * Far: 1 group of 128+128 shares. Both are 2 MiB per super-block; the arena
- * keeps 66 logical slots but allocates each block plane on demand. */
+ * Far: 1 group of 128+128 shares. At S=1024 both are 256 KiB per
+ * super-block; the arena keeps 66 logical slots but allocates each block
+ * plane on demand. */
 static void test_fec_arena(void)
 {
     const size_t s = TBT_FEC_S;

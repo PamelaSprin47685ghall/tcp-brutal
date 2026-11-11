@@ -2580,7 +2580,7 @@ static void test_group_reassembly(void)
 
 static void test_credit_split(void)
 {
-    enum { N = 4, M = 0, K = TBT_FEC_REPLAY_K_MAX, SLOTS = 66 };
+    enum { N = 4, M = 4, K = TBT_FEC_REPLAY_K_MAX, SLOTS = 66 };
     u32 prev = 0;
     u32 credit;
     u16 g;
@@ -2628,8 +2628,8 @@ static void test_credit_split(void)
            "cap below a super-block floors at one share");
     ok_u32(tbt_fec_credit_packets(0, N, M, K, SLOTS, 0), 1,
            "zero groups floors at one share");
-    ok_u32(tbt_fec_credit_packets(32, 0, M, K, SLOTS, 0), 1,
-           "zero n floors at one share");
+    ok_u32(tbt_fec_credit_packets(32, 0, M, K, SLOTS, 0),
+           (u32)(K - 2) * 32 * M, "zero n still counts the m shares");
 }
 
 /* ------------------------------------------------------------------ *
