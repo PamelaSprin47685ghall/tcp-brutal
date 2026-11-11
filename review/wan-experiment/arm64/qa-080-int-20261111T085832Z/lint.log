@@ -1,0 +1,34 @@
+PASS  no-pump-lock-work-cancel           
+PASS  sk-cleared-before-release          
+PASS  stream-insert-rechecks             
+PASS  callbacks-lock-user-data           
+PASS  stats-rcu-no-sleep                 
+PASS  listen-clear-before-cancel         
+PASS  proc-entries-removed               
+PASS  frame-types-total                  
+PASS  no-zero-length-data                
+PASS  carrier-buffers-allocated          
+PASS  render-fits-line-max               
+PASS  retain-trim-serialized             
+PASS  kfree-marker-proof                 
+PASS  no-gfp-kernel-in-rx                
+PASS  retx-snd-una-gated                 
+PASS  chunk-one-record                   
+PASS  atomic-stats-atomic64              
+SELFTEST PASS  kfree-ctor-ok
+SELFTEST PASS  kfree-ctor-missing-marker
+SELFTEST PASS  kfree-drain-ok
+SELFTEST PASS  kfree-drain-cancel
+SELFTEST PASS  kfree-drain-no-removal
+SELFTEST PASS  pump-cancel-before-lock
+SELFTEST PASS  pump-cancel-under-lock
+SELFTEST PASS  pump-retire-w_pump
+SELFTEST PASS  callback-locked
+SELFTEST PASS  callback-unlocked
+SELFTEST PASS  ctor-order-ok
+SELFTEST PASS  ctor-order-bad
+SELFTEST PASS  atomic-stats-bare-access
+SELFTEST PASS  atomic-stats-wrapped-access
+
+17/17 checks passed, 0 failed
+14/14 self-tests passed, 0 failed

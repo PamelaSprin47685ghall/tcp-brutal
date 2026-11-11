@@ -1,0 +1,4 @@
+base: 45ae232
+d8088f0 docs: record the 0.8.0 release notes
+32072db fix(fec): freeze FIN at the real short-block tail
+HEAD: d8088f0c5f54eeaadac46441dccf3c7d6f57fba8

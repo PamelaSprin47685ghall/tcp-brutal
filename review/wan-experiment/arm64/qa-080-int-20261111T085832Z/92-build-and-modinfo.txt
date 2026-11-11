@@ -1,0 +1,46 @@
+make: Entering directory '/usr/lib/modules/7.3.0-rc6-1-MANJARO/build'
+make[1]: Entering directory '/root/tbt-080-int'
+  CC [M]  tbtun/tbt_core.o
+  CC [M]  tbtun/tbt_session.o
+  CC [M]  tbtun/tbt_procfs.o
+  CC [M]  tbtun/tbt_listen.o
+  CC [M]  tbtun/tbt_proto.o
+  CC [M]  tbtun/tbt_carrier.o
+  CC [M]  tbtun/tbt_sock.o
+  CC [M]  tbtun/tbt_tx.o
+  CC [M]  tbtun/tbt_rx.o
+  CC [M]  tbtun/tbt_rec.o
+  CC [M]  tbtun/tbt_parse.o
+  CC [M]  tbtun/tbt_http.o
+  CC [M]  tbtun/tbt_fec_batch.o
+  CC [M]  tbtun/tbt_crypto.o
+  CC [M]  tbtun/tbt_portmap.o
+  CC [M]  tbtun/tbt_map.o
+  CC [M]  tbtun/tbt_fec.o
+  CC [M]  tbtun/tbt_fec_data.o
+  CC [M]  tbtun/tbt_fec_adapt.o
+  CC [M]  tbtun/tbt_fec_adapt_sclc.o
+  CC [M]  tbtun/tbt_mux.o
+  CC [M]  tbtun/tbt_fec_sclc.o
+  CC [M]  tbtun/tbt_fec_codec_cache.o
+  CC [M]  tbtun/tbt_sc_ldpc.o
+  CC [M]  tbtun/tbt_sc_ldpc_gf16.o
+  CC [M]  tbtun/tbt_sclc_uplink.o
+  LD [M]  tbtun.o
+  MODPOST Module.symvers
+  CC [M]  tbtun.mod.o
+  CC [M]  .module-common.o
+  LD [M]  tbtun.ko
+  BTF [M] tbtun.ko
+make[1]: Leaving directory '/root/tbt-080-int'
+make: Leaving directory '/usr/lib/modules/7.3.0-rc6-1-MANJARO/build'
+---MODINFO---
+0.8.0
+6FF2030C982DC8A87C3A8E5
+7.3.0-rc6-1-MANJARO SMP preempt mod_unload 
+ae42ed4e6d72e2108a76381fb7776cb8d892db1b266f3e6c4a32408ff4b7776e  /root/tbt-080-int/tbtun.ko
+WARNINGS=0 ERRORS=0 LINES=36
+-rw-r--r-- 1 root root 11457776 Nov 11 16:56 /root/tbt-080-int/tbtun.ko
+0.8.0
+6FF2030C982DC8A87C3A8E5
+7.3.0-rc6-1-MANJARO SMP preempt mod_unload 
