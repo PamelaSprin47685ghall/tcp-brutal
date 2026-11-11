@@ -293,6 +293,24 @@ static inline bool tbt_tx_peer_fin_close_expired(bool rx_fin_done,
            now > rx_fin_done_ns && now - rx_fin_done_ns > bound;
 }
 
+/* The short peer-FIN close bound is a half-close rule: it may release the
+ * stream only after our TX direction has nothing unacknowledged. While
+ * tx_ack < tx_seq the reverse direction is still draining, and killing it
+ * truncates a response the peer is still reading (curl closes its write
+ * half immediately after the request). The normal close budget and the FEC
+ * repair/credit hold own that case. */
+static inline bool tbt_tx_peer_fin_close_allowed(bool peer_fin_done,
+                                                 bool tx_fin_written,
+                                                 bool tx_unacked,
+                                                 u64 rx_fin_done_ns,
+                                                 u64 now, u64 bound)
+{
+    if (tx_unacked)
+        return false;
+    return tbt_tx_peer_fin_close_expired(peer_fin_done, tx_fin_written,
+                                         rx_fin_done_ns, now, bound);
+}
+
 /* A peer/target has closed its write side when TCP reports RCV_SHUTDOWN, or
  * when the socket reached TCP_CLOSE without a local kill. The latter catches a
  * target that closed fully and cleared sk_shutdown; a dead stream is ignored. */

@@ -1486,6 +1486,16 @@ static void test_peer_fin_close_bound(void)
        "close bound: one ns past the bound kills");
     ok(!tbt_tx_peer_fin_close_expired(true, false, t + 10, t, bound),
        "close bound: a timestamp from the future does not expire");
+    /* Half-close: the short peer-FIN bound may not reset the reverse TX. */
+    ok(!tbt_tx_peer_fin_close_allowed(true, false, true, t, t + bound + 1,
+                                      bound),
+       "close bound: unacked TX blocks the short bound");
+    ok(tbt_tx_peer_fin_close_allowed(true, false, false, t, t + bound + 1,
+                                     bound),
+       "close bound: acked TX allows the short bound");
+    ok(!tbt_tx_peer_fin_close_allowed(true, true, false, t, t + bound + 1,
+                                      bound),
+       "close bound: a written FIN takes the detach path");
 }
 
 /* Init creates the primary flow before any OPEN. The default quota takes all

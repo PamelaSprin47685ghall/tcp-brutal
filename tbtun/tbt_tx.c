@@ -2092,6 +2092,7 @@ static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
     u64 start, budget, bound, now = tbt_now_ns();
     bool peer_fin = READ_ONCE(st->rx_fin_done);
     bool fin_written = READ_ONCE(st->tx_fin_written);
+    bool tx_unacked = READ_ONCE(st->tx_ack) < READ_ONCE(st->tx_seq);
 
     budget = tbt_tx_wait_budget_ns(sess, st);
     bound = tbt_tx_close_bound(peer_fin && !fin_written, budget);
@@ -2117,7 +2118,7 @@ static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
                       (READ_ONCE(sk->sk_shutdown) & RCV_SHUTDOWN) != 0,
                       READ_ONCE(sk->sk_state) == TCP_CLOSE, false))
             tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
-        if (tbt_tx_peer_fin_close_expired(peer_fin, fin_written,
+        if (tbt_tx_peer_fin_close_allowed(peer_fin, fin_written, tx_unacked,
                                           READ_ONCE(st->rx_fin_done_ns),
                                           now, bound))
         {
