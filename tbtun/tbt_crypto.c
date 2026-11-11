@@ -393,12 +393,134 @@ static void tbt_chacha8_blocks_xor_sse2(u32 st[16], u8 *data, size_t blocks,
 }
 #endif
 
+/* Four-block interleaved NEON for the user-space aarch64 client. The shape
+ * follows the SSE2 path line for line: each lane holds one block's four
+ * state rows in four 128-bit vectors, so one quarter-round advances all four
+ * columns of a block and the diagonal round only rotates the lanes of B, C
+ * and D. Four blocks give the core independent chains to overlap.
+ *
+ * NEON is baseline on every AArch64 target, so this path needs no run-time
+ * dispatch and no target attribute. The kernel build must never see
+ * <arm_neon.h>: the guard keeps this block out of it, and the kernel keeps
+ * the scalar path. */
+#if !defined(__KERNEL__) && defined(__aarch64__) && \
+    (defined(__GNUC__) || defined(__clang__))
+#define TBT_CHACHA_NEON 1
+
+#include <arm_neon.h>
+
+typedef uint32x4_t tbt_chacha_v4u32;
+
+/* Rotate each 32-bit lane left by a compile-time count. */
+#define TBT_CHACHA_NEON_ROTL(x, n) \
+    vorrq_u32(vshlq_n_u32((x), (n)), vshrq_n_u32((x), 32 - (n)))
+
+#define TBT_CHACHA_NEON_VQR(a, b, c, d)              \
+    do {                                             \
+        (a) = vaddq_u32((a), (b));                   \
+        (d) = veorq_u32((d), (a));                   \
+        (d) = TBT_CHACHA_NEON_ROTL((d), 16);         \
+        (c) = vaddq_u32((c), (d));                   \
+        (b) = veorq_u32((b), (c));                   \
+        (b) = TBT_CHACHA_NEON_ROTL((b), 12);         \
+        (a) = vaddq_u32((a), (b));                   \
+        (d) = veorq_u32((d), (a));                   \
+        (d) = TBT_CHACHA_NEON_ROTL((d), 8);          \
+        (c) = vaddq_u32((c), (d));                   \
+        (b) = veorq_u32((b), (c));                   \
+        (b) = TBT_CHACHA_NEON_ROTL((b), 7);          \
+    } while (0)
+
+/* Lane rotations for the diagonal round. vextq_u32(x, x, k) yields lanes
+ * k..3,0..k-1, the same permutation as the SSE2 shuffle helpers. */
+#define TBT_CHACHA_NEON_VDOUBLE(a, b, c, d)  \
+    do {                                     \
+        TBT_CHACHA_NEON_VQR(a, b, c, d);     \
+        (b) = vextq_u32((b), (b), 1);        \
+        (c) = vextq_u32((c), (c), 2);        \
+        (d) = vextq_u32((d), (d), 3);        \
+        TBT_CHACHA_NEON_VQR(a, b, c, d);     \
+        (b) = vextq_u32((b), (b), 3);        \
+        (c) = vextq_u32((c), (c), 2);        \
+        (d) = vextq_u32((d), (d), 1);        \
+    } while (0)
+
+/* State row D of block ctr + n: [counter low, counter high, nonce low,
+ * nonce high]. bd already holds the last two lanes. */
+static inline uint32x4_t tbt_chacha_neon_dvec(uint32x4_t bd, u64 c)
+{
+    uint32x4_t v = vsetq_lane_u32((u32)c, bd, 0);
+
+    return vsetq_lane_u32((u32)(c >> 32), v, 1);
+}
+
+/* XOR one 128-bit keystream word into the payload at p. */
+static inline void tbt_chacha_neon_xor16(u8 *p, uint32x4_t o)
+{
+    vst1q_u8(p, vreinterpretq_u8_u32(
+                    veorq_u32(vreinterpretq_u32_u8(vld1q_u8(p)), o)));
+}
+
+__attribute__((noinline)) static void
+tbt_chacha8_blocks_xor_neon(u32 st[16], u8 *data, size_t blocks, u32 rounds)
+{
+    uint32x4_t ba = vld1q_u32(st);
+    uint32x4_t bb = vld1q_u32(st + 4);
+    uint32x4_t bc = vld1q_u32(st + 8);
+    uint32x4_t bd = vld1q_u32(st + 12);
+    uint32x4_t A[4], B[4], C[4], D[4];
+    u64 ctr = (u64)st[12] | ((u64)st[13] << 32);
+    size_t g;
+    u32 l;
+
+    for (g = 0; g < blocks; g += 4)
+    {
+        u32 r;
+
+        for (l = 0; l < 4; l++)
+        {
+            u64 c = ctr + l;
+
+            A[l] = ba;
+            B[l] = bb;
+            C[l] = bc;
+            D[l] = tbt_chacha_neon_dvec(bd, c);
+        }
+        for (r = 0; r < rounds / 2; r++)
+            for (l = 0; l < 4; l++)
+                TBT_CHACHA_NEON_VDOUBLE(A[l], B[l], C[l], D[l]);
+        for (l = 0; l < 4; l++)
+        {
+            u64 c = ctr + l;
+            u8 *p = data + (g + l) * TBT_CRYPTO_BLOCK_LEN;
+            uint32x4_t o;
+
+            o = vaddq_u32(A[l], ba);
+            tbt_chacha_neon_xor16(p, o);
+            o = vaddq_u32(B[l], bb);
+            tbt_chacha_neon_xor16(p + 16, o);
+            o = vaddq_u32(C[l], bc);
+            tbt_chacha_neon_xor16(p + 32, o);
+            o = vaddq_u32(D[l], tbt_chacha_neon_dvec(bd, c));
+            tbt_chacha_neon_xor16(p + 48, o);
+        }
+        ctr += 4;
+    }
+    st[12] = (u32)ctr;
+    st[13] = (u32)(ctr >> 32);
+    tbt_memzero_explicit(A, sizeof(A));
+    tbt_memzero_explicit(B, sizeof(B));
+    tbt_memzero_explicit(C, sizeof(C));
+    tbt_memzero_explicit(D, sizeof(D));
+}
+#endif
+
 static void tbt_chacha8_blocks_xor(u32 st[16], u8 *data, size_t blocks,
                                    u32 rounds)
 {
     if (blocks == 0)
         return;
-#ifdef TBT_CHACHA_SSE2
+#if defined(TBT_CHACHA_SSE2) || defined(TBT_CHACHA_NEON)
     {
         size_t n = blocks & ~(size_t)3;
 
@@ -407,7 +529,11 @@ static void tbt_chacha8_blocks_xor(u32 st[16], u8 *data, size_t blocks,
 #ifdef __KERNEL__
             kernel_fpu_begin();
 #endif
+#ifdef TBT_CHACHA_SSE2
             tbt_chacha8_blocks_xor_sse2(st, data, n, rounds);
+#else
+            tbt_chacha8_blocks_xor_neon(st, data, n, rounds);
+#endif
 #ifdef __KERNEL__
             kernel_fpu_end();
 #endif
