@@ -261,7 +261,11 @@ struct engine
     u8 rx_nonce[TBT_CRYPTO_NONCE_LEN];
     struct tbt_crypto_pair crypto;
 
-    /* TX shape of this side */
+    /* The two 0.8 FEC directions. The uplink is always the 8x32 GF(16)
+     * shape; it never inherits the configured downlink n/m. tx_shape is the
+     * shape this role actually transmits: up for near, down for far. */
+    struct tbt_fec_sclc_shape down_shape;
+    struct tbt_fec_sclc_shape up_shape;
     struct tbt_fec_sclc_shape tx_shape;
     u16 tx_n, tx_m, tx_groups;
     u64 tx_seed;
@@ -1245,8 +1249,9 @@ static int flow_send_cfg(struct flow *f)
     c.rate_ppm = (u32)(((u64)f->tx_shape.n * 1000000u +
                         (f->tx_shape.n + f->tx_shape.m) - 1u) /
                        (f->tx_shape.n + f->tx_shape.m));
-    logmsg(e, "tbt_client: flow %llu cfg tx n=%u m=%u groups=%u block=%u L=%u\n",
-           (unsigned long long)f->sid, c.n, c.m, c.groups, c.block, c.L);
+    logmsg(e, "tbt_client: flow %llu cfg tx %s n=%u m=%u groups=%u block=%u L=%u\n",
+           (unsigned long long)f->sid, e->near ? "up" : "down", c.n, c.m,
+           c.groups, c.block, c.L);
     if (tbt_fec_cfg_pack(&c, body))
         return -EINVAL;
     return send_ctl_record(e, f, TBT_FEC_CFG, f->sid, 0, 0, body, sizeof(body));
@@ -2776,15 +2781,51 @@ int tbt_engine_run(const struct tbt_engine_cfg *cfg)
     signal(SIGPIPE, SIG_IGN);
     rng_seed(e);
 
-    if (tbt_fec_sclc_shape_of(cfg->cfg.n, cfg->cfg.m, cfg->cfg.carriers,
-                              cfg->cfg.w, cfg->cfg.L, &e->tx_shape))
+    if (cfg->cfg.carriers != 256)
     {
         fprintf(stderr,
-                "tbt_client: not an SC-LDPC shape: n=%u m=%u carriers=%u\n",
-                cfg->cfg.n, cfg->cfg.m, cfg->cfg.carriers);
+                "tbt_client: the 0.8 SC-LDPC client needs carriers=256 (8x32 up, 1x256 down)\n");
         free(e);
         return -EINVAL;
     }
+    if (tbt_fec_sclc_shape_of(8, 24, 256, TBT_FEC_SCLC_BLOCK_UP,
+                              TBT_FEC_SCLC_L_UP, &e->up_shape))
+    {
+        fprintf(stderr, "tbt_client: cannot build the 8x32 uplink shape\n");
+        free(e);
+        return -EINVAL;
+    }
+    {
+        struct tbt_fec_sclc_shape cfg_shape;
+
+        if (tbt_fec_sclc_shape_of(cfg->cfg.n, cfg->cfg.m, cfg->cfg.carriers,
+                                  cfg->cfg.w, cfg->cfg.L, &cfg_shape))
+        {
+            fprintf(stderr,
+                    "tbt_client: not an SC-LDPC shape: n=%u m=%u carriers=%u\n",
+                    cfg->cfg.n, cfg->cfg.m, cfg->cfg.carriers);
+            free(e);
+            return -EINVAL;
+        }
+        if (cfg_shape.variant == TBT_FEC_SCLC_DOWN)
+            e->down_shape = cfg_shape;
+        else if (tbt_fec_sclc_shape_of(128, 128, 256, 256, 8,
+                                       &e->down_shape))
+        {
+            fprintf(stderr, "tbt_client: cannot build the 1x256 downlink shape\n");
+            free(e);
+            return -EINVAL;
+        }
+        if (!e->near && cfg_shape.variant != TBT_FEC_SCLC_DOWN)
+        {
+            fprintf(stderr,
+                    "tbt_client: far role needs a downlink n/m (1x256), got n=%u m=%u\n",
+                    cfg->cfg.n, cfg->cfg.m);
+            free(e);
+            return -EINVAL;
+        }
+    }
+    e->tx_shape = e->near ? e->up_shape : e->down_shape;
     e->tx_n = e->tx_shape.n;
     e->tx_m = e->tx_shape.m;
     e->tx_groups = e->tx_shape.groups;
@@ -2855,10 +2896,12 @@ int tbt_engine_run(const struct tbt_engine_cfg *cfg)
         }
     }
     logmsg(e,
-           "tbt_client: role=%s carriers=%u n=%u m=%u groups=%u crypto=%d "
-           "drop_ppm=%u\n",
-           e->near ? "near" : "far", e->n_car, e->tx_n, e->tx_m,
-           e->tx_groups, e->crypto_on, e->drop_ppm);
+           "tbt_client: role=%s carriers=%u down_tx n=%u m=%u groups=%u block=%u L=%u up_tx n=%u m=%u groups=%u block=%u L=%u crypto=%d drop_ppm=%u\n",
+           e->near ? "near" : "far", e->n_car, e->down_shape.n,
+           e->down_shape.m, e->down_shape.groups, e->down_shape.block,
+           e->down_shape.L, e->up_shape.n, e->up_shape.m,
+           e->up_shape.groups, e->up_shape.block, e->up_shape.L,
+           e->crypto_on, e->drop_ppm);
 
     e->running = true;
     while (e->running)

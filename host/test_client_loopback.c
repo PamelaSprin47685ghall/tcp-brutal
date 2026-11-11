@@ -219,8 +219,10 @@ static void fill_cfg(struct tbt_engine_cfg *ec, bool near, u16 base,
     c->carriers = 256;
     if (near)
     {
-        c->n = 8;
-        c->m = 24;
+        /* The configured n/m name the downlink shape. The uplink is the
+         * fixed 8x32 GF(16) shape and must not inherit these values. */
+        c->n = 128;
+        c->m = 128;
         set_v4(&c->listen, (u16)(base + 1), &c->listen_port);
         set_v4(&c->peer, base, &c->peer_port);
         set_v4(&c->target, (u16)(base + 2), &c->target_port);
