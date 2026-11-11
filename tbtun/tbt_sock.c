@@ -879,6 +879,10 @@ struct tbt_pending
     struct list_head node;
     struct socket *sock;
     u8 slot; /* near mapping slot this connection arrived on */
+    /* First flow-admission refusal: the connection waits for the previous
+     * stream's close handshake until this jiffies deadline. */
+    unsigned long admit_until;
+    bool admit_extended; /* the full closing grace was already granted */
 };
 
 /* The near allocator's view of a sid: any object still in the hash owns the
@@ -995,11 +999,10 @@ static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock,
         if (IS_ERR(flow))
         {
             err = PTR_ERR(flow);
-            /* No group is free, or the shape cannot carry a second flow:
-             * queueing the socket would not help. The pending path resets
-             * the connection, and the counter says why. */
-            if (err == -ENOSPC)
-                atomic64_inc(&sess->fec_stream_refused);
+            /* No group is free, or the shape cannot carry a second flow.
+             * The pending path decides whether this is a sequential
+             * predecessor still closing (wait) or a genuinely concurrent
+             * stream (reset and count). */
             return err == -ENOSPC ? -EOPNOTSUPP : -EINVAL;
         }
     }
@@ -1086,11 +1089,37 @@ static void tbt_pending_body(struct tbt_session *sess)
         err = tbt_stream_start_now(sess, sock, p->slot);
         if (err == -EOPNOTSUPP)
         {
-            /* The FEC flow table has no group left for this stream. Reset the
-             * connection now: queueing it cannot help until another flow
-             * detaches, and a two-connection protocol (iperf3's control
-             * connection plus its data connection) must see the refusal as an
-             * error instead of hanging. */
+            /* The session carries one FEC flow and the previous stream still
+             * owns it. A sequential connection arrives inside that stream's
+             * FIN handshake: the cell-tail seal defers the FIN, and the flow
+             * is released only when the stream detaches. Resetting now turns
+             * a connection the session is about to be able to carry into
+             * ECONNRESET at connect. Wait for the handshake, but never for a
+             * live stream: a genuinely concurrent connection is still
+             * refused, with the counter saying why. */
+            unsigned long now = jiffies;
+
+            if (!p->admit_until)
+                p->admit_until = now +
+                                 msecs_to_jiffies(TBT_PENDING_LIVE_WAIT_MS);
+            if (!p->admit_extended &&
+                tbt_session_flow_owner_closing(sess))
+            {
+                p->admit_until = now +
+                                 msecs_to_jiffies(TBT_PENDING_CLOSE_WAIT_MS);
+                p->admit_extended = true;
+            }
+            if (time_before(now, p->admit_until))
+            {
+                spin_lock(&sess->lock);
+                list_add_tail(&p->node, &sess->pending);
+                sess->n_pending++;
+                spin_unlock(&sess->lock);
+                tbt_session_arm(sess, TBT_SW_PENDING,
+                                msecs_to_jiffies(1));
+                return;
+            }
+            atomic64_inc(&sess->fec_stream_refused);
             kfree(p);
             if (sock->sk)
                 tbt_sk_ops_restore(sock->sk, &sess->def_ops);

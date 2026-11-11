@@ -352,6 +352,14 @@ void tbt_listen_stop(struct tbt_tunnel *t);
  * session instead of the thread. */
 #define TBT_SESSION_DRAIN_MS 10000
 #define TBT_PENDING_MAX 128
+/* A public connection may arrive while the previous stream still owns the
+ * session's single FEC flow. Its FIN can be deferred by one cell-tail idle
+ * window and its flow is released only when the stream detaches after the
+ * FIN handshake. A pending connection waits this long once the old stream is
+ * visibly closing, and this long for a stream that has not started closing
+ * yet before the refusal stands. */
+#define TBT_PENDING_CLOSE_WAIT_MS 3000
+#define TBT_PENDING_LIVE_WAIT_MS 50
 #define TBT_STREAMS_MAX 128
 #define TBT_STREAM_SNAP_MAX 128
 /* Discrete RTO grid for the stall survival estimate (0.5/1/2/4/8/16 s). */
@@ -2523,6 +2531,10 @@ void tbt_tx_fec_poll(struct tbt_session *sess);
 void tbt_stream_maybe_detach(struct tbt_stream *st);
 void tbt_stream_kill(struct tbt_stream *st, u8 reason);
 void tbt_stream_kill_by_sid(struct tbt_session *sess, u64 sid, u8 reason);
+/* Whether the stream that owns the session's FEC flow already started its
+ * close handshake. A pending connection uses this to wait for a sequential
+ * predecessor without waiting out a live concurrent stream. */
+bool tbt_session_flow_owner_closing(struct tbt_session *sess);
 /* 0.2.0 session lifetime (review/s2-merged-design.md §1.3/§5). tbt_session_get()
  * is the admission gate and takes sess->lock; tbt_session_put() completes
  * &drained on the last reference and never frees. tbt_session_arm()/cancel()
