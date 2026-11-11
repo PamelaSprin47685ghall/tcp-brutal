@@ -762,13 +762,87 @@ static int tbt_hello_bad(struct tbt_carrier *c, const char *why)
     return -EPROTO;
 }
 
-/* Validate HELLO, adopt or check the nonce, and join the far side's slot. */
+/* The far side's HELLO gate: the source anchor, the session nonce and the
+ * nonce authority rule. Called twice for one HELLO -- as a read-only precheck
+ * before tbt_rx_hello_crypto(), and as the commit after it -- with sess->lock
+ * held both times. Several carriers can pass the precheck together, so the
+ * second call repeats every check against whatever the winner committed;
+ * only then does it adopt an unset nonce, fix the anchor and record the peer
+ * generation. Each refusal is counted exactly once, here. */
+static int tbt_hello_far_gate(struct tbt_session *sess, struct tbt_carrier *c,
+                              const u8 *body, const struct tbt_addr *src,
+                              u8 gen, bool commit, const char **why)
+{
+    struct tbt_tunnel *t = sess->tunnel;
+    bool adopt = false;
+
+    /* An established anchor rejects every other source, free carrier index
+     * included, before the nonce is even examined: a stranger cannot probe
+     * the nonce. */
+    if (sess->anchor_set && !tbt_addr_eq(src, &sess->anchor))
+    {
+        atomic64_inc(&sess->join_src_reject);
+        *why = "source address";
+        return -EPROTO;
+    }
+    if (sess->nonce_pinned || sess->nonce_set)
+    {
+        if (memcmp(body + 2, sess->nonce, sizeof(sess->nonce)))
+        {
+            atomic64_inc(&sess->session_join_bad);
+            *why = "session nonce";
+            return -EPROTO;
+        }
+    }
+    else
+    {
+        /* Only the configured near peer may define the session nonce on its
+         * first carrier; otherwise any connection could name a session
+         * without the secret. A far tunnel has no configured peer (0), so
+         * the first HELLO defines it and every later one must match; a
+         * configured peer must match its source address. */
+        if (tbt_addr_set(&t->cfg.peer) && !tbt_addr_eq(src, &t->cfg.peer))
+        {
+            atomic64_inc(&sess->join_nonce_reject);
+            *why = "nonce authority";
+            return -EPROTO;
+        }
+        adopt = true;
+    }
+    if (!commit)
+        return 0;
+    if (adopt)
+    {
+        memcpy(sess->nonce, body + 2, sizeof(sess->nonce));
+        sess->nonce_set = true;
+    }
+    /* Only a HELLO that passed every check may fix the anchor. */
+    if (!sess->anchor_set)
+    {
+        sess->anchor = *src;
+        sess->anchor_set = true;
+    }
+    WRITE_ONCE(c->peer_gen, gen);
+    return 0;
+}
+
+/* Validate HELLO, adopt or check the nonce, and join the far side's slot.
+ *
+ * Two phases keep a refused HELLO from leaving state behind. The stateless
+ * checks (path id, source anchor, session nonce, nonce authority) run before
+ * tbt_rx_hello_crypto(), so a wrong nonce can neither adopt the peer's key
+ * nor poison the RX context. Every mutation -- the session nonce, the anchor,
+ * peer_gen, peer_hello and join_retries -- happens only after the crypto step
+ * accepted the HELLO. The commit repeats the anchor and nonce checks under
+ * sess->lock because another carrier may have fixed them in between. */
 int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
 {
     struct tbt_session *sess = c->sess;
     struct tbt_tunnel *t = sess->tunnel;
-    u8 want_role = t->cfg.role == TBT_ROLE_NEAR ? TBT_ROLE_FAR : TBT_ROLE_NEAR;
-    int err;
+    bool far = t->cfg.role == TBT_ROLE_FAR;
+    u8 want_role = far ? TBT_ROLE_NEAR : TBT_ROLE_FAR;
+    struct tbt_addr src;
+    u8 gen = 0;
 
     if (!tbt_hello_admit(sess->fec, h->body_len, body, want_role))
         return tbt_hello_bad(c, "length/version/role");
@@ -780,17 +854,45 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
         bool spare = h->path_id >= sess->n_pri;
         u8 want = tbt_carrier_profile(sess, h->path_id, spare);
         u8 prof = body[22] & 3;
-        u8 gen = (body[22] >> 2) & 0xf;
 
+        gen = (body[22] >> 2) & 0xf;
         if (prof != want)
         {
             atomic64_inc(&sess->profile_mismatch);
             return tbt_hello_bad(c, "profile");
         }
-        c->peer_gen = gen;
     }
     if (tbt_le16(body + 18) != TBT_PAYLOAD_MAX || tbt_le16(body + 20) != TBT_CHUNK_MAX)
         return tbt_hello_bad(c, "payload/chunk ceiling");
+
+    /* Phase one: admission. Nothing here writes session or carrier state. */
+    if (far)
+    {
+        struct sock *csk = tbt_carrier_sk_get(c);
+        const char *why = NULL;
+        int gerr;
+
+        if (h->path_id >= sess->n_car || !csk)
+        {
+            if (csk)
+                tbt_carrier_sk_put(csk);
+            return tbt_hello_bad(c, "path id");
+        }
+        tbt_sk_peer_addr(csk, &src);
+        tbt_carrier_sk_put(csk);
+        spin_lock(&sess->lock);
+        gerr = tbt_hello_far_gate(sess, c, body, &src, gen, false, &why);
+        spin_unlock(&sess->lock);
+        if (gerr)
+            return tbt_hello_bad(c, why);
+    }
+    else
+    {
+        if (memcmp(body + 2, sess->nonce, sizeof(sess->nonce)))
+            return tbt_hello_bad(c, "session nonce");
+        if (h->path_id != c->index)
+            return tbt_hello_bad(c, "path id");
+    }
 
     if (sess->fec)
     {
@@ -801,82 +903,26 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
             return tbt_hello_bad(c, why);
     }
 
-    if (t->cfg.role == TBT_ROLE_FAR)
+    /* Phase two: commit. Every check that guards a one-time write is repeated
+     * under the lock the write itself takes. */
+    if (far)
     {
-        struct sock *csk = tbt_carrier_sk_get(c);
-        struct tbt_addr src;
+        const char *why = NULL;
+        int gerr;
+        int err;
 
-        if (h->path_id >= sess->n_car || !csk)
-        {
-            if (csk)
-                tbt_carrier_sk_put(csk);
-            return tbt_hello_bad(c, "path id");
-        }
-        tbt_sk_peer_addr(csk, &src);
         spin_lock(&sess->lock);
-        /* An established anchor rejects every other source, free carrier
-         * index included, before the nonce is even examined: a stranger
-         * cannot probe the nonce. */
-        if (sess->anchor_set && !tbt_addr_eq(&src, &sess->anchor))
-        {
-            atomic64_inc(&sess->join_src_reject);
-            spin_unlock(&sess->lock);
-            tbt_carrier_sk_put(csk);
-            return tbt_hello_bad(c, "source address");
-        }
-        if (sess->nonce_pinned)
-        {
-            if (memcmp(body + 2, sess->nonce, sizeof(sess->nonce)))
-            {
-                atomic64_inc(&sess->session_join_bad);
-                spin_unlock(&sess->lock);
-                tbt_carrier_sk_put(csk);
-                return tbt_hello_bad(c, "session nonce");
-            }
-        }
-        else if (!sess->nonce_set)
-        {
-            /* Only the configured near peer may define the session nonce on
-             * its first carrier; otherwise any connection could name a
-             * session without the secret. A far tunnel has no configured
-             * peer (0), so the first HELLO defines it and every later one
-             * must match; a configured peer must match its source address. */
-            if (!csk || (tbt_addr_set(&t->cfg.peer) &&
-                         !tbt_addr_eq(&src, &t->cfg.peer)))
-            {
-                atomic64_inc(&sess->join_nonce_reject);
-                spin_unlock(&sess->lock);
-                tbt_carrier_sk_put(csk);
-                return tbt_hello_bad(c, "nonce authority");
-            }
-            memcpy(sess->nonce, body + 2, sizeof(sess->nonce));
-            sess->nonce_set = true;
-        }
-        else if (memcmp(body + 2, sess->nonce, sizeof(sess->nonce)))
-        {
-            atomic64_inc(&sess->session_join_bad);
-            spin_unlock(&sess->lock);
-            tbt_carrier_sk_put(csk);
-            return tbt_hello_bad(c, "session nonce");
-        }
-        /* Only a HELLO that passed the nonce check may fix the anchor. */
-        if (!sess->anchor_set)
-        {
-            sess->anchor = src;
-            sess->anchor_set = true;
-        }
+        gerr = tbt_hello_far_gate(sess, c, body, &src, gen, true, &why);
         spin_unlock(&sess->lock);
-        tbt_carrier_sk_put(csk);
+        if (gerr)
+            return tbt_hello_bad(c, why);
         err = tbt_session_join(sess, c, h->path_id);
         if (err)
             return err;
     }
     else
     {
-        if (memcmp(body + 2, sess->nonce, sizeof(sess->nonce)))
-            return tbt_hello_bad(c, "session nonce");
-        if (h->path_id != c->index)
-            return tbt_hello_bad(c, "path id");
+        WRITE_ONCE(c->peer_gen, gen);
         WRITE_ONCE(c->peer_hello, true);
         /* The far joined this generation: the join_dup storm is over. */
         sess->join_retries = 0;
