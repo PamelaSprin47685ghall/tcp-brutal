@@ -1503,6 +1503,76 @@ static void tbt_carrier_arm_nospace(struct tbt_carrier *c, struct sock *sk)
     }
 }
 
+/* Exact wire length of one FEC chunk in the shape this session runs.
+ * The HTTP profile wraps a TBT_FEC_HDR_LEN + TBT_FEC_S record in a chunk
+ * whose size line is "430\r\n" (three hex digits), so the whole chunk is
+ * 5 + 1072 + 2 = 1079 bytes. Raw mode writes the record alone. */
+#define TBT_SHELL_HTTP_CHUNK_LEN (5 + TBT_FEC_HDR_LEN + TBT_FEC_S + 2)
+#define TBT_SHELL_RAW_CHUNK_LEN (TBT_FEC_HDR_LEN + TBT_FEC_S)
+
+/* Cap GSO at the current MSS and remember what was observed. With every
+ * carrier write marked MSG_EOR (tcp_sendmsg_locked sets TCP_SKB_CB->eor),
+ * tcp_skb_can_collapse_to() is false, so autocork, tcp_grow_skb() and the
+ * MTU probe cannot merge the next chunk into this skb. With the GSO cap the
+ * stack cannot build a TSO skb either. A carrier whose MSS is smaller than
+ * one chunk cannot satisfy the precondition at all: count it and leave the
+ * substitution engine off for that socket. */
+static void tbt_car_shell_prep(struct tbt_session *sess, struct sock *sk)
+{
+    struct tcp_sock *tp = tcp_sk(sk);
+    u32 mss = READ_ONCE(tp->mss_cache);
+    u32 gso;
+
+    if (!READ_ONCE(tbt_shell_retx) || !sess || !sk)
+        return;
+    gso = READ_ONCE(sk->sk_gso_max_size);
+    WRITE_ONCE(sess->shell_gso_before, gso);
+    WRITE_ONCE(sess->shell_mss, mss);
+    if (!mss || mss < TBT_SHELL_HTTP_CHUNK_LEN)
+    {
+        atomic64_inc(&sess->shell_prep_short_mss);
+        return;
+    }
+    if (gso > mss)
+        WRITE_ONCE(sk->sk_gso_max_size, mss);
+    WRITE_ONCE(sess->shell_gso_after, READ_ONCE(sk->sk_gso_max_size));
+    atomic64_inc(&sess->shell_prep_ok);
+}
+
+/* Locate the skb that owns the bytes ending at tp->write_seq and classify
+ * it. Called with the socket locked, immediately after a successful
+ * tcp_sendmsg_locked() of exactly one chunk, so the answer describes this
+ * write and nothing else. A sent skb lives in the rtx rbtree; an unsent one
+ * (window or cwnd closed) is still the write-queue tail. */
+static void tbt_car_shell_check_chunk(struct tbt_session *sess, struct sock *sk,
+                                      size_t total)
+{
+    struct tcp_sock *tp = tcp_sk(sk);
+    struct sk_buff *skb = tcp_write_queue_tail(sk);
+
+    atomic64_inc(&sess->shell_chunk_writes);
+    if (!skb || TCP_SKB_CB(skb)->end_seq != READ_ONCE(tp->write_seq))
+        skb = tcp_rtx_queue_tail(sk);
+    if (!skb || TCP_SKB_CB(skb)->end_seq != READ_ONCE(tp->write_seq))
+    {
+        atomic64_inc(&sess->shell_chunk_noskb);
+        return;
+    }
+    if (skb_is_gso(skb) || skb_shinfo(skb)->gso_size)
+    {
+        atomic64_inc(&sess->shell_chunk_gso);
+        WRITE_ONCE(sess->shell_chunk_sample, (u32)skb->len);
+        return;
+    }
+    if (skb->len != total)
+    {
+        atomic64_inc(&sess->shell_chunk_merged);
+        WRITE_ONCE(sess->shell_chunk_sample, (u32)skb->len);
+        return;
+    }
+    atomic64_inc(&sess->shell_chunk_exact);
+}
+
 /* Commit a segment list with one non-blocking socket write. Flush an older
  * tail first, then pre-check the socket's free send memory so ordinary
  * backpressure is -EAGAIN, not a partially written batch. A kernel short
@@ -1555,9 +1625,25 @@ static int tbt_carrier_send_segs(struct tbt_carrier *c, struct sock *sk,
         iov[i].iov_len = segs[i].len;
     }
     iov_iter_kvec(&msg.msg_iter, ITER_SOURCE, iov, nseg, total);
-    msg.msg_flags = MSG_DONTWAIT;
+    /* MSG_EOR marks every chunk's skb as a record boundary. It has no wire
+     * meaning for TCP; it stops the send path from appending the next chunk
+     * to this skb (tcp_skb_can_collapse_to is false) and stops autocork from
+     * withholding it. Only the experiment needs this, so the normal path is
+     * byte-for-byte unchanged. */
+    msg.msg_flags = MSG_DONTWAIT |
+                    (READ_ONCE(tbt_shell_retx) ? MSG_EOR : 0);
     lock_sock(sk);
     err = tcp_sendmsg_locked(sk, &msg, total);
+    if ((size_t)err == total)
+    {
+        size_t chunk = c->profile != 3 ? TBT_SHELL_HTTP_CHUNK_LEN
+                                       : TBT_SHELL_RAW_CHUNK_LEN;
+
+        if (total == chunk)
+            tbt_car_shell_check_chunk(c->sess, sk, total);
+        else
+            atomic64_inc(&c->sess->shell_send_other);
+    }
     release_sock(sk);
     if (err < 0)
     {
@@ -3667,6 +3753,7 @@ static void tbt_car_connect_work(struct work_struct *w)
         atomic64_inc(&sess->car_bbr_ok);
     else
         atomic64_inc(&sess->car_bbr_fail);
+    tbt_car_shell_prep(sess, s->sk);
     tbt_carrier_install_proto(s->sk);
     c->sock = s;
     rcu_assign_pointer(c->sk, s->sk);
@@ -3992,6 +4079,7 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
         atomic64_inc(&sess->car_bbr_ok);
     else
         atomic64_inc(&sess->car_bbr_fail);
+    tbt_car_shell_prep(sess, newsock->sk);
     tbt_carrier_keepalive(newsock);
     atomic_set(&c->connected, 1);
     sess->rx_adopt_events++;

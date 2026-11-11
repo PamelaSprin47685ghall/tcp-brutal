@@ -74,6 +74,15 @@ bool tbt_hold_enable = true;
 module_param_named(hold_enable, tbt_hold_enable, bool, 0644);
 MODULE_PARM_DESC(hold_enable, "Hold BBR cwnd/pacing across idle periods (default 1; 0=off)");
 
+/* Borrowed-shell retransmission experiment. Off by default and read-only
+ * after load. When enabled, a carrier socket caps its GSO size at the
+ * current MSS and marks every carrier write MSG_EOR, so one encoded FEC
+ * chunk occupies exactly one skb. The substitution engine itself is gated
+ * by the same flag; this switch also turns on its counters. */
+bool tbt_shell_retx;
+module_param_named(shell_retx, tbt_shell_retx, bool, 0444);
+MODULE_PARM_DESC(shell_retx, "Borrowed-shell retransmission experiment (default 0)");
+
 /* Retained for configuration compatibility. 0.7.0 carries one FEC flow per
  * session and that flow owns every group, so this value is ignored. */
 unsigned int tbt_fec_groups_per_flow;

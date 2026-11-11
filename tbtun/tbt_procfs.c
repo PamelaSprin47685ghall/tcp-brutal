@@ -1427,6 +1427,27 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                                    ring);
                     }
                 }
+                /* Borrowed-shell premise probe. Writes counts the 1079-byte
+                 * HTTP chunk writes (or the 1072-byte raw record) checked;
+                 * exact is the count that proves one chunk occupied one
+                 * non-GSO skb. merged/gso/noskb name every way that proof
+                 * failed, and sample is the offending skb length. */
+                seq_printf(m, "tunnel %llu shell prep=%llu short_mss=%llu "
+                              "gso_before=%u gso_after=%u mss=%u "
+                              "writes=%llu exact=%llu merged=%llu gso=%llu "
+                              "noskb=%llu other=%llu sample=%u\n", id,
+                           tbt_stat_read(&s->shell_prep_ok),
+                           tbt_stat_read(&s->shell_prep_short_mss),
+                           READ_ONCE(s->shell_gso_before),
+                           READ_ONCE(s->shell_gso_after),
+                           READ_ONCE(s->shell_mss),
+                           tbt_stat_read(&s->shell_chunk_writes),
+                           tbt_stat_read(&s->shell_chunk_exact),
+                           tbt_stat_read(&s->shell_chunk_merged),
+                           tbt_stat_read(&s->shell_chunk_gso),
+                           tbt_stat_read(&s->shell_chunk_noskb),
+                           tbt_stat_read(&s->shell_send_other),
+                           READ_ONCE(s->shell_chunk_sample));
                 /* c13: the adaptive control surface. The shape is the one in
                  * force (updated by the data plane on every epoch), and the
                  * window counters are alive-filtered DATA shares since that

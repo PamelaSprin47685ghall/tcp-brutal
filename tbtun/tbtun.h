@@ -286,6 +286,9 @@ extern unsigned int max_tunnels;
 extern unsigned int max_carriers;
 /* Peripheral BBR hold, opt-in (module param hold_enable). */
 extern bool tbt_hold_enable;
+/* Borrowed-shell retransmission experiment, opt-in (module param
+ * shell_retx). Off at load unless the operator passes shell_retx=1. */
+extern bool tbt_shell_retx;
 
 /* Carrier source ports (DESIGN.md §7.2). `used` is one absolute bitmap over
  * the whole 16-bit port space; `lo`/`hi` are the global fallback window for a
@@ -1901,6 +1904,25 @@ struct tbt_session
     atomic64_t fec_replay_miss_get;     /* total of the two causes below */
     atomic64_t fec_replay_miss_evicted; /* block no longer in the ring */
     atomic64_t fec_replay_miss_never_stored; /* block resident, share absent */
+    /* Borrowed-shell precondition probe (module param shell_retx). Every
+     * 1079-byte HTTP chunk write checks the skb that now owns those bytes:
+     * exact means len == the chunk length and the skb is not a GSO skb.
+     * merged is the autocork/coalescing case the experiment must exclude;
+     * gso is a TSO skb; noskb means the write could not be located (window
+     * closed or a short write). These counters are the observable proof
+     * that one chunk is one skb, or that it is not. */
+    atomic64_t shell_prep_ok;        /* carriers capped to MSS-sized GSO */
+    atomic64_t shell_prep_short_mss; /* carriers whose MSS < chunk length */
+    atomic64_t shell_chunk_writes;   /* chunk-sized writes checked */
+    atomic64_t shell_chunk_exact;    /* one chunk == one non-GSO skb */
+    atomic64_t shell_chunk_merged;   /* chunk coalesced into a larger skb */
+    atomic64_t shell_chunk_gso;      /* skb is GSO/TSO */
+    atomic64_t shell_chunk_noskb;    /* owning skb not found */
+    atomic64_t shell_send_other;     /* carrier writes not chunk-sized */
+    u32 shell_gso_before;            /* sk_gso_max_size seen at prep */
+    u32 shell_gso_after;             /* sk_gso_max_size after the cap */
+    u32 shell_mss;                   /* mss_cache of the last prepared sk */
+    u32 shell_chunk_sample;          /* len of the last mismatching skb */
     atomic64_t fec_nack_sparse_probe;   /* unstarted group: probe parity 0 only */
     atomic64_t fec_nack_empty_reply;    /* empty marker sent for an absent share */
     atomic64_t fec_nack_parity_reply;   /* parity/cut sent for a short block */
