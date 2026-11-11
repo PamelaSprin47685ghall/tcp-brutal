@@ -876,7 +876,7 @@ static void case_q_step(void)
     struct tbt_fec_adapt_sclc_out out;
     u64 now = SEC;
     u32 i, q_post, m_post;
-    bool bounded = true, no_rise = true, below_m = true;
+    bool no_rise = true, below_m = true;
     double diff;
 
     /* Start at the top of the downlink range: n = 192, m = m_min = 64. */
@@ -887,12 +887,12 @@ static void case_q_step(void)
     {
         feed(&c, 40, 9, true, 256);
         tick(&c, &now, &out);
-        if (out.q_raw_q16 > 42u * TBT_FEC_ADAPT_SCLC_ONE)
-            bounded = false;
     }
-    diff = out.q_raw_q16 / 65536.0 - 40.0;
-    ok(diff <= 2.0 && diff >= -2.0, "q step: q_raw settles on 40 shares");
-    ok(bounded, "q step: q_raw never exceeds 42 shares");
+    diff = out.q_raw_q16 / 65536.0 - out.q_anchor_q16 / 65536.0;
+    ok(diff <= 2.0 && diff >= -2.0,
+       "q step: q_raw settles on the analytic anchor");
+    ok(out.q_raw_q16 <= out.q_anchor_q16 + 2u * TBT_FEC_ADAPT_SCLC_ONE,
+       "q step: q_raw does not overshoot the anchor by two shares");
     ok(out.m_target > 64, "q step: m rises above the cold value");
     q_post = out.q_raw_q16;
     m_post = out.m_target;
@@ -994,12 +994,14 @@ static void case_burst_onset(void)
     u32 i, steady, peak = 0;
     bool saw_burst = false, held = true;
 
-    init_up(&c);
-    run(&c, &now, 100, 2, 3, true, 32, &out);
+    /* A high-loss downlink keeps m above m_min, where the burst
+     * feedforward is visible. */
+    init_down_n(&c, 192);
+    run(&c, &now, 116, 40, 9, true, 256, &out);
     steady = out.m_target;
     for (i = 0; i < 2; i++)
     {
-        feed(&c, 20, 3, true, 32);
+        feed(&c, 60, 9, true, 256);
         tick(&c, &now, &out);
         if (out.burst_q16 > 0)
             saw_burst = true;
@@ -1008,23 +1010,19 @@ static void case_burst_onset(void)
     }
     ok(saw_burst, "burst: burst_q16 is positive during onset");
     ok(peak >= steady + 3, "burst: m_target rises by at least 3 shares");
-    run(&c, &now, 32, 2, 3, true, 32, &out);
+    run(&c, &now, 64, 40, 9, true, 256, &out);
     ok((u32)out.m_target + 2u >= steady && steady + 2u >= (u32)out.m_target,
        "burst: m_target returns to the pre-burst value");
     eq_u32(out.burst_q16, 0,
-           "burst: burst_q16 is zero after 32 clean blocks");
+           "burst: burst_q16 is zero after 64 clean blocks");
 
-    /* A long burst must hold the feedforward up for every burst block.
-     * The uplink controller sticks at m_max after its own burst, so the
-     * return is measured on a fresh downlink. */
-    init_down_n(&c, 192);
-    run(&c, &now, 116, 2, 9, true, 256, &out);
+    /* A long burst must hold the feedforward up for every burst block. */
     steady = out.m_target;
     saw_burst = false;
     held = true;
     for (i = 0; i < 16; i++)
     {
-        feed(&c, 20, 9, true, 256);
+        feed(&c, 60, 9, true, 256);
         tick(&c, &now, &out);
         if (out.burst_q16 > 0)
             saw_burst = true;
@@ -1033,7 +1031,7 @@ static void case_burst_onset(void)
     }
     ok(saw_burst, "burst: the long burst keeps burst_q16 positive");
     ok(held, "burst: m_target stays three shares above steady");
-    run(&c, &now, 128, 2, 9, true, 256, &out);
+    run(&c, &now, 128, 40, 9, true, 256, &out);
     ok((u32)out.m_target + 2u >= steady && steady + 2u >= (u32)out.m_target,
        "burst: m_target returns after the long burst");
     eq_u32(out.burst_q16, 0,
@@ -1498,6 +1496,81 @@ static void case_fixed_point(void)
     }
 }
 
+/* A binomial DATA-loss stream at 5/10/15/20 percent must move m to the
+ * anchor's fixed point within 40 blocks, and a 20->5 percent switch must
+ * fall back within 60. */
+static u16 binom_e(u32 *s, u16 n, u32 ppm)
+{
+    u16 k = 0;
+    u16 i;
+
+    for (i = 0; i < n; i++)
+        if (rng_next(s) % 1000000u < ppm)
+            k++;
+    return k;
+}
+
+static void case_tail_anchor(void)
+{
+    static const u32 ps[] = {50000, 100000, 150000, 200000};
+    struct tbt_fec_adapt_sclc_ctl c;
+    struct tbt_fec_adapt_sclc_out out;
+    u64 now = SEC;
+    u32 k, i;
+
+    for (k = 0; k < sizeof(ps) / sizeof(ps[0]); k++)
+    {
+        u32 seed = 0x51ed270bu + k * 7919u;
+        u32 delta;
+        int off;
+        bool found;
+        u16 want;
+        u32 gap;
+
+        init_down_n(&c, 128);
+        for (i = 0; i < 16 + 40; i++)
+        {
+            feed(&c, binom_e(&seed, 128, ps[k]), 9, true, 256);
+            tick(&c, &now, &out);
+        }
+        want = fp_least_m(TBT_FEC_SCLC_DOWN, out.q_anchor_q16,
+                          out.burst_q16, out.backup, c.delta_off_q16,
+                          out.eps_q16, &delta, &off, &found);
+        ok(found, "tail anchor: the anchor fixed point exists");
+        gap = out.m_target > want ? out.m_target - want : want - out.m_target;
+        ok(gap <= 1,
+           "tail anchor: m converges to the anchor fixed point in 40 blocks");
+        if (ps[k] <= 150000)
+            eq_u32(out.m_target, c.m_min,
+                   "tail anchor: 5..15 percent sits at m_min");
+        gap = out.q_raw_q16 > out.q_anchor_q16
+                  ? out.q_raw_q16 - out.q_anchor_q16
+                  : out.q_anchor_q16 - out.q_raw_q16;
+        ok(gap <= out.sigma_q16 + TBT_FEC_ADAPT_SCLC_ONE,
+           "tail anchor: q stays within one sigma of the anchor");
+    }
+
+    {
+        u32 seed = 0x9e3779b9u;
+
+        init_down_n(&c, 128);
+        for (i = 0; i < 16 + 100; i++)
+        {
+            feed(&c, binom_e(&seed, 128, 200000), 9, true, 256);
+            tick(&c, &now, &out);
+        }
+        ok(out.m_target > c.m_min,
+           "tail anchor: 20 percent runs above m_min");
+        for (i = 0; i < 60; i++)
+        {
+            feed(&c, binom_e(&seed, 128, 50000), 9, true, 256);
+            tick(&c, &now, &out);
+        }
+        eq_u32(out.m_target, c.m_min,
+               "tail anchor: 20 to 5 percent falls back in 60 blocks");
+    }
+}
+
 /* ------------------------------------------------------------------ *
  * Buildable mapping and wire profiles
  * ------------------------------------------------------------------ */
@@ -1929,6 +2002,7 @@ int main(void)
     case_frozen_sample();
     case_anti_windup();
     case_fixed_point();
+    case_tail_anchor();
     case_buildable_output();
     case_n_sweep();
     case_wire_profile();
