@@ -221,31 +221,6 @@ static struct tbt_fec_grouped *tbt_fec_codec_build(
 #define TBT_FEC_RUN_BIT   0u
 #define TBT_FEC_AGAIN_BIT 1u
 
-/* How long a partial packet may wait for company. The packetizer emits a
- * share only when its packet is full, so an application that writes a small
- * request and then waits for the answer -- an HTTP request, iperf3's control
- * cookie -- would wait for S bytes that never come, and the tunnel would
- * look connected and silent. This timer is the interactive tail only: a
- * block that merely holds real shares is not sealed on it (see
- * TBT_FEC_BLOCK_IDLE_MS), or a 1 MB/s stream that drains the ring after
- * every 8 KiB write would cut a one-share block per write. */
-#define TBT_FEC_SHORT_MS 2
-/* A block that still holds real shares is sealed after this much silence.
- * The receiver learns a short block's cut only from its PARITY win_len, so a
- * stream that stops between blocks without closing must eventually say so.
- * 25 ms is inside the 20-50 ms short-block window: above the 8 ms gap
- * between the writes of a 1 MB/s sender (so a sustained block fills to
- * groups*n shares and sends parity only then), below any user-visible
- * request timeout (so a request/response stream that never half-closes is
- * delivered). FIN still closes the final block at once. */
-#define TBT_FEC_BLOCK_IDLE_MS 25
-/* After a block is sealed mid-write, the bytes left in the packetizer belong
- * to the same application write. A relay's source arrives in whole delivered
- * blocks, so the next bytes of that write can be a scheduling quantum late;
- * flushing the remainder on the same 25 ms timer turns every block-quantised
- * source into a short share at the next block's first slot. Give the seam one
- * longer, still sub-second window before the interactive tail takes it. */
-#define TBT_FEC_CUT_GRACE_MS 100
 /* A super-block that has not become ready for this long cannot become ready:
  * this wire has no NACK and no retransmission, so a share that never arrived
  * is never fetched. The bound is well above any recovery the parity can do
@@ -2365,6 +2340,26 @@ static bool tbt_fec_tx_block_dirty(const struct tbt_fec_tx *tx)
     return tx->seq - tx->blk_seq0 >= (u64)tx->groups * tx->blk_n;
 }
 
+/* The idle-cut view of the block. A buffered partial packet is not a share
+ * of this block: those bytes start the next block. Counting them here made
+ * every grace pass close an empty block and re-arm the block deadline, so a
+ * non-S-multiple tail behind a full share starved forever. */
+static bool tbt_fec_tx_any_nreal(const struct tbt_fec_tx *tx)
+{
+    u16 group;
+
+    for (group = 0; group < tx->groups; group++)
+        if (tx->g[group].nreal)
+            return true;
+    return false;
+}
+
+static bool tbt_fec_tx_block_owns_share(const struct tbt_fec_tx *tx)
+{
+    return tbt_fec_block_owns_share(tbt_fec_tx_any_nreal(tx), tx->seq,
+                                    tx->blk_seq0, tx->groups, tx->blk_n);
+}
+
 /* Apply the peer's m_target at a block boundary. The target codec is built
  * here, in w_fec_tx, before the first block of the new split; a dirty block
  * keeps the current n/m until it closes. A build failure keeps the current
@@ -2535,7 +2530,7 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
     bool paused = false;
     bool pulled = false;
     bool fill_ready;
-    bool block_dirty;
+    bool block_real;
     u32 pass = 0;
 
     if (!tx || f->state != 1 || READ_ONCE(sess->closing) ||
@@ -2744,81 +2739,45 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
      * live on w_fec_cut: tbt_session_arm() never retimes a pending item, and
      * a 25 ms timer on w_fec_tx would swallow the next write's 0 ms wake. */
     fill_ready = tx->fill != 0;
-    block_dirty = tbt_fec_tx_block_dirty(tx);
+    block_real = tbt_fec_tx_block_owns_share(tx);
     spin_lock(&tx->lock);
     if (tx->head != tx->tail)
-        fill_ready = block_dirty = false;
+        fill_ready = block_real = false;
     spin_unlock(&tx->lock);
-    if ((fill_ready || block_dirty) && !READ_ONCE(tx->flush_req) &&
+    if ((fill_ready || block_real) && !READ_ONCE(tx->flush_req) &&
         !tbt_fec_tx_outq_high(sess))
     {
+        struct tbt_fec_cut_timer cut = {tx->short_at_ns, tx->block_at_ns};
+        struct tbt_fec_cut_state cs;
+        unsigned int plan;
         u64 now = ktime_get_ns();
-        u64 deadline = 0;
 
-        if (fill_ready)
-        {
-            u64 wait_ns = (READ_ONCE(st->fec_pkt_base_set)
-                               ? TBT_FEC_BLOCK_IDLE_MS
-                               : TBT_FEC_SHORT_MS) *
-                          NSEC_PER_MSEC;
-
-            if (!tx->short_at_ns)
-                tx->short_at_ns = now + wait_ns;
-            deadline = tx->short_at_ns;
-        }
-        else
-            tx->short_at_ns = 0;
-        if (block_dirty)
-        {
-            if (!tx->block_at_ns)
-                tx->block_at_ns =
-                    now + (u64)TBT_FEC_BLOCK_IDLE_MS * NSEC_PER_MSEC;
-            if (!deadline || tx->block_at_ns < deadline)
-                deadline = tx->block_at_ns;
-        }
-        else
-            tx->block_at_ns = 0;
-
-        if (now >= deadline && tbt_fec_tx_credit_ok(tx))
-        {
-            /* The block idle deadline ends the block at its last real
-             * share. A partial packet that happens to be in front of it is
-             * stream bytes, not a share of this block yet: cutting it into
-             * a short DATA record gives one extra share for the same bytes,
-             * an unaligned final tail, and a block of credit spent on fewer
-             * than groups*n shares. Those bytes instead start the next
-             * block, where more of the same write usually follows and they
-             * coalesce into a full share. */
-            bool cut_block = block_dirty && tx->block_at_ns &&
-                             now >= tx->block_at_ns;
-
-            if (tx->fill && !cut_block)
-            {
-                tbt_fec_packetize(sess, tx, st, false);
-                tx->short_at_ns = 0;
-            }
-            /* The partial tail is the interactive cut: seal it now. A block
-             * that is merely waiting for its next share keeps the partial
-             * packet buffered and gets its own tail deadline below. */
-            if (fill_ready || cut_block)
-            {
-                tbt_fec_tx_close_block(sess, tx, true, false);
-                tx->block_at_ns = 0;
-                tx->short_at_ns = 0;
-                /* The bytes kept above still need the interactive tail:
-                 * closing the block is a new quiet interval, not the end
-                 * of the stream. Without this arm the pump would sleep
-                 * forever after sealing a block mid-write. */
-                if (cut_block && tx->fill)
-                    tx->short_at_ns =
-                        now + (u64)(READ_ONCE(st->fec_pkt_base_set)
-                                        ? TBT_FEC_CUT_GRACE_MS
-                                        : TBT_FEC_SHORT_MS) *
-                                  NSEC_PER_MSEC;
-            }
-        }
+        cs.fill = fill_ready;
+        cs.any_nreal = tbt_fec_tx_any_nreal(tx);
+        cs.base_set = READ_ONCE(st->fec_pkt_base_set);
+        cs.credit_ok = tbt_fec_tx_credit_ok(tx);
+        cs.seq = tx->seq;
+        cs.blk_seq0 = tx->blk_seq0;
+        cs.groups = tx->groups;
+        cs.blk_n = tx->blk_n;
+        cs.now_ns = now;
+        plan = tbt_fec_cut_pass(&cut, &cs);
+        tx->short_at_ns = cut.short_at_ns;
+        tx->block_at_ns = cut.block_at_ns;
+        /* The block idle deadline ends the block at its last real share. A
+         * partial packet in front of it is stream bytes, not a share of this
+         * block yet: cutting it into a short DATA record gives one extra
+         * share for the same bytes, an unaligned final tail, and a block of
+         * credit spent on fewer than groups*n shares. Those bytes instead
+         * start the next block, where more of the same write usually
+         * follows and they coalesce into a full share. */
+        if (plan & TBT_FEC_CUT_TAIL)
+            tbt_fec_packetize(sess, tx, st, false);
+        if (plan & TBT_FEC_CUT_BLOCK)
+            tbt_fec_tx_close_block(sess, tx, true, false);
         /* Credit is a closed window, not a lost deadline: the ACK that
-         * reopens it is the wake this wait needs. */
+         * reopens it is the wake this wait needs. An expired deadline stays
+         * armed, and tbt_fec_tx_cut_arm() ignores it. */
         if (tx->short_at_ns || tx->block_at_ns)
             tbt_fec_tx_cut_arm(sess, tx);
     }

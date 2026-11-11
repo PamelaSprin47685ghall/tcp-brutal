@@ -213,6 +213,146 @@ static inline bool tbt_fec_fin_delivered(u64 total_pkts, u64 next_deliver,
     return !deliver_partial && next_deliver >= total_pkts;
 }
 
+/* How long a partial packet may wait for company. The packetizer emits a
+ * share only when its packet is full, so an application that writes a small
+ * request and then waits for the answer -- an HTTP request, iperf3's control
+ * cookie -- would wait for S bytes that never come, and the tunnel would
+ * look connected and silent. This timer is the interactive tail only: a
+ * block that merely holds real shares is not sealed on it (see
+ * TBT_FEC_BLOCK_IDLE_MS), or a 1 MB/s stream that drains the ring after
+ * every 8 KiB write would cut a one-share block per write. */
+#define TBT_FEC_SHORT_MS 2
+/* A block that still holds real shares is sealed after this much silence.
+ * The receiver learns a short block's cut only from its PARITY win_len, so a
+ * stream that stops between blocks without closing must eventually say so.
+ * 25 ms is inside the 20-50 ms short-block window: above the 8 ms gap
+ * between the writes of a 1 MB/s sender (so a sustained block fills to
+ * groups*n shares and sends parity only then), below any user-visible
+ * request timeout (so a request/response stream that never half-closes is
+ * delivered). FIN still closes the final block at once. */
+#define TBT_FEC_BLOCK_IDLE_MS 25
+/* After a block is sealed mid-write, the bytes left in the packetizer belong
+ * to the same application write. A relay's source arrives in whole delivered
+ * blocks, so the next bytes of that write can be a scheduling quantum late;
+ * flushing the remainder on the same 25 ms timer turns every block-quantised
+ * source into a short share at the next block's first slot. Give the seam one
+ * longer, still sub-second window before the interactive tail takes it. */
+#define TBT_FEC_CUT_GRACE_MS 100
+
+/* The packetizer's idle-cut deadlines. Zero means unarmed. */
+struct tbt_fec_cut_timer
+{
+    u64 short_at_ns; /* interactive tail: seal a buffered partial packet */
+    u64 block_at_ns; /* block idle: close the block at its real tail */
+};
+
+/* The packetizer state one idle-cut pass reads. `fill` is a buffered packet
+ * shorter than S. `any_nreal` says a group already wrote a share into the
+ * block under construction. `base_set` says the stream already sent a share,
+ * so the first-packet short timer no longer applies. */
+struct tbt_fec_cut_state
+{
+    bool fill;
+    bool any_nreal;
+    bool base_set;
+    bool credit_ok;
+    u64 seq;
+    u64 blk_seq0;
+    u16 groups;
+    u16 blk_n;
+    u64 now_ns;
+};
+
+/* What one expired idle-cut pass does. */
+#define TBT_FEC_CUT_TAIL 1u  /* packetize the buffered partial packet */
+#define TBT_FEC_CUT_BLOCK 2u /* close the block at its last real share */
+
+/* True when the block under construction owns a real share: a group wrote
+ * one, or the block filled and waits for its boundary advance. A buffered
+ * partial packet is not one of them; it starts the next block. */
+static inline bool tbt_fec_block_owns_share(bool any_nreal, u64 seq,
+                                            u64 blk_seq0, u16 groups,
+                                            u16 blk_n)
+{
+    if (any_nreal)
+        return true;
+    if (!blk_n || seq < blk_seq0)
+        return false;
+    return seq - blk_seq0 >= (u64)groups * blk_n;
+}
+
+/* One idle-cut pass. Pure, so the host test drives the same state machine
+ * the packetizer runs.
+ *
+ * The pass arms a deadline when none is armed. At an expired deadline with
+ * credit it returns the actions due and advances the timers. A buffered tail
+ * never counts as a real share: the block deadline closes the block at its
+ * last real share and the tail keeps its own later grace deadline. If the
+ * tail counted as a share, every grace pass would cut an empty block and
+ * re-arm the block deadline, and the tail would starve forever.
+ *
+ * A closed credit window leaves the expired deadlines in place. The ACK that
+ * reopens it runs the pump again; re-arming here would spin the two work
+ * items against the window. */
+static inline unsigned int
+tbt_fec_cut_pass(struct tbt_fec_cut_timer *t,
+                 const struct tbt_fec_cut_state *s)
+{
+    bool real = tbt_fec_block_owns_share(s->any_nreal, s->seq, s->blk_seq0,
+                                         s->groups, s->blk_n);
+    bool cut_block;
+    u64 deadline = 0;
+    u64 wait_ns;
+    unsigned int plan = 0;
+
+    if (!s->fill && !real)
+    {
+        t->short_at_ns = 0;
+        t->block_at_ns = 0;
+        return 0;
+    }
+    if (s->fill)
+    {
+        wait_ns = (u64)(s->base_set ? TBT_FEC_BLOCK_IDLE_MS
+                                    : TBT_FEC_SHORT_MS) *
+                  1000000ULL;
+        if (!t->short_at_ns)
+            t->short_at_ns = s->now_ns + wait_ns;
+        deadline = t->short_at_ns;
+    }
+    else
+        t->short_at_ns = 0;
+    if (real)
+    {
+        if (!t->block_at_ns)
+            t->block_at_ns =
+                s->now_ns + (u64)TBT_FEC_BLOCK_IDLE_MS * 1000000ULL;
+        if (!deadline || t->block_at_ns < deadline)
+            deadline = t->block_at_ns;
+    }
+    else
+        t->block_at_ns = 0;
+    if (s->now_ns < deadline || !s->credit_ok)
+        return 0;
+    cut_block = real && t->block_at_ns && s->now_ns >= t->block_at_ns;
+    if (s->fill && !cut_block)
+        plan |= TBT_FEC_CUT_TAIL;
+    if (s->fill || cut_block)
+        plan |= TBT_FEC_CUT_BLOCK;
+    if (plan & TBT_FEC_CUT_BLOCK)
+    {
+        t->block_at_ns = 0;
+        t->short_at_ns = 0;
+        if (cut_block && s->fill)
+            t->short_at_ns =
+                s->now_ns +
+                (u64)(s->base_set ? TBT_FEC_CUT_GRACE_MS
+                                  : TBT_FEC_SHORT_MS) *
+                    1000000ULL;
+    }
+    return plan;
+}
+
 /* Standard CRC32C (Castagnoli), reflected, init ~0, final xor. A fresh CRC
  * uses seed 0; chaining uses the previous return value as the next seed. */
 u32 tbt_fec_crc32c(u32 seed, const void *data, size_t len);
