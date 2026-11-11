@@ -1908,6 +1908,15 @@ static inline bool tbt_fec_rx_snap_current(bool used, u64 snap_block_id,
  * DATA-share count 1..192, not a ladder interpolation: the controller and
  * the wake line then use one basis for every split, including n < 64 where
  * the old six-point table fell back to the largest measured value. */
+/* The ACK/FBK shape must come from the frontier block when that slot is
+ * occupied, not from a late block or the session's last published shape. */
+static inline u16 tbt_fec_frontier_shape_n(bool used, u64 block_id,
+                                           u64 frontier, u16 block_n,
+                                           u16 session_n)
+{
+    return (used && block_id == frontier && block_n) ? block_n : session_n;
+}
+
 static inline u16 tbt_fec_sclc_wake_extra_down(u16 n)
 {
     u32 q;

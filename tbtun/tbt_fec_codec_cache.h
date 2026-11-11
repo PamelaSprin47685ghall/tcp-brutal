@@ -54,7 +54,7 @@
  * (or a block still holding it) has not been released yet. init() accepts
  * 1..TBT_FEC_CODEC_CACHE_MAX. */
 #define TBT_FEC_CODEC_CACHE_DOWN 4u
-#define TBT_FEC_CODEC_CACHE_UP 3u
+#define TBT_FEC_CODEC_CACHE_UP 4u
 #define TBT_FEC_CODEC_CACHE_MAX TBT_FEC_CODEC_CACHE_DOWN
 
 /* The key is the complete codec identity. The seed is part of it because

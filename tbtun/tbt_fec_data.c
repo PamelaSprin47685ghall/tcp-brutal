@@ -3366,6 +3366,20 @@ static int tbt_fec_blk_decode(struct tbt_session *sess,
  * deliver_bytes is the stream-relative byte count this receiver has actually
  * handed over; it is the only value the sender may use as tx_ack, because a
  * packet frontier can name bytes that no delivered share carried. */
+/* The shape of the frontier block, or the session view when that slot is
+ * not occupied. A late/out-of-order block must not define the ACK credit. */
+static u16 tbt_fec_frontier_n(struct tbt_fec_rx *rx, u64 s)
+{
+    struct tbt_fec_blk *b;
+    u16 n;
+
+    spin_lock_bh(&rx->lock);
+    b = tbt_fec_rx_blk(rx, 0, s);
+    n = tbt_fec_frontier_shape_n(b->used, b->block_id, s, b->n, rx->n);
+    spin_unlock_bh(&rx->lock);
+    return n;
+}
+
 static void tbt_fec_ack(struct tbt_session *sess, struct tbt_fec_flow *f,
                         struct tbt_stream *st, u64 next_deliver,
                         u64 deliver_bytes)
@@ -3391,7 +3405,8 @@ static void tbt_fec_ack(struct tbt_session *sess, struct tbt_fec_flow *f,
         struct tbt_fec_rx *rx = f->rx;
 
         a.credit_packets = tbt_fec_credit_packets(
-            rx->groups, rx->n, rx->replay_k, rx->slots,
+            rx->groups, tbt_fec_frontier_n(rx, next_deliver),
+            rx->replay_k, rx->slots,
             tbt_fec_credit_max_packets_dir(sess, rx->groups > 1));
         /* The peer uses this as the replay round trip: a share asked again
          * before it can arrive would only duplicate the repair. The sample
@@ -5183,13 +5198,32 @@ static void tbt_fec_rx_codec_queue_locked(struct tbt_fec_rx *rx,
 }
 
 static void tbt_fec_rx_codec_publish_locked(struct tbt_fec_rx *rx,
-                                            struct tbt_fec_codec_entry *e)
+                                            struct tbt_fec_codec_entry *e,
+                                            u64 block_id)
 {
+    struct tbt_fec_codec_entry *pin;
+    bool ready = false;
     u16 shares;
 
     if (!e || !e->ready || !e->codec)
         return;
+    /* An out-of-order old block must not drag rx->n/m (and the FBK
+     * n_current/m_current) back to its retired shape. Only a block at or
+     * beyond the delivery frontier may publish the session view. */
+    if (block_id < READ_ONCE(rx->next_super))
+        return;
     shares = (u16)(e->key.n + e->key.m);
+    pin = tbt_fec_codec_cache_get(rx->codec_cache, &e->key, &ready);
+    if (pin && ready && pin != rx->codec_entry)
+    {
+        struct tbt_fec_codec_entry *old = rx->codec_entry;
+
+        rx->codec_entry = pin;
+        if (old)
+            tbt_fec_codec_cache_put(old);
+    }
+    else if (pin)
+        tbt_fec_codec_cache_put(pin);
     rx->n = e->key.n;
     rx->m = e->key.m;
     rx->shape.n = e->key.n;
@@ -5229,7 +5263,7 @@ static void tbt_fec_rx_blk_attach_locked(struct tbt_fec_rx *rx,
         return;
     b->codec_entry = e;
     if (ready)
-        tbt_fec_rx_codec_publish_locked(rx, e);
+        tbt_fec_rx_codec_publish_locked(rx, e, b->block_id);
     else
         tbt_fec_rx_codec_queue_locked(rx, &key, e);
 }
@@ -5285,7 +5319,10 @@ static void tbt_fec_rx_build_pending(struct tbt_fec_rx *rx)
         {
             rx->codec_backoff = 0;
             rx->codec_next_ns = 0;
-            tbt_fec_rx_codec_publish_locked(rx, e);
+            /* A build completion publishes the codec entry but must not
+             * change the session n/m; the frontier block does that when it
+             * attaches. */
+            (void)e;
         }
         tbt_fec_codec_cache_put(e);
         spin_unlock_bh(&rx->lock);

@@ -166,7 +166,7 @@ static void test_init_capacity(void)
     struct mock m;
 
     eq_u32(TBT_FEC_CODEC_CACHE_DOWN, 4, "down capacity constant");
-    eq_u32(TBT_FEC_CODEC_CACHE_UP, 3, "up capacity constant");
+    eq_u32(TBT_FEC_CODEC_CACHE_UP, 4, "up capacity constant");
     eq_u32(TBT_FEC_CODEC_CACHE_MAX, 4, "maximum capacity constant");
 
     memset(&m, 0, sizeof(m));
@@ -524,9 +524,9 @@ static void test_capacity_four_two(void)
     ok(m.codec_frees == 5, "five down codecs are freed once");
     ok(m.slot_frees == 1, "down slots are freed once");
 
-    /* Uplink: three entries. */
+    /* Uplink: four entries. */
     cache_init(&c, &m, TBT_FEC_CODEC_CACHE_UP);
-    for (i = 0; i < 3; i++)
+    for (i = 0; i < 4; i++)
     {
         k[i] = make_key(8, 24, 128, 16, (u64)(i + 1));
         e = tbt_fec_codec_cache_get(&c, &k[i], &ready);
@@ -534,19 +534,19 @@ static void test_capacity_four_two(void)
         tbt_fec_codec_cache_build_done(e, MOCK_CODEC(50 + i), true);
         tbt_fec_codec_cache_put(e);
     }
-    eq_u32(c.used, 3, "up cache holds three");
+    eq_u32(c.used, 4, "up cache holds four");
     eq_u64(stats_of(&c).evictions, 0, "no up eviction at capacity");
 
-    k[3] = make_key(8, 24, 128, 16, 4);
-    e = tbt_fec_codec_cache_get(&c, &k[3], &ready);
-    ok(e != NULL && !ready, "fourth up key reserves");
-    eq_u64(stats_of(&c).evictions, 1, "fourth up key evicts");
+    k[4] = make_key(8, 24, 128, 16, 5);
+    e = tbt_fec_codec_cache_get(&c, &k[4], &ready);
+    ok(e != NULL && !ready, "fifth up key reserves");
+    eq_u64(stats_of(&c).evictions, 1, "fifth up key evicts");
     ok(codec_freed(&m, MOCK_CODEC(50)), "oldest up codec is freed");
-    tbt_fec_codec_cache_build_done(e, MOCK_CODEC(53), true);
+    tbt_fec_codec_cache_build_done(e, MOCK_CODEC(54), true);
     tbt_fec_codec_cache_put(e);
 
     tbt_fec_codec_cache_destroy(&c);
-    ok(m.codec_frees == 4, "four up codecs are freed once");
+    ok(m.codec_frees == 5, "five up codecs are freed once");
     ok(m.slot_frees == 1, "up slots are freed once");
 }
 
@@ -679,7 +679,7 @@ static void test_up_three_targets(void)
 {
     struct tbt_fec_codec_cache c;
     struct tbt_fec_codec_key k;
-    struct tbt_fec_codec_entry *initial, *target, *prev = NULL;
+    struct tbt_fec_codec_entry *initial, *target, *held[3] = {0};
     struct mock m;
     bool ready = false;
     int i;
@@ -701,13 +701,14 @@ static void test_up_three_targets(void)
             break;
         tbt_fec_codec_cache_build_done(target, MOCK_CODEC(61 + i), true);
         ok(target->ready, "up target: target codec is ready");
-        /* Publish the switch, then release the old target pin. */
-        if (prev)
-            tbt_fec_codec_cache_put(prev);
-        prev = target;
+        /* An in-flight block holds each old shape while the next target is
+         * built; capacity 4 must keep all four entries resident. */
+        held[i] = target;
     }
-    if (prev)
-        tbt_fec_codec_cache_put(prev);
+    eq_u32(c.used, 4, "up target: four shapes fit with in-flight refs");
+    for (i = 0; i < 3; i++)
+        if (held[i])
+            tbt_fec_codec_cache_put(held[i]);
     tbt_fec_codec_cache_put(initial);
     tbt_fec_codec_cache_destroy(&c);
     ok(m.slot_frees == 1, "up target: slots are freed once");
