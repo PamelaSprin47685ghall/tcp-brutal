@@ -1,3 +1,0 @@
-arm,app,app_MB,app_Mbit,wire,wire_app,retx,retx_pct,nack_tx,nack_rx,replay_hit,replay_miss,near_miss,hol_wait,flush,stall,near_cpu,far_cpu,elapsed,code
-base,15728640,3.145,25.160,49626779,3.155,6361280,40.444,26,26,772,0,66,8948,3668,1,87.978,132.367,5.001,200
-xor,14679959,2.935,23.484,45574538,3.105,5446640,37.103,16,16,661,0,66,3503,1875,1,83.385,105.781,5.001,200

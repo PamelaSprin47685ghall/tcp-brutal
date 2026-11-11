@@ -1,3 +1,0 @@
-config,carriers,app_bytes,elapsed_s,app_MB_s,app_Mbit_s,wire_bytes,wire_Mbit_s,wire_per_app,retx_pct,nack_tx,nack_rx,replay_hit,replay_miss,hol_us,hol_wait,flush_skip,stall,near_cpu_pct,far_cpu_pct,tx_window,txq_max,bdp_bytes,k_x100,rtt_mean_us
-rx8m,256,35651478,5.000409,7.130,57.0,87100704,139.4,2.4431,13.5,22,22,584,0,0,0,0,0,85.8,155.0,8388608,8454432,862691,500,178170
-rx32m,256,36700054,5.000583,7.339,58.7,81077226,129.7,2.2092,15.4,24,24,685,0,0,0,0,0,79.2,151.6,33554432,33620256,807583,500,166140

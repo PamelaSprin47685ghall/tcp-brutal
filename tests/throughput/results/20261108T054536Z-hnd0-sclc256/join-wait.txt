@@ -1,7 +1,0 @@
-join_elapsed_s=18
-near_up=256 far_up=256
-[166852.741006] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=53459, awaiting HELLO
-[166852.914893] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=53463, awaiting HELLO
-[166853.094314] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40257, awaiting HELLO
-[166853.210121] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=53437, awaiting HELLO
-[166853.213598] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40242, awaiting HELLO

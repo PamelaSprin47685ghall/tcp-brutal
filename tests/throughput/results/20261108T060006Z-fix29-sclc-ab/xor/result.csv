@@ -1,2 +1,0 @@
-name,carriers,app_bytes,wire_bytes,wire_per_app,retx_bytes,retx_ppm,nack_tx,nack_rx,replay_hit,replay_miss,hol_max_us,hol_wait,flush_skip,stall_declared,near_cpu_pct,far_cpu_pct,near_proto_fail,far_proto_fail,elapsed_s,rc,app_MB_s,app_Mbit_s
-remote.n256.fec-on.sc-ldpc.http-kal.crypto-on.xor,256,014679959,45574538,3.1045,5446640,371025,16,16,661,0,0,3503,1875,1,417000.0,529000.0,0,0,0.001,28,14679.959,117439.672

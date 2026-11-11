@@ -1,6 +1,0 @@
-name,carriers,mode,direction,elapsed_s,app_bytes,app_MB_s,app_Mbit_s,wire_bytes,wire_MB_s,wire_per_app,near_cpu_pct,far_cpu_pct,decode_side,decode_blocks,decode_blocks_per_s,decode_in_MB_s,outq_max,outq_bytes,replay_hit,replay_miss,nack_tx,nack_rx
-short256-5s.txt,256,sc-ldpc,down,5.002,14680064,2.935,23.48,47986236,9.594,3.269,92.6,133.2,near,88,17.6,7.684,0,0,824,0,19,19
-steady256-60.txt,256,sc-ldpc,down,60.001,171966358,2.866,22.93,353372990,5.889,2.055,95.7,96.8,near,1257,20.9,5.490,74,5454880,296,0,6,6
-grouped32-5s.txt,32,grouped,down,5.001,14155776,2.831,22.65,41392422,8.277,2.924,13.8,65.4,near,583,116.6,5.844,0,0,54,10,17,17
-grouped64-5s.txt,64,grouped,down,5.001,14155776,2.831,22.64,44276614,8.853,3.128,16.8,72.0,near,686,137.2,6.395,0,0,22,39,14,14
-uplink256-60.txt,256,sc-ldpc,up,60.040,39321600,0.655,5.24,169265030,2.819,4.305,46.8,129.5,far,1183,19.7,2.868,0,0,2262,16,58,57

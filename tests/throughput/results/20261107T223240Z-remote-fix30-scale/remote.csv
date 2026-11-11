@@ -1,3 +1,0 @@
-name,iterations,ns_per_op,mb_per_s,checksum
-remote.n64.fec-on.grouped.http-kal.crypto-on,57,87730666.667,11.952,0000000003900000
-remote.n256.fec-on.grouped.http-kal.crypto-on,34,147070852.941,7.130,00000000021fff96

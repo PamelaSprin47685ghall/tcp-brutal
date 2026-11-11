@@ -1,5 +1,0 @@
-639706af2bd60b69688d308b3e0702f1b8c7aae9e9f81e0ef401170f54b923fc  tbtun.ko
-version:        0.2.3
-srcversion:     B66D7B86A162F744837BFF3
-vermagic:       6.1.172 SMP mod_unload modversions aarch64
-6.1.172

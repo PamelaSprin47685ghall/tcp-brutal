@@ -1,2 +1,0 @@
-PSK recovery: first connect after 256 join with crypto_key fixed
-connect=0.009 first_byte=3.256 header=5124096

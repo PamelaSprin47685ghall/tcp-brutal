@@ -1,2 +1,0 @@
-name,base_ns,new_ns,delta_ns_pct,base_mb_s,new_mb_s,delta_mb_pct,checksum,verdict
-remote.n32.fec-on.grouped.http-kal.crypto-on,1667437666.667,1667437666.667,+0.0,0.472,0.472,+0.0,same,stable

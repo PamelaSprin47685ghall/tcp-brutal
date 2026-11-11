@@ -1,1 +1,0 @@
-TIMEOUT connect=0.009 (15s no HTTP header)

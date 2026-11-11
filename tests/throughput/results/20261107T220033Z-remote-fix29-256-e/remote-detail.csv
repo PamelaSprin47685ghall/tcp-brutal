@@ -1,2 +1,0 @@
-name,carriers,app_bytes,wire_bytes,wire_per_app,retx_bytes,retx_ppm,nack_tx,nack_rx,replay_hit,replay_miss,hol_max_us,hol_wait,flush_skip,stall_declared,near_cpu_pct,far_cpu_pct,near_proto_fail,far_proto_fail,elapsed_s,rc
-remote.n256.fec-on.grouped.http-kal.crypto-on,256,37748736,93463438,2.4759,6923112,183399,24,24,841,28,0,0,0,0,92.2,169.6,0,0,5.000547,0
