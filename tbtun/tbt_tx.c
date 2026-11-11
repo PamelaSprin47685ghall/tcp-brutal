@@ -430,6 +430,35 @@ int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp,
     if (!READ_ONCE(st->close_since_ns))
         WRITE_ONCE(st->close_since_ns, tbt_now_ns());
 
+    /* The target can still have unread bytes when its shutdown is seen: the
+     * last write and the FIN may race. Do not request the FEC flush yet; a
+     * flush would freeze pkt_end before that tail is submitted, and the FIN
+     * would overtake it. The capture work calls back after the next read. */
+    if (sess->fec && !smp_load_acquire(&st->fec_finished))
+    {
+        struct sock *sk = READ_ONCE(st->sk);
+        bool unread = false;
+
+        if (sk)
+        {
+            struct tcp_sock *tp = tcp_sk(sk);
+
+            unread = READ_ONCE(tp->copied_seq) != READ_ONCE(tp->rcv_nxt);
+        }
+        if (unread)
+        {
+            if (!READ_ONCE(st->fin_pending_counted))
+            {
+                WRITE_ONCE(st->fin_pending_counted, true);
+                atomic64_inc(&sess->fec_fin_frozen_with_pending);
+            }
+            if (debug >= 1)
+                pr_info_ratelimited("tbtun: fec FIN deferred sid=%llu unread=1 tx_seq=%llu\n",
+                                    (unsigned long long)st->sid,
+                                    (unsigned long long)READ_ONCE(st->tx_seq));
+            return 0;
+        }
+    }
     /* FEC: the packetizer must finish the stream's last block before FIN
      * names its end. The first call only requests the flush and returns 0;
      * the close path retries. Once finish has run, pkt_end is frozen and the
