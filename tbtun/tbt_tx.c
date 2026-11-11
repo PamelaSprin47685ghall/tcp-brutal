@@ -1954,7 +1954,8 @@ static bool tbt_tx_fec_credit_waiting(const struct tbt_session *sess)
             else
                 waiting = tbt_fec_credit_waiting(
                     READ_ONCE(tx->peer_pkts), seq, READ_ONCE(tx->credit),
-                    (u32)READ_ONCE(tx->groups) * READ_ONCE(tx->n));
+                    READ_ONCE(tx->groups), READ_ONCE(tx->n),
+                    READ_ONCE(tx->m));
         }
     rcu_read_unlock();
     return waiting;
@@ -2192,8 +2193,8 @@ void tbt_tx_fec_rearm_if_pending(struct tbt_session *sess, struct tbt_stream *st
         tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
     }
     if (ring && !tbt_fec_credit_waiting(
-                    peer, seq, credit,
-                    (u32)READ_ONCE(tx->groups) * READ_ONCE(tx->n)) &&
+                    peer, seq, credit, READ_ONCE(tx->groups),
+                    READ_ONCE(tx->n), READ_ONCE(tx->m)) &&
         READ_ONCE(tx->last_pump_seq) == seq &&
         (!READ_ONCE(tx->last_pump_ns) ||
          (now > READ_ONCE(tx->last_pump_ns) &&
@@ -2239,8 +2240,8 @@ void tbt_tx_fec_poll(struct tbt_session *sess)
     seq = READ_ONCE(tx->seq);
     credit = READ_ONCE(tx->credit);
     credit_ok = !tbt_fec_credit_waiting(
-        peer, seq, credit,
-        (u32)READ_ONCE(tx->groups) * READ_ONCE(tx->n));
+        peer, seq, credit, READ_ONCE(tx->groups), READ_ONCE(tx->n),
+        READ_ONCE(tx->m));
     stalled = ring && credit_ok && stall_ns &&
               READ_ONCE(tx->stall_seq) == seq &&
               now > stall_ns &&

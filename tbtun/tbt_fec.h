@@ -654,14 +654,13 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
  * block is never evicted while the receiver can still ask for it.
  * tbt_fec_credit_packets() converts these bytes to DATA packets; neither
  * window multiplies again by the carrier count. */
-#define TBT_FEC_WINDOW_DOWN (64u * 128u * TBT_FEC_S)
-#define TBT_FEC_WINDOW_UP (64u * 8u * 8u * TBT_FEC_S)
-/* The ACK grants at most this many DATA packets of FEC credit. At S=1024
- * 8192 packets are 8 MiB, exactly the downlink 64 x 128 x 1024 window; the
- * uplink window resolves to 4096. The credit bounds the sender's in-flight
+#define TBT_FEC_WINDOW_DOWN (64u * TBT_FEC_MAX_SHARES * TBT_FEC_S)
+#define TBT_FEC_WINDOW_UP (64u * 32u * TBT_FEC_S)
+/* The ACK grants at most this many DATA packets of FEC credit. Credit is in shares (n+m per block): 16384 shares are 64 blocks of
+ * 256, exactly the downlink window; the uplink window resolves to 2048. The credit bounds the sender's in-flight
  * data; the ring bounds the repair storage, and both are constant-size for
  * a given shape. */
-#define TBT_FEC_CREDIT_MAX 8192u
+#define TBT_FEC_CREDIT_MAX 16384u
 
 /* Block planes resident in the replay hot pool. Eight 256 KiB blocks are
  * 2 MiB at S=1024; below TBT_FEC_REPLAY_MEM_LOW_KB the pool shrinks to
@@ -704,10 +703,11 @@ long tbt_fec_host_live_allocs(void);
  * (TBT_FEC_CREDIT_MAX) to bound memory. A K too small to hold the two-block
  * slack still grants one super-block: the stream must move, and repair is
  * already unavailable. */
-static inline u32 tbt_fec_credit_packets(u16 groups, u16 n, u16 k_ring,
-                                         u16 slots, u32 max_packets)
+static inline u32 tbt_fec_credit_packets(u16 groups, u16 n, u16 m,
+                                         u16 k_ring, u16 slots,
+                                         u32 max_packets)
 {
-    u32 per_block = (u32)groups * n;
+    u32 per_block = (u32)groups * ((u32)n + m);
     u32 k_eff = k_ring;
     u32 blocks;
 
@@ -732,9 +732,9 @@ static inline u32 tbt_fec_credit_packets(u16 groups, u16 n, u16 k_ring,
  * in packets because that is what the receiver's arena counts; the sender
  * spends it in blocks, which is the unit that survives a short cut. */
 static inline u32 tbt_fec_credit_blocks(u32 credit_packets, u16 groups,
-                                        u16 n)
+                                        u16 n, u16 m)
 {
-    u32 per_block = (u32)groups * n;
+    u32 per_block = (u32)groups * ((u32)n + m);
     u32 blocks;
 
     if (!per_block || !credit_packets)
@@ -1303,17 +1303,24 @@ static inline u64 tbt_fec_block_of_seq(u64 seq, u16 groups, u16 k)
  * NACK use block ids; the sender does not.
  */
 static inline bool tbt_fec_credit_waiting(u64 peer_pkts, u64 seq, u32 credit,
-                                          u32 block_pkts)
+                                          u16 groups, u16 n, u16 m)
 {
-    if (!credit)
+    u32 per_block_shares = (u32)groups * ((u32)n + m);
+    u32 per_block_data = (u32)groups * n;
+    u32 credit_blocks;
+    u64 credit_data;
+
+    if (!credit || !per_block_shares || !per_block_data)
         return true;
+    credit_blocks = credit / per_block_shares;
+    credit_data = (u64)credit_blocks * per_block_data;
     /* One block of headroom: a block that has started must finish, so the
      * next block may open while the previous one spent up to block_pkts
      * beyond the granted window. Without it, a full block can leave
      * lead > credit and deadlock the next block against the receiver's
      * ACK (measured: lead 962, credit 952, rx_next waiting for block 106). */
     return seq > peer_pkts &&
-           seq - peer_pkts >= (u64)credit + block_pkts;
+           seq - peer_pkts >= credit_data + per_block_data;
 }
 
 /* Poll-time decision: the FEC TX work is not running (run bit clear),
