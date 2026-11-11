@@ -25,10 +25,11 @@ and moves independently of the module version.
   did not create. `host/test_ul_pin_inject` pins the mapping, the wrap-safe
   chunk position, the slice bounds and the byte identity in both crypto
   modes.
-- `docs/coexist-fairness.md`: the measurement design for the competing plain
-  TCP flow's throughput loss on a shared bottleneck (topology, load matrix,
-  metrics, pass/fail thresholds, and what each Step 3 change is expected to
-  move).
+- `docs/coexist-fairness.md`: an optional appendix with a method for
+  measuring a competing plain TCP flow's throughput on a shared bottleneck,
+  plus the replay's uncovered cases. Design only, never measured, not a
+  release gate; the target deployment is metered bandwidth, where
+  coexistence with third-party TCP is not a requirement.
 - IPv6 endpoints. `listen=`, `peer=`, `target=` and `srcaddrs=` accept an IPv4
   literal or a bracketed IPv6 literal (`[2001:db8::1]:9000`), and one tunnel
   line may mix families. The listener, carrier dial and target dial create the
