@@ -2463,6 +2463,11 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
 
     WRITE_ONCE(tx->last_pump_ns, ktime_get_ns());
     WRITE_ONCE(tx->last_pump_seq, READ_ONCE(tx->seq));
+    if (READ_ONCE(tx->stall_seq) != READ_ONCE(tx->seq))
+    {
+        WRITE_ONCE(tx->stall_seq, READ_ONCE(tx->seq));
+        WRITE_ONCE(tx->stall_ns, ktime_get_ns());
+    }
     struct tbt_stream *st;
     bool paused = false;
     bool pulled = false;
@@ -2539,8 +2544,28 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
         if (unacked >= max_unacked && tx->fill == 0 &&
             !tbt_fec_tx_block_dirty(tx))
         {
-            tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
-            break;
+            u32 ring_bytes = (u32)(READ_ONCE(tx->head) -
+                                   READ_ONCE(tx->tail));
+
+            /* The replay ring is at its soft cap, but the source ring may
+             * still hold the bytes the close needs to drain. Breaking here
+             * before ring_get left a full ring untouched forever. If the
+             * packet window is open, read and send one block; the hard
+             * refusal in tbt_fec_out_push() still bounds memory. */
+            if (ring_bytes &&
+                !tbt_fec_credit_waiting(READ_ONCE(tx->peer_pkts),
+                                        READ_ONCE(tx->seq),
+                                        READ_ONCE(tx->credit),
+                                        (u32)READ_ONCE(tx->groups) *
+                                            READ_ONCE(tx->n)))
+            {
+                atomic64_inc(&sess->fec_unacked_ring_drain);
+            }
+            else
+            {
+                tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
+                break;
+            }
         }
         if (tbt_fec_tx_outq_high(sess))
         {

@@ -881,6 +881,11 @@ struct tbt_fec_tx
      * for TBT_FEC_PUMP_REARM_MS, the close path re-arms the work. */
     u64 last_pump_ns;
     u64 last_pump_seq;
+    /* Packet progress watermark for the seq-stall watchdog. Updated by the
+     * pump whenever tx->seq moves; the poll re-arms if it does not move for
+     * the threshold while the ring has bytes and credit is open. */
+    u64 stall_seq;
+    u64 stall_ns;
     /* Flow control, from the peer's ACK: the delivered packet frontier and the
      * credit it grants beyond it. The receiver buffers `slots` super-blocks, so
      * a sender that stays inside the credit cannot outrun that buffer. */
@@ -1835,6 +1840,7 @@ struct tbt_session
     atomic64_t fec_replay_evicted_before_nack;
     atomic64_t fec_tx_pump_rearm;
     atomic64_t fec_tx_run_leak;
+    atomic64_t fec_unacked_ring_drain;
     /* FEC sender scheduling. fec_flush_pass counts accepted DATA records.
      * fec_flush_skip and fec_hol_wait are kept for the old per-carrier queue
      * accounting; the session FIFO never queues a record behind one socket,

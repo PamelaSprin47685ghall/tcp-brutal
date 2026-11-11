@@ -2039,7 +2039,10 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
                                     (unsigned long long)st->sid, ack,
                                     READ_ONCE(st->tx_seq),
                                     (now - start) / NSEC_PER_USEC);
-            tbt_tx_fec_rearm_if_pending(sess, st);
+            if (sess->fec)
+        WRITE_ONCE(sess->fec_closing,
+                   READ_ONCE(st->close_since_ns) != 0);
+    tbt_tx_fec_rearm_if_pending(sess, st);
             start = now;
             would_kill = false;
         }
@@ -2184,9 +2187,9 @@ void tbt_tx_fec_rearm_if_pending(struct tbt_session *sess, struct tbt_stream *st
 void tbt_tx_fec_poll(struct tbt_session *sess)
 {
     struct tbt_fec_tx *tx;
-    u64 ring, now, last, peer, seq;
+    u64 ring, now, stall_ns, peer, seq;
     u32 run, credit;
-    bool sched, credit_ok;
+    bool sched, credit_ok, stalled;
 
     if (!sess || !sess->fec)
         return;
@@ -2200,7 +2203,7 @@ void tbt_tx_fec_poll(struct tbt_session *sess)
     ring = (u64)(READ_ONCE(tx->head) - READ_ONCE(tx->tail)) +
            READ_ONCE(tx->fill);
     now = ktime_get_ns();
-    last = READ_ONCE(tx->last_pump_ns);
+    stall_ns = READ_ONCE(tx->stall_ns);
     run = atomic_read(&sess->fec_tx_run);
     sched = test_bit(TBT_SW_FEC_TX, &sess->sched);
     peer = READ_ONCE(tx->peer_pkts);
@@ -2209,29 +2212,22 @@ void tbt_tx_fec_poll(struct tbt_session *sess)
     credit_ok = !tbt_fec_credit_waiting(
         peer, seq, credit,
         (u32)READ_ONCE(tx->groups) * READ_ONCE(tx->n));
-    if (tbt_fec_pump_stuck(run, READ_ONCE(tx->last_pump_seq), seq, now,
-                           last, NSEC_PER_SEC))
+    stalled = ring && credit_ok && stall_ns &&
+              READ_ONCE(tx->stall_seq) == seq &&
+              now > stall_ns &&
+              now - stall_ns > (u64)TBT_FEC_PUMP_REARM_MS * NSEC_PER_MSEC;
+    if (stalled && !sched)
     {
-        atomic64_inc(&sess->fec_tx_run_leak);
-        atomic_fetch_and(~1u, &sess->fec_tx_run);
-        atomic_fetch_or(2u, &sess->fec_tx_run);
+        if ((run & 1u) &&
+            now - stall_ns > NSEC_PER_SEC)
+            atomic64_inc(&sess->fec_tx_run_leak);
         atomic64_inc(&sess->fec_tx_pump_rearm);
-        pr_info_ratelimited("tbtun: FEC pump stuck poll sid=%llu ring=%llu seq=%llu run=%u sched=%d\n",
-                            (unsigned long long)tx->sid,
-                            (unsigned long long)ring,
-                            (unsigned long long)seq, run, sched);
-        tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
-    }
-    else if (tbt_fec_pump_rearm_due(ring != 0, credit_ok, run, sched, now,
-                                    last,
-                                    (u64)TBT_FEC_PUMP_REARM_MS *
-                                        NSEC_PER_MSEC))
-    {
-        atomic64_inc(&sess->fec_tx_pump_rearm);
-        pr_info_ratelimited("tbtun: FEC pump rearm poll sid=%llu ring=%llu credit=%u seq=%llu run=%u sched=%d\n",
+        pr_info_ratelimited("tbtun: FEC pump seq stalled sid=%llu ring=%llu credit=%u seq=%llu run=%u sched=%d stall_us=%llu\n",
                             (unsigned long long)tx->sid,
                             (unsigned long long)ring, credit,
-                            (unsigned long long)seq, run, sched);
+                            (unsigned long long)seq, run, sched,
+                            (unsigned long long)(now - stall_ns) /
+                                NSEC_PER_USEC);
         tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
     }
     rcu_read_unlock();
@@ -2247,6 +2243,9 @@ static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
 
     budget = tbt_tx_wait_budget_ns(sess, st);
     bound = tbt_tx_close_bound(peer_fin && !fin_written, budget);
+    if (sess->fec)
+        WRITE_ONCE(sess->fec_closing,
+                   READ_ONCE(st->close_since_ns) != 0);
     tbt_tx_fec_rearm_if_pending(sess, st);
 
     /* The peer's FIN reached the application but the target never closed its
