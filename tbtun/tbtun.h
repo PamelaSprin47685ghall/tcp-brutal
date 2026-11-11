@@ -1500,6 +1500,12 @@ struct tbt_session
     struct tbt_fec_out **fec_fifo; /* DATA records waiting for a carrier */
     u32 fec_fifo_head;             /* consumer position; drain work only */
     u32 fec_fifo_tail;             /* producer position; packetizer only */
+    /* Borrowed-shell experiment only: a record the drain popped but has not
+     * written yet. The drain owns it; a shell steal never sees it. */
+    struct tbt_fec_out *fec_fifo_stall;
+    /* Serialises FIFO push/take when the shell experiment is on. The normal
+     * path stays the lockless SPSC ring it has always been. */
+    spinlock_t fec_fifo_lock;
     atomic_t async_rot;            /* carrier cursor for the next DATA record */
     u16 fec_ndrain;
     struct delayed_work w_fec_tx; /* packetizer + control/replay writer */
@@ -1923,6 +1929,37 @@ struct tbt_session
     u32 shell_gso_after;             /* sk_gso_max_size after the cap */
     u32 shell_mss;                   /* mss_cache of the last prepared sk */
     u32 shell_chunk_sample;          /* len of the last mismatching skb */
+    /* Borrowed-shell substitution engine. Every counter names one failure
+     * mode or one resolved ownership path; none is silent. */
+    atomic64_t shell_subst;          /* substitutions written */
+    atomic64_t shell_subst_bytes;    /* chunk bytes written per substitution */
+    atomic64_t shell_skip_len;       /* rtx skb is not exactly one chunk */
+    atomic64_t shell_skip_gso;       /* rtx skb is a GSO skb */
+    atomic64_t shell_skip_cloned;    /* skb_cloned() true */
+    atomic64_t shell_skip_shared;    /* skb_shared() true */
+    atomic64_t shell_skip_busy;      /* a clone is still in the host queue */
+    atomic64_t shell_skip_csum;      /* neither CHECKSUM_PARTIAL nor NONE */
+    atomic64_t shell_csum_none;      /* rtx skb carries CHECKSUM_NONE */
+    atomic64_t shell_csum_partial;   /* rtx skb carries CHECKSUM_PARTIAL */
+    atomic64_t shell_skip_mss;       /* current MSS < one chunk */
+    atomic64_t shell_skip_owned;     /* this seq already carries a substitute */
+    atomic64_t shell_skip_lost;      /* skb is not marked LOST */
+    atomic64_t shell_skip_prefix;    /* payload is not a full FEC share chunk */
+    atomic64_t shell_no_record;      /* no eligible record in the FIFO */
+    atomic64_t shell_ring_full;      /* all 64 ownership slots are in use */
+    atomic64_t shell_encode_fail;    /* chunk encode failed or wrong length */
+    atomic64_t shell_store_fail;     /* skb_store_bits() failed */
+    atomic64_t shell_selfcheck_fail; /* read-back differs from the encoding */
+    atomic64_t shell_ack_ok;         /* owned seq ACKed without a DSACK */
+    atomic64_t shell_dsack_events;   /* sender saw a DSACK while slots live */
+    atomic64_t shell_dsack_requeue;  /* slots returned to the replay queue */
+    atomic64_t shell_retx_same;      /* owned skb retransmitted again */
+    atomic64_t shell_timeout;        /* live slot exceeded its age bound */
+    atomic64_t shell_carrier_lost;   /* slots returned at carrier teardown */
+    atomic64_t shell_requeue_fail;   /* replay conversion refused */
+    atomic64_t shell_stranded;       /* record freed without being replayed */
+    atomic64_t shell_install_fail;   /* carrier left without the wrapper */
+    atomic64_t shell_rec_invalid;    /* stolen record is not a full share */
     atomic64_t fec_nack_sparse_probe;   /* unstarted group: probe parity 0 only */
     atomic64_t fec_nack_empty_reply;    /* empty marker sent for an absent share */
     atomic64_t fec_nack_parity_reply;   /* parity/cut sent for a short block */
@@ -2139,6 +2176,57 @@ struct tbt_session
 #define TBT_STREAM_BUCKET(sid) \
     (((u32)(sid) ^ (u32)((sid) >> 32)) & (TBT_STREAM_HT - 1))
 
+/* Borrowed-shell retransmission: one ownership slot per substituted TCP
+ * sequence. The ring is per carrier because the rtx queue is per socket.
+ * A slot owns the struct tbt_fec_out it stole from the FEC FIFO until the
+ * ACK path or the session poll resolves it. */
+#define TBT_SHELL_RING 64
+/* One encoded chunk. The HTTP form is 5 + 48 + 1024 + 2 = 1079 bytes; the
+ * raw form is 48 + 1024 = 1072. 16 bytes of slack keeps the size line
+ * builder inside the buffer for any future record length. */
+#define TBT_SHELL_CHUNK_MAX (TBT_FEC_HDR_LEN + TBT_FEC_PAYLOAD_MAX + 16)
+
+enum tbt_shell_state
+{
+    TBT_SHELL_FREE = 0,
+    /* The ACK path reserved the slot but has not written the payload yet.
+     * Only the poll and the ACK path look at it; the poll skips it. */
+    TBT_SHELL_RESERVED,
+    /* Payload written; the record is owned and its fate is unknown. */
+    TBT_SHELL_LIVE,
+    /* The owning sequence was ACKed without DSACK: the record was delivered.
+     * The poll frees the queue reference. */
+    TBT_SHELL_ACKED,
+    /* The record must return to the FEC replay queue (DSACK, carrier loss,
+     * timeout, or a failed write). The poll converts it. */
+    TBT_SHELL_REQUEUE,
+    /* The poll claimed the slot and is converting/freeing it. */
+    TBT_SHELL_PROCESSING,
+};
+
+struct tbt_shell_slot
+{
+    u32 seq;      /* TCP sequence of the substituted skb */
+    u32 end_seq;
+    u64 block_id; /* FEC record identity, for the counters and the report */
+    u16 group;
+    u16 share;
+    u8 state;
+    u8 seen_retx; /* EVER_RETRANS observed on the owning skb */
+    u64 live_ns;
+    struct tbt_fec_out *rec; /* owned FIFO record, NULL when resolved */
+};
+
+struct tbt_shell_retx
+{
+    spinlock_t lock;
+    u32 dsack_seen;             /* tp->dsack_dups at the last callback */
+    u32 next;                   /* round-robin hint for a free slot */
+    u8 chunk[TBT_SHELL_CHUNK_MAX]; /* encode scratch */
+    u8 check[TBT_SHELL_CHUNK_MAX]; /* read-back/self-check scratch */
+    struct tbt_shell_slot slot[TBT_SHELL_RING];
+};
+
 struct tbt_carrier
 {
     struct list_head node;    /* sess->prov; self-linked otherwise */
@@ -2157,6 +2245,9 @@ struct tbt_carrier
     refcount_t refs;          /* 1 = container/installer; each reader adds
                                * one; the last put -> kfree_rcu */
     struct rcu_head rcu;      /* tbt_carrier_put() free path */
+    /* Borrowed-shell ownership ring; NULL unless shell_retx is on and the
+     * carrier accepted the wrapper congestion control. */
+    struct tbt_shell_retx *shell;
     struct work_struct w_connect; /* sock_create/bind/connect off the writer */
     struct work_struct w_rx;      /* drains carrier input -> tbt_rx */
     struct delayed_work w_pump;   /* correctness wake while a carrier is full */
@@ -2401,6 +2492,17 @@ u8 tbt_carrier_profile(const struct tbt_session *sess, u8 index, bool spare);
 void tbt_carrier_retire(struct tbt_session *sess, struct tbt_carrier *c);
 void tbt_carrier_stats_retire(struct tbt_session *sess, struct tbt_carrier *c);
 void tbt_carrier_free(struct tbt_carrier *c);
+/* Borrowed-shell retransmission (tbt_shell_retx.c). install() allocates the
+ * per-carrier ring and switches the socket to the wrapper congestion control;
+ * it is a no-op unless the module parameter is on. close() returns every
+ * owned record to the FEC replay queue before the socket dies, and free()
+ * releases the ring after the RCU grace period. poll() resolves ACKED and
+ * REQUEUE slots from process context. */
+int tbt_shell_retx_install(struct tbt_carrier *c, struct socket *s);
+void tbt_shell_retx_carrier_close(struct tbt_carrier *c);
+void tbt_shell_retx_carrier_free(struct tbt_carrier *c);
+void tbt_shell_retx_poll(struct tbt_session *sess);
+void tbt_shell_retx_exit(void);
 void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c,
                       const char *why);
 /* Pause a live carrier whose snd_una has not moved: no RETIRE, no
@@ -2460,6 +2562,22 @@ void tbt_fec_tx_work(struct work_struct *w);
  * gains room, so the blocked head leaves without waiting for the 2 ms
  * fallback. */
 void tbt_fec_out_kick(struct tbt_session *sess);
+/* Borrowed-shell experiment: take the newest eligible record out of the DATA
+ * FIFO. The caller owns one queue reference and must return it with
+ * tbt_fec_out_unsteal(), tbt_fec_out_to_replay() or tbt_fec_out_drop_stolen().
+ * Returns NULL when the FIFO has no full-share record for a live flow. */
+struct tbt_fec_out *tbt_fec_out_steal(struct tbt_session *sess);
+/* Put a stolen record back at the FIFO tail. False when the queue is full;
+ * the caller then keeps ownership and resolves it another way. */
+bool tbt_fec_out_unsteal(struct tbt_session *sess, struct tbt_fec_out *o);
+/* Move a stolen record onto the replay queue without copying or allocating.
+ * The record keeps its queue reference and flow reference. False when the
+ * session is stopping or the replay byte cap is full; the caller then owns
+ * it and must drop it. */
+bool tbt_fec_out_to_replay(struct tbt_session *sess, struct tbt_fec_out *o);
+/* Release a stolen record's queue reference. Process context only: this may
+ * free the record and queue the flow free work. */
+void tbt_fec_out_drop_stolen(struct tbt_session *sess, struct tbt_fec_out *o);
 /* Decode outside rx->lock, then deliver ready super-blocks in order. */
 void tbt_fec_rx_work(struct work_struct *w);
 int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len);

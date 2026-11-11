@@ -424,6 +424,24 @@ static bool tbt_fec_out_fifo_push(struct tbt_session *sess,
     u32 tail = sess->fec_fifo_tail;
     u32 head = smp_load_acquire(&sess->fec_fifo_head);
 
+    if (READ_ONCE(tbt_shell_retx))
+    {
+        unsigned long flags;
+        bool ok;
+
+        spin_lock_irqsave(&sess->fec_fifo_lock, flags);
+        tail = sess->fec_fifo_tail;
+        head = smp_load_acquire(&sess->fec_fifo_head);
+        ok = tail - head < TBT_FEC_OUTQ_FIFO_SIZE;
+        if (ok)
+        {
+            WRITE_ONCE(sess->fec_fifo[tail & (TBT_FEC_OUTQ_FIFO_SIZE - 1)],
+                       o);
+            smp_store_release(&sess->fec_fifo_tail, tail + 1);
+        }
+        spin_unlock_irqrestore(&sess->fec_fifo_lock, flags);
+        return ok;
+    }
     if (tail - head >= TBT_FEC_OUTQ_FIFO_SIZE)
         return false;
     WRITE_ONCE(sess->fec_fifo[tail & (TBT_FEC_OUTQ_FIFO_SIZE - 1)], o);
@@ -445,6 +463,175 @@ static struct tbt_fec_out *tbt_fec_out_fifo_peek(struct tbt_session *sess)
 static void tbt_fec_out_fifo_pop(struct tbt_session *sess)
 {
     smp_store_release(&sess->fec_fifo_head, sess->fec_fifo_head + 1);
+}
+
+/* Shell mode takes a record out of the ring and owns it immediately. NULL
+ * slots are holes left by a steal; the drain steps over them and publishes
+ * the advanced head. Called with fec_fifo_lock held. */
+static struct tbt_fec_out *tbt_fec_out_fifo_take_locked(struct tbt_session *sess,
+                                                        bool newest)
+{
+    u32 head = sess->fec_fifo_head;
+    u32 tail = sess->fec_fifo_tail;
+
+    if (newest)
+    {
+        while (tail != head)
+        {
+            u32 pos = tail - 1;
+            struct tbt_fec_out *o =
+                READ_ONCE(sess->fec_fifo[pos & (TBT_FEC_OUTQ_FIFO_SIZE - 1)]);
+
+            if (o)
+            {
+                WRITE_ONCE(sess->fec_fifo[pos & (TBT_FEC_OUTQ_FIFO_SIZE - 1)],
+                           NULL);
+                smp_store_release(&sess->fec_fifo_tail, pos);
+                return o;
+            }
+            tail = pos;
+        }
+        return NULL;
+    }
+    while (head != tail)
+    {
+        struct tbt_fec_out *o =
+            READ_ONCE(sess->fec_fifo[head & (TBT_FEC_OUTQ_FIFO_SIZE - 1)]);
+
+        if (o)
+        {
+            WRITE_ONCE(sess->fec_fifo[head & (TBT_FEC_OUTQ_FIFO_SIZE - 1)],
+                       NULL);
+            smp_store_release(&sess->fec_fifo_head, head + 1);
+            return o;
+        }
+        head++;
+    }
+    smp_store_release(&sess->fec_fifo_head, head);
+    return NULL;
+}
+
+/* Borrowed-shell: take the newest record that is a full FEC share of a live
+ * flow. Invalid or dying records stay in the ring for the normal drain. */
+struct tbt_fec_out *tbt_fec_out_steal(struct tbt_session *sess)
+{
+    unsigned long flags;
+    u32 head, tail;
+
+    if (!sess || !sess->fec_fifo || !READ_ONCE(tbt_shell_retx))
+        return NULL;
+    spin_lock_irqsave(&sess->fec_fifo_lock, flags);
+    head = sess->fec_fifo_head;
+    tail = sess->fec_fifo_tail;
+    while (tail != head)
+    {
+        u32 pos = tail - 1;
+        struct tbt_fec_out *o =
+            READ_ONCE(sess->fec_fifo[pos & (TBT_FEC_OUTQ_FIFO_SIZE - 1)]);
+
+        if (o)
+        {
+            bool live = !o->flow ||
+                        tbt_fec_flow_live(READ_ONCE(o->flow->state));
+
+            if (!o->control && !o->replay &&
+                o->len == TBT_FEC_HDR_LEN + TBT_FEC_S && live)
+            {
+                WRITE_ONCE(sess->fec_fifo[pos & (TBT_FEC_OUTQ_FIFO_SIZE - 1)],
+                           NULL);
+                smp_store_release(&sess->fec_fifo_tail, pos);
+                spin_unlock_irqrestore(&sess->fec_fifo_lock, flags);
+                return o;
+            }
+        }
+        tail = pos;
+    }
+    spin_unlock_irqrestore(&sess->fec_fifo_lock, flags);
+    return NULL;
+}
+
+/* Return a stolen record to the FIFO tail. Called when the substitution was
+ * refused after the steal (ring full, encode failure, store failure). */
+bool tbt_fec_out_unsteal(struct tbt_session *sess, struct tbt_fec_out *o)
+{
+    unsigned long flags;
+    u32 tail, head;
+    bool ok;
+
+    if (!sess || !o)
+        return false;
+    spin_lock_irqsave(&sess->fec_fifo_lock, flags);
+    tail = sess->fec_fifo_tail;
+    head = smp_load_acquire(&sess->fec_fifo_head);
+    ok = tail - head < TBT_FEC_OUTQ_FIFO_SIZE;
+    if (ok)
+    {
+        WRITE_ONCE(sess->fec_fifo[tail & (TBT_FEC_OUTQ_FIFO_SIZE - 1)], o);
+        smp_store_release(&sess->fec_fifo_tail, tail + 1);
+    }
+    spin_unlock_irqrestore(&sess->fec_fifo_lock, flags);
+    return ok;
+}
+
+/* Move a stolen record to the replay queue. The record object, its data, its
+ * flow reference and its queue reference are reused; only the accounting and
+ * the list change. Called from process context (session poll/carrier close),
+ * never from the ACK path. */
+bool tbt_fec_out_to_replay(struct tbt_session *sess, struct tbt_fec_out *o)
+{
+    struct tbt_fec_out *pos;
+    bool placed = false;
+    u32 cap;
+
+    if (!sess || !o || !sess->fec)
+        return false;
+    cap = tbt_fec_replay_cap(READ_ONCE(sess->fec_closing),
+                             TBT_FEC_REPLAY_BYTES_MAX);
+    spin_lock(&sess->fec_out_lock);
+    if (READ_ONCE(sess->closing) || READ_ONCE(sess->fec_stopping) ||
+        sess->fec_replay_bytes + o->len > cap)
+    {
+        spin_unlock(&sess->fec_out_lock);
+        return false;
+    }
+    /* The record was taken out of the DATA FIFO but its queue reference is
+     * still charged to the DATA counters until this point. */
+    atomic_dec(&sess->fec_outq_queued);
+    atomic_sub(o->len, &sess->fec_outq_bytes);
+    o->replay = 1;
+    o->control = 0;
+    o->carrier = 0;
+    o->stamp_ns = 0;
+    sess->fec_replay_queued++;
+    sess->fec_replay_bytes += o->len;
+    if (sess->fec_replay_bytes >
+        atomic64_read(&sess->fec_replay_queue_high))
+        atomic64_set(&sess->fec_replay_queue_high, sess->fec_replay_bytes);
+    /* The replay flush is ordered by block id: a repair must not sit ahead
+     * of the block holding the peer's frontier. */
+    list_for_each_entry(pos, &sess->fec_out_replay, node)
+    {
+        if (pos->block_id > o->block_id)
+        {
+            list_add_tail(&o->node, &pos->node);
+            placed = true;
+            break;
+        }
+    }
+    if (!placed)
+        list_add_tail(&o->node, &sess->fec_out_replay);
+    spin_unlock(&sess->fec_out_lock);
+    tbt_fec_out_kick(sess);
+    return true;
+}
+
+void tbt_fec_out_drop_stolen(struct tbt_session *sess, struct tbt_fec_out *o)
+{
+    if (!sess || !o)
+        return;
+    spin_lock(&sess->fec_out_lock);
+    tbt_fec_out_free(sess, o);
+    spin_unlock(&sess->fec_out_lock);
 }
 
 void tbt_fec_out_kick(struct tbt_session *sess)
@@ -1134,9 +1321,31 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
         return;
     while (served < TBT_FEC_DRAIN_PASS_MAX)
     {
-        struct tbt_fec_out *o = tbt_fec_out_fifo_peek(sess);
+        struct tbt_fec_out *o;
+        bool shell = READ_ONCE(tbt_shell_retx);
         int err;
 
+        if (shell)
+        {
+            unsigned long flags;
+
+            /* The shell path pops before dispatch, so a steal never takes a
+             * record the drain is already writing. A refused dispatch keeps
+             * the record in fec_fifo_stall; the head cannot advance past
+             * it. */
+            o = sess->fec_fifo_stall;
+            sess->fec_fifo_stall = NULL;
+            if (!o)
+            {
+                spin_lock_irqsave(&sess->fec_fifo_lock, flags);
+                o = tbt_fec_out_fifo_take_locked(sess, false);
+                spin_unlock_irqrestore(&sess->fec_fifo_lock, flags);
+            }
+        }
+        else
+        {
+            o = tbt_fec_out_fifo_peek(sess);
+        }
         if (!o)
             break;
         /* A record whose flow detached while it waited must not put a dead
@@ -1144,7 +1353,8 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
          * consumer that can drop it safely. */
         if (o->flow && !tbt_fec_flow_live(READ_ONCE(o->flow->state)))
         {
-            tbt_fec_out_fifo_pop(sess);
+            if (!shell)
+                tbt_fec_out_fifo_pop(sess);
             spin_lock(&sess->fec_out_lock);
             tbt_fec_out_free(sess, o);
             spin_unlock(&sess->fec_out_lock);
@@ -1162,7 +1372,8 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
                 pr_warn_once("tbtun: dropping FEC records: debug_loss=1 and drop_ppm=%u\n",
                              drop);
                 sess->dropped_by_ppm++;
-                tbt_fec_out_fifo_pop(sess);
+                if (!shell)
+                    tbt_fec_out_fifo_pop(sess);
                 spin_lock(&sess->fec_out_lock);
                 tbt_fec_out_free(sess, o);
                 spin_unlock(&sess->fec_out_lock);
@@ -1174,11 +1385,14 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
         {
             /* Every socket is full: zero wait was paid, and the session
              * retries the head in 2 ms. */
+            if (shell)
+                sess->fec_fifo_stall = o;
             mod_delayed_work(TBT_WQ, &sess->fec_drain_work,
                              msecs_to_jiffies(2));
             return;
         }
-        tbt_fec_out_fifo_pop(sess);
+        if (!shell)
+            tbt_fec_out_fifo_pop(sess);
         spin_lock(&sess->fec_out_lock);
         tbt_fec_out_free(sess, o);
         spin_unlock(&sess->fec_out_lock);
@@ -8055,11 +8269,36 @@ void tbt_fec_data_free(struct tbt_session *sess)
         list_for_each_entry_safe(o, tmp, &sess->fec_out_replay, node)
             tbt_fec_out_free(sess, o);
         /* The drain work is cancelled above, so this is the only consumer
-         * left and the FIFO can be emptied in order. */
-        while ((o = tbt_fec_out_fifo_peek(sess)) != NULL)
+         * left and the FIFO can be emptied in order. In shell mode the drain
+         * may have owned a record in fec_fifo_stall; take the records out
+         * under the FIFO lock because a steal may hold one too. */
+        if (sess->fec_fifo_stall)
         {
-            tbt_fec_out_fifo_pop(sess);
+            o = sess->fec_fifo_stall;
+            sess->fec_fifo_stall = NULL;
             tbt_fec_out_free(sess, o);
+        }
+        if (READ_ONCE(tbt_shell_retx))
+        {
+            unsigned long flags;
+
+            for (;;)
+            {
+                spin_lock_irqsave(&sess->fec_fifo_lock, flags);
+                o = tbt_fec_out_fifo_take_locked(sess, false);
+                spin_unlock_irqrestore(&sess->fec_fifo_lock, flags);
+                if (!o)
+                    break;
+                tbt_fec_out_free(sess, o);
+            }
+        }
+        else
+        {
+            while ((o = tbt_fec_out_fifo_peek(sess)) != NULL)
+            {
+                tbt_fec_out_fifo_pop(sess);
+                tbt_fec_out_free(sess, o);
+            }
         }
         spin_unlock(&sess->fec_out_lock);
 
@@ -9134,6 +9373,8 @@ int tbt_fec_data_init(struct tbt_session *sess)
     INIT_LIST_HEAD(&sess->fec_out_ctl);
     INIT_LIST_HEAD(&sess->fec_out_replay);
     spin_lock_init(&sess->fec_out_lock);
+    spin_lock_init(&sess->fec_fifo_lock);
+    sess->fec_fifo_stall = NULL;
     INIT_DELAYED_WORK(&sess->w_fec_tx, tbt_fec_tx_work);
     INIT_DELAYED_WORK(&sess->w_fec_rx, tbt_fec_rx_work);
     INIT_DELAYED_WORK(&sess->w_fec_tick, tbt_fec_tick_work);

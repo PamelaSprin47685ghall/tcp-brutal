@@ -1435,7 +1435,17 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                 seq_printf(m, "tunnel %llu shell prep=%llu short_mss=%llu "
                               "gso_before=%u gso_after=%u mss=%u "
                               "writes=%llu exact=%llu merged=%llu gso=%llu "
-                              "noskb=%llu other=%llu sample=%u\n", id,
+                              "noskb=%llu other=%llu sample=%u "
+                              "subst=%llu bytes=%llu ack=%llu dsack=%llu "
+                              "dsack_rq=%llu retx_same=%llu timeout=%llu "
+                              "carrier_lost=%llu requeue_fail=%llu stranded=%llu "
+                              "no_rec=%llu ring_full=%llu rec_bad=%llu "
+                              "enc_fail=%llu store_fail=%llu selfcheck=%llu "
+                              "skip_len=%llu skip_gso=%llu skip_cloned=%llu "
+                              "skip_shared=%llu skip_busy=%llu skip_csum=%llu "
+                              "csum_none=%llu csum_partial=%llu "
+                              "skip_mss=%llu skip_owned=%llu skip_lost=%llu "
+                              "skip_prefix=%llu install_fail=%llu\n", id,
                            tbt_stat_read(&s->shell_prep_ok),
                            tbt_stat_read(&s->shell_prep_short_mss),
                            READ_ONCE(s->shell_gso_before),
@@ -1447,7 +1457,36 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->shell_chunk_gso),
                            tbt_stat_read(&s->shell_chunk_noskb),
                            tbt_stat_read(&s->shell_send_other),
-                           READ_ONCE(s->shell_chunk_sample));
+                           READ_ONCE(s->shell_chunk_sample),
+                           tbt_stat_read(&s->shell_subst),
+                           tbt_stat_read(&s->shell_subst_bytes),
+                           tbt_stat_read(&s->shell_ack_ok),
+                           tbt_stat_read(&s->shell_dsack_events),
+                           tbt_stat_read(&s->shell_dsack_requeue),
+                           tbt_stat_read(&s->shell_retx_same),
+                           tbt_stat_read(&s->shell_timeout),
+                           tbt_stat_read(&s->shell_carrier_lost),
+                           tbt_stat_read(&s->shell_requeue_fail),
+                           tbt_stat_read(&s->shell_stranded),
+                           tbt_stat_read(&s->shell_no_record),
+                           tbt_stat_read(&s->shell_ring_full),
+                           tbt_stat_read(&s->shell_rec_invalid),
+                           tbt_stat_read(&s->shell_encode_fail),
+                           tbt_stat_read(&s->shell_store_fail),
+                           tbt_stat_read(&s->shell_selfcheck_fail),
+                           tbt_stat_read(&s->shell_skip_len),
+                           tbt_stat_read(&s->shell_skip_gso),
+                           tbt_stat_read(&s->shell_skip_cloned),
+                           tbt_stat_read(&s->shell_skip_shared),
+                           tbt_stat_read(&s->shell_skip_busy),
+                           tbt_stat_read(&s->shell_skip_csum),
+                           tbt_stat_read(&s->shell_csum_none),
+                           tbt_stat_read(&s->shell_csum_partial),
+                           tbt_stat_read(&s->shell_skip_mss),
+                           tbt_stat_read(&s->shell_skip_owned),
+                           tbt_stat_read(&s->shell_skip_lost),
+                           tbt_stat_read(&s->shell_skip_prefix),
+                           tbt_stat_read(&s->shell_install_fail));
                 /* c13: the adaptive control surface. The shape is the one in
                  * force (updated by the data plane on every epoch), and the
                  * window counters are alive-filtered DATA shares since that

@@ -208,6 +208,9 @@ static void __exit tbtun_exit(void)
      * sessions down outside it; a destroy that waits for work must not pin
      * the global lock. */
     tbt_tunnel_shutdown();
+    /* Every carrier socket is closed by the teardown above, so the wrapper
+     * congestion control has no user left. */
+    tbt_shell_retx_exit();
     /* No flow can be put after the session teardown. Drain and destroy the
      * module-owned flow free workqueue: session destroy queues the last puts
      * there, and synchronize_rcu()/rcu_barrier() do not wait for work items.

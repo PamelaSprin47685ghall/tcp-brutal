@@ -16,7 +16,7 @@ SRCS            := Makefile \
                    tbtun/tbt_tx_acct.h \
                    tbtun/tbt_rx_budget.h \
                    tbtun/tbt_core.c tbtun/tbt_session.c tbtun/tbt_procfs.c tbtun/tbt_listen.c \
-                   tbtun/tbt_carrier.c tbtun/tbt_sock.c tbtun/tbt_tx.c tbtun/tbt_rx.c \
+                   tbtun/tbt_carrier.c tbtun/tbt_shell_retx.c tbtun/tbt_sock.c tbtun/tbt_tx.c tbtun/tbt_rx.c \
                    tbtun/tbt_parse.c tbtun/tbt_proto.c tbtun/tbt_rec.c tbtun/tbt_http.c \
                    tbtun/tbt_fec_batch.c \
                    tbtun/tbt_crypto.c tbtun/tbt_fec.c \
@@ -287,7 +287,8 @@ tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
                    tbtun/tbt_fec_sclc.o \
                    tbtun/tbt_fec_codec_cache.o \
                    tbtun/tbt_sc_ldpc.o \
-                   tbtun/tbt_sc_ldpc_gf16.o tbtun/tbt_sclc_uplink.o
+                   tbtun/tbt_sc_ldpc_gf16.o tbtun/tbt_sclc_uplink.o \
+                   tbtun/tbt_shell_retx.o
 
 # Keep every module frame small enough for the kernel stack: a 1 KiB bound
 # catches a TBT_STREAMS_MAX pointer array before it reaches a real call path.

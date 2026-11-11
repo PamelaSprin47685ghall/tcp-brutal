@@ -1188,6 +1188,8 @@ static void tbt_session_poll_body(struct tbt_session *sess)
      * it can, so the next pass has capacity without touching the user. */
     tbt_carrier_capacity_check(sess);
     tbt_tx_fec_poll(sess);
+    /* Borrowed-shell resolution: process-context half of the ACK callback. */
+    tbt_shell_retx_poll(sess);
     if (!READ_ONCE(sess->closing))
         tbt_session_arm(sess, TBT_SW_POLL, msecs_to_jiffies(50));
 }
@@ -2785,6 +2787,9 @@ static void tbt_carrier_close(struct tbt_carrier *c)
 
     if (!c)
         return;
+    /* Every owned substitute returns to the FEC replay queue before the
+     * socket that carries it dies. */
+    tbt_shell_retx_carrier_close(c);
     if (s)
     {
         tbt_sock_abort_on_close(s);
@@ -2887,6 +2892,7 @@ void tbt_carrier_free(struct tbt_carrier *c)
     kfree(c->part);
     kfree(c->parser);
     kfree(c->http_rx);
+    tbt_shell_retx_carrier_free(c);
     if (c->sess)
         tbt_session_put(c->sess);
     /* refcount-zero: last put's RCU callback, or a never-published discard */
@@ -3767,6 +3773,12 @@ static void tbt_car_connect_work(struct work_struct *w)
     TBT_DIAG("tunnel=%llu carrier=%u gen=%u callbacks installed lport=%u",
              (unsigned long long)t->cfg.id, c->index, c->gen,
              ntohs(inet_sk(s->sk)->inet_sport));
+    /* After sk_user_data: the wrapper's ACK callback resolves the carrier
+     * through it. A refusal leaves the carrier on BBR and the experiment off
+     * for this socket; shell_install_fail names it. */
+    if (tbt_shell_retx_install(c, s))
+        TBT_DIAG("tunnel=%llu carrier=%u gen=%u shell install refused",
+                 (unsigned long long)t->cfg.id, c->index, c->gen);
 
 
     atomic_set(&c->connected, 1);
@@ -4080,6 +4092,9 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
     else
         atomic64_inc(&sess->car_bbr_fail);
     tbt_car_shell_prep(sess, newsock->sk);
+    if (tbt_shell_retx_install(c, newsock))
+        TBT_DIAG("tunnel=%llu carrier=%u gen=%u shell install refused",
+                 (unsigned long long)t->cfg.id, c->index, c->gen);
     tbt_carrier_keepalive(newsock);
     atomic_set(&c->connected, 1);
     sess->rx_adopt_events++;
