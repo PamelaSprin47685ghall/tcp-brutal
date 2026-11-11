@@ -452,6 +452,13 @@ static void tbt_drain_body(struct tbt_stream *st)
     if (eof)
     {
         tbt_sock_shutdown_wr(st);
+        /* The peer's half-close does not stop the target's echo. If the
+         * source ring paused capture earlier, resume it now; otherwise the
+         * remaining target bytes never enter the FEC ring and the pump has
+         * nothing to send. */
+        if (READ_ONCE(st->tx_paused))
+            WRITE_ONCE(st->tx_paused, false);
+        tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
         tbt_tx_fec_rearm_if_pending(st->sess, st);
         /* rx_fin_done is half of the detach gate; the FBK tick owns the
          * other half (tx_fin_written) and the close bound. Wake it even when
