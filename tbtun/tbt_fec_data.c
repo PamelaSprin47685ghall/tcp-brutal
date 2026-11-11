@@ -5039,6 +5039,7 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
                 sample_real = real;
                 sample_first = true;
                 sample = true;
+                atomic64_inc(&sess->fec_first_ok);
             }
         }
         else if (block_code ? tbt_fec_sclc_decode_wake(
@@ -5229,6 +5230,10 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
     {
         b->wake_first_ok = (u8)(rc == 0 && b->ready);
         b->wake_sampled = 1;
+        if (tbt_fec_first_outcome(b->empty, 0, b->wake_first_ok != 0) > 0)
+            atomic64_inc(&sess->fec_first_ok);
+        else
+            atomic64_inc(&sess->fec_first_fail);
         sample_e = b->wake_real > b->wake_ndata
                        ? (u16)(b->wake_real - b->wake_ndata)
                        : 0;

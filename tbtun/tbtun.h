@@ -1943,6 +1943,8 @@ struct tbt_session
      * failures. Each names one way a share or a stream can be lost, so a
      * stalled stream is diagnosed from /proc instead of guesswork. */
     atomic64_t fec_decode_blocks;     /* blocks handed to the codec */
+    atomic64_t fec_first_ok;          /* group blocks: first decode succeeded */
+    atomic64_t fec_first_fail;        /* group blocks: first decode failed */
     atomic64_t fec_decode_recovered;  /* shares recovered from parity */
     atomic64_t fec_decode_nomem;      /* codec workspace allocation failed */
     atomic64_t fec_deliver_nomem;     /* delivery allocation failed: retry */

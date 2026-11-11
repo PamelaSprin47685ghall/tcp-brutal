@@ -1438,7 +1438,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                                   "state=%s reason=%s "
                                   "m_target=%u q_raw=%u q=%u delta=%u "
                                   "delta_off=%d burst=%u eps=%u sigma=%u backup=%u "
-                                  "ctl_reason=%s frozen=%u\n",
+                                  "ctl_reason=%s frozen=%u "
+                                  "first_ok=%llu first_fail=%llu\n",
                                id, tbt_read_bool(s->adaptive) ? "on" : "off",
                                READ_ONCE(a->epoch), an, am, ag,
                                READ_ONCE(a->class), READ_ONCE(a->p_ppm),
@@ -1463,7 +1464,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                                READ_ONCE(a->backup),
                                tbt_adapt_sclc_reason_name(
                                    READ_ONCE(a->ctl_reason)),
-                               READ_ONCE(a->frozen));
+                               READ_ONCE(a->frozen),
+                               tbt_stat_read(&s->fec_first_ok),
+                               tbt_stat_read(&s->fec_first_fail));
                 }
                 seq_printf(m, "tunnel %llu c8 profile_mismatch=%llu http_parse_err=%llu "
                               "http_status_err=%llu http_req=%llu http_resp=%llu "

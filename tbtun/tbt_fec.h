@@ -1881,6 +1881,19 @@ static inline bool tbt_fec_block_shape_ok(u16 n, u16 m, u16 ref_n, u16 ref_m,
     return tbt_fec_sclc_up_split(n, m);
 }
 
+/* First-attempt outcome for one group block: 0 = empty marker (not a
+ * sample), +1 = success, -1 = failure. A block that already holds every
+ * DATA share is a success without running the codec. */
+static inline int tbt_fec_first_outcome(bool empty, bool full_data,
+                                         bool ready)
+{
+    if (empty)
+        return 0;
+    if (full_data)
+        return 1;
+    return ready ? 1 : -1;
+}
+
 /* A decode runs outside rx->lock on a snapshot of the block's shape,
  * presence and payload lengths. Placing a share (or resetting the slot)
  * bumps the block's generation; the commit then rejects a result that
