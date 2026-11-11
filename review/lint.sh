@@ -181,6 +181,8 @@ atomic_stats_names='
     dbg_over_qmax dbg_copy_fail dbg_empty_len dbg_pump_runs dbg_pump_nocar
     ctl_lost retired_tx_bytes retired_data_frames retired_retx_data
     stall_paused_skips
+    fec_pin_drop ul_pin_inject ul_pin_bytes ul_pin_skip_window
+    ul_pin_skip_no_ofo ul_pin_skip_model
 '
 
 # Print one line per access to one of the named session counters that is not

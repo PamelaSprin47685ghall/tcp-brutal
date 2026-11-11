@@ -42,6 +42,7 @@
 #include "tbt_fec_adapt_sclc.h"
 #include "tbt_sclc_uplink.h"
 #include "tbt_rec.h"
+#include "tbt_ul_pin.h"
 
 static struct tbt_fec_blk *tbt_fec_rx_blk(struct tbt_fec_rx *rx, u16 group,
                                           u64 block_id);
@@ -711,6 +712,23 @@ static u32 tbt_fec_car_backlog(struct tbt_session *sess, u16 index)
     return queued;
 }
 
+/* 0.8.0 Step 3: the near side's uplink is deterministic. Every DATA record
+ * is bound to the carrier its share names, and every control record rides a
+ * parity slot. The far side keeps the adaptive dispatch: its downlink has no
+ * byte-position contract to honour. */
+static bool tbt_fec_uplink_pinned(const struct tbt_session *sess)
+{
+    return sess->fec && sess->tunnel &&
+           sess->tunnel->cfg.role == TBT_ROLE_NEAR;
+}
+
+static bool tbt_fec_ctl_carrier_ok(const struct tbt_session *sess, u16 index)
+{
+    if (!tbt_fec_uplink_pinned(sess))
+        return true;
+    return !tbt_ul_pin_is_data(index, sess->fec_n, sess->fec_m);
+}
+
 /* Write one replay record. The carrier is not part of the record's identity:
  * start at the emptiest usable queue, then rotate so one full socket cannot
  * hold the repair. `usable` is a per-flush snapshot; every candidate is
@@ -813,6 +831,9 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o,
         {
             u16 idx = (u16)((start + i) % sess->n_car);
 
+            /* A control record never lands on a DATA carrier. */
+            if (!tbt_fec_ctl_carrier_ok(sess, idx))
+                continue;
             c = tbt_carrier_get(sess, (u8)idx);
             if (!c)
                 continue;
@@ -972,6 +993,72 @@ static void tbt_fec_out_slow_note(struct tbt_carrier *c, bool room)
         WRITE_ONCE(c->slow, true);
 }
 
+/* Write one pinned DATA record, or keep it queued.
+ *
+ * The record goes on its own carrier and nowhere else: the far side derives a
+ * lost share's byte position from this mapping, so moving the byte to another
+ * stream would invalidate the arithmetic. A carrier that is gone (down,
+ * stalled, stopping) costs its share, and parity rebuilds it: that is cheaper
+ * than a record stuck at the FIFO head. A live socket that is merely full
+ * keeps the record, and the drain retries in 2 ms. */
+static int tbt_fec_out_dispatch_pinned(struct tbt_session *sess,
+                                       struct tbt_fec_out *o)
+{
+    struct tbt_carrier *c;
+    struct sock *sk;
+    int err;
+
+    if (o->carrier >= sess->n_car)
+        return -EINVAL;
+    c = tbt_carrier_get(sess, (u8)o->carrier);
+    if (!c)
+    {
+        atomic64_inc(&sess->fec_pin_drop);
+        return 0;
+    }
+    if (!atomic_read(&c->up) || atomic_read(&c->stopping) ||
+        !atomic_read(&c->connected) || READ_ONCE(c->stalled))
+    {
+        tbt_carrier_put(c);
+        atomic64_inc(&sess->fec_pin_drop);
+        return 0;
+    }
+    sk = tbt_carrier_sk_get(c);
+    if (!sk)
+    {
+        tbt_carrier_put(c);
+        atomic64_inc(&sess->fec_pin_drop);
+        return 0;
+    }
+    if (sk_stream_wspace(sk) < (int)o->len)
+    {
+        tbt_carrier_sk_put(sk);
+        tbt_fec_out_slow_note(c, false);
+        tbt_carrier_put(c);
+        return -EAGAIN;
+    }
+    tbt_carrier_sk_put(sk);
+    tbt_fec_out_slow_note(c, true);
+    err = tbt_carrier_send_fec(c, o->data, o->len);
+    tbt_carrier_put(c);
+    if (!err)
+    {
+        atomic_set(&sess->async_rot, (u16)((o->carrier + 1) % sess->n_car));
+        return 0;
+    }
+    if (err == -EAGAIN)
+    {
+        tbt_fec_out_slow_note(c, false);
+        return -EAGAIN;
+    }
+    if (err == -ENOTCONN || err == -ENODEV)
+    {
+        atomic64_inc(&sess->fec_pin_drop);
+        return 0;
+    }
+    return err;
+}
+
 /* Offer one DATA record to the carriers in async_rot order and write it on
  * the first socket whose send space holds it. A refusal costs no wait: the
  * scan moves to the next carrier, and a refusal after the wspace check is
@@ -986,11 +1073,14 @@ static void tbt_fec_out_slow_note(struct tbt_carrier *c, bool room)
 static int tbt_fec_out_dispatch(struct tbt_session *sess,
                                 struct tbt_fec_out *o)
 {
-    u16 start = (u16)(atomic_read(&sess->async_rot) % sess->n_car);
+    u16 start;
     u16 fallback = 0xffff;
     bool skipped_slow = false;
     int round;
 
+    if (tbt_fec_uplink_pinned(sess))
+        return tbt_fec_out_dispatch_pinned(sess, o);
+    start = (u16)(atomic_read(&sess->async_rot) % sess->n_car);
     for (round = 0; round < 2; round++)
     {
         u16 idx = start;
@@ -4929,6 +5019,54 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
  * The snapshot is what the codec sees; a share that arrives during the decode
  * is placed into b->data as usual, and the commit only writes slots that are
  * still missing. */
+/* Hand every DATA share this attempt recovered from parity to the uplink
+ * replay (0.8.0 Step 3). A recovered share is plaintext in the block, and the
+ * bytes it stood for are still missing from its carrier's TCP stream; the
+ * replay rebuilds that exact segment and fills the hole when the carrier's
+ * rcv_nxt is inside it. Sleeping is allowed here: w_fec_rx owns this call and
+ * the replay takes the carrier's socket lock. */
+static void tbt_fec_rx_repair_uplink(struct tbt_session *sess,
+                                     struct tbt_fec_flow *f, u16 group,
+                                     const struct tbt_fec_decode_snap *snap,
+                                     const u8 recov[TBT_FEC_BITMAP_BYTES])
+{
+    struct tbt_fec_rx *rx = f ? f->rx : NULL;
+    u16 i;
+
+    if (!rx || !snap->real || snap->real > snap->n)
+        return;
+    for (i = 0; i < snap->real; i++)
+    {
+        struct tbt_fec_blk *b;
+        u8 *payload;
+        u16 real = 0, short_len = 0;
+        bool live = false;
+
+        if (!tbt_fec_adapt_bitmap_test(recov, i))
+            continue;
+        payload = kmalloc(rx->s, GFP_KERNEL);
+        if (!payload)
+            continue;
+        b = tbt_fec_rx_blk(rx, group, snap->block_id);
+        spin_lock_bh(&rx->lock);
+        /* The slot may have been reused while this attempt ran; only the
+         * block that produced the recovered share may be read. */
+        if (b->used && b->block_id == snap->block_id && b->data &&
+            b->dpresent[i])
+        {
+            memcpy(payload, b->data + (size_t)i * rx->s, rx->s);
+            real = tbt_fec_blk_real_len(rx, group, b);
+            short_len = b->short_len;
+            live = true;
+        }
+        spin_unlock_bh(&rx->lock);
+        if (live)
+            tbt_ul_pin_repair(sess, f, group, i, snap->block_id, snap->seq0,
+                              snap->n, snap->m, real, short_len, payload);
+        kfree(payload);
+    }
+}
+
 static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
                                   struct tbt_fec_flow *f, u16 group,
                                   u16 slot)
@@ -4943,11 +5081,16 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
     bool block_code;
     u16 sample_e = 0, sample_s = 0, sample_real = 0;
     bool sample_first = false;
+    /* Shares this attempt recovered from parity. The uplink replay walks this
+     * set after the lock is released: a replay sleeps (it takes the carrier's
+     * socket lock), so it cannot run under rx->lock. */
+    u8 recov[TBT_FEC_BITMAP_BYTES];
     u64 now = ktime_get_ns();
     int rc;
 
     if (!snap)
         return false;
+    memset(recov, 0, sizeof(recov));
     memset(snap, 0, sizeof(*snap));
     spin_lock_bh(&rx->lock);
     block_code = rx->sclc;
@@ -5093,6 +5236,7 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
                 if (i < 32)
                     b->miss_mask |= 1u << i;
                 tbt_fec_adapt_bitmap_set(b->miss_bits, i);
+                tbt_fec_adapt_bitmap_set(recov, i);
             }
             k++;
         }
@@ -5153,6 +5297,7 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
         tbt_fec_adapt_sclc_block_sample(&rx->ctl, sample_e, sample_s,
                                         sample_first, sample_real);
     }
+    tbt_fec_rx_repair_uplink(sess, f, group, snap, recov);
     return rc == 0;
 }
 

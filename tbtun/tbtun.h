@@ -712,6 +712,10 @@ struct tbt_parser
 {
     u8 buf[TBT_PARSER_BUF];
     size_t have;
+    /* TCP sequence of buf[0]. The uplink chunk-origin bookkeeping needs the
+     * exact byte position of the first chunk, and the parser is the only
+     * place that sees every consumed byte in order. */
+    u32 seq;
 };
 
 /* ------------------------------------------------------------------ *
@@ -1962,6 +1966,17 @@ struct tbt_session
     atomic64_t fec_ack_bad;           /* ACK frontier/credit clamped */
     atomic64_t fec_tx_share_gap;      /* sender share sequence skipped */
     atomic64_t fec_empty_block;       /* markers emitted for empty groups */
+    atomic64_t fec_pin_drop;          /* pinned DATA record lost with its
+                                       * carrier; parity rebuilds the share */
+    /* 0.8.0 Step 3 uplink replay: a parity-recovered DATA share was rebuilt
+     * into its wire segment and fed to the carrier's stalled rcv_nxt. The
+     * skips name why an offered share was not replayed, so a stuck hole
+     * reads as "no ofo proof" / "position not provable" instead of a guess. */
+    atomic64_t ul_pin_inject;         /* segments replayed into a carrier */
+    atomic64_t ul_pin_bytes;          /* bytes replayed */
+    atomic64_t ul_pin_skip_window;    /* rcv_nxt outside the rebuilt chunk */
+    atomic64_t ul_pin_skip_no_ofo;    /* out-of-order tree empty */
+    atomic64_t ul_pin_skip_model;     /* byte position not provable */
     atomic64_t http_parse_err;   /* container framing/header protocol error */
     atomic64_t http_status_err;  /* non-200 or non-chunked/non-keepalive */
     u64 http_req, http_resp; /* header blocks emitted; pump only */
@@ -2203,6 +2218,17 @@ struct tbt_carrier
     struct mutex http_lock;       /* serialises the one-time header start */
     bool http_hdr_done;           /* peer header parsed; body stage */
     bool http_req_done;           /* far side: request header parsed (TX gate) */
+    /* 0.8.0 Step 3: the uplink chunk body's position in this carrier's TCP
+     * stream. rx_body_start_seq is the sequence of the first chunk's first
+     * byte, rx_body_seq the running cursor the parser advances by one chunk
+     * at a time, and rx_chunk_len the constant a full DATA chunk repeats.
+     * The carrier's RX work is the only writer; the FEC RX work reads them
+     * with READ_ONCE and replays a recovered share at the cursor. */
+    u32 rx_body_start_seq;
+    u32 rx_body_seq;
+    u32 rx_chunk_len;
+    u64 rx_body_chunks;
+    bool rx_body_seq_set;
     bool http_pending;            /* a decoded record awaits handling (-EAGAIN) */
     struct tbt_hdr http_pending_hdr;
     u16 http_pending_len;
@@ -2301,7 +2327,7 @@ void tbt_tx_frame_drop_account(struct tbt_session *sess, struct tbt_frame *fr);
 /* tbt_rx.c */
 int tbt_rx_parse_pending(struct tbt_carrier *c);
 int tbt_rx_skb(struct tbt_carrier *c, struct sk_buff *skb, unsigned int offset,
-               size_t len, size_t *consumed);
+               size_t len, u32 seq, size_t *consumed);
 void tbt_rx_free_queue(struct tbt_stream *st);
 int tbt_rx_flush(struct tbt_stream *st);
 int tbt_target_attach(struct tbt_stream *st, struct socket *s);

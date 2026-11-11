@@ -13,6 +13,7 @@ SRCS            := Makefile \
                    tbtun/tbt_fec.h tbtun/tbt_fec_adapt.h tbtun/tbt_fec_adapt_sclc.h \
                    tbtun/tbt_fec_sclc_delta.h \
                    tbtun/tbt_portmap.h tbtun/tbt_map.h tbtun/tbt_carrier_policy.h \
+                   tbtun/tbt_ul_pin.h \
                    tbtun/tbt_tx_acct.h \
                    tbtun/tbt_rx_budget.h \
                    tbtun/tbt_core.c tbtun/tbt_session.c tbtun/tbt_procfs.c tbtun/tbt_listen.c \
@@ -23,7 +24,7 @@ SRCS            := Makefile \
                    tbtun/tbt_fec_data.c tbtun/tbt_fec_adapt.c \
                    tbtun/tbt_fec_adapt_sclc.c tbtun/tbt_fec_sclc.c \
                    tbtun/tbt_fec_sclc.h tbtun/tbt_fec_codec_cache.c \
-                   tbtun/tbt_fec_codec_cache.h \
+                   tbtun/tbt_fec_codec_cache.h tbtun/tbt_ul_pin.c \
                    tbtun/tbt_portmap.c tbtun/tbt_map.c \
                    tbtun/tbt_sc_ldpc.c tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c \
                    tbtun/tbt_sc_ldpc.h tbtun/tbt_sc_ldpc_gf16.h tbtun/tbt_sclc_uplink.h \
@@ -160,6 +161,13 @@ HOST_MAP_HDRS   := tbtun/tbt_map.h tbtun/tbt_parse.h tbtun/tbt_uapi.h \
                    tbtun/tbt_proto.h
 HOST_CARRIER_POLICY := host/test_carrier_policy
 HOST_CARRIER_POLICY_HDRS := tbtun/tbt_carrier_policy.h tbtun/tbt_uapi.h
+HOST_UL_PIN     := host/test_ul_pin_inject
+HOST_UL_PIN_SRCS := host/test_ul_pin_inject.c tbtun/tbt_ul_pin.c \
+                   tbtun/tbt_fec.c tbtun/tbt_crypto.c tbtun/tbt_http.c \
+                   tbtun/tbt_fec_batch.c tbtun/tbt_proto.c tbtun/tbt_rec.c
+HOST_UL_PIN_HDRS := tbtun/tbt_ul_pin.h tbtun/tbt_fec.h tbtun/tbt_crypto.h \
+                   tbtun/tbt_fec_batch.h tbtun/tbt_http.h tbtun/tbt_uapi.h \
+                   tbtun/tbt_proto.h tbtun/tbt_rec.h
 HOST_LIFETIME   := host/test_lifetime
 HOST_LIFETIME_SRCS := host/test_lifetime.c
 HOST_SCLC       := host/test_sclc_uplink
@@ -234,7 +242,8 @@ tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
                    tbtun/tbt_fec_sclc.o \
                    tbtun/tbt_fec_codec_cache.o \
                    tbtun/tbt_sc_ldpc.o \
-                   tbtun/tbt_sc_ldpc_gf16.o tbtun/tbt_sclc_uplink.o
+                   tbtun/tbt_sc_ldpc_gf16.o tbtun/tbt_sclc_uplink.o \
+                   tbtun/tbt_ul_pin.o
 
 # Keep every module frame small enough for the kernel stack: a 1 KiB bound
 # catches a TBT_STREAMS_MAX pointer array before it reaches a real call path.
@@ -269,7 +278,7 @@ check: dkms-srcs-check
 host-test: $(HOST_CARRIER_POLICY)
 host-test-san-run: host/test_carrier_policy_san
 
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_CODEC_CACHE) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_SHAPES) $(HOST_PORTMAP) $(HOST_MAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_INVARIANTS) $(HOST_WIRE_COMPAT) $(HTTP_RFC_GEN) $(HOST_RX_BUDGET)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_CODEC_CACHE) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_SHAPES) $(HOST_PORTMAP) $(HOST_MAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_INVARIANTS) $(HOST_WIRE_COMPAT) $(HTTP_RFC_GEN) $(HOST_RX_BUDGET) $(HOST_UL_PIN)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
@@ -298,6 +307,7 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_PORTMAP)
 	@./$(HOST_MAP)
 	@./$(HOST_CARRIER_POLICY)
+	@./$(HOST_UL_PIN)
 	@./$(HOST_LIFETIME)
 	@./$(HOST_SCLC)
 	@./$(HOST_SCLC_DATA)
@@ -459,6 +469,12 @@ $(HOST_MAP): $(HOST_MAP_SRCS) $(HOST_MAP_HDRS)
 $(HOST_CARRIER_POLICY): host/test_carrier_policy.c $(HOST_CARRIER_POLICY_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ host/test_carrier_policy.c
 
+$(HOST_UL_PIN): $(HOST_UL_PIN_SRCS) $(HOST_UL_PIN_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_UL_PIN_SRCS)
+
+host/test_ul_pin_inject_san: $(HOST_UL_PIN_SRCS) $(HOST_UL_PIN_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_UL_PIN_SRCS)
+
 $(HOST_LIFETIME): $(HOST_LIFETIME_SRCS)
 	$(HOSTCC) $(HOST_CFLAGS) -o $@ $(HOST_LIFETIME_SRCS)
 
@@ -530,7 +546,7 @@ host-test-san:
 		echo "host-test-san: skipped, $(HOSTCC) cannot link -fsanitize=address,undefined"; \
 	fi
 
-host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_mem_budget_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_batch_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_shapes_san host/test_close_wake_san host/test_hold_san host/test_portmap_san host/test_map_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_invariants_san host/test_wire_compat_san host/test_rx_budget_san $(HTTP_RFC_GEN_SAN)
+host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_mem_budget_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_batch_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_shapes_san host/test_close_wake_san host/test_hold_san host/test_portmap_san host/test_map_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_invariants_san host/test_wire_compat_san host/test_rx_budget_san host/test_ul_pin_inject_san $(HTTP_RFC_GEN_SAN)
 host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san
 	@./host/test_parse_san
 	@./host/test_fuzz_san
@@ -551,6 +567,7 @@ host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san hos
 	@./host/test_portmap_san
 	@./host/test_map_san
 	@./host/test_carrier_policy_san
+	@./host/test_ul_pin_inject_san
 	@./host/test_lifetime_san
 	@./host/test_sclc_uplink_san
 	@./host/test_fec_sclc_data_san
@@ -689,6 +706,7 @@ clean: clean-dkms.conf clean-dkms-tarball
 	$(RM) $(HOST_BENCH_RXPATH)
 	$(RM) $(HOST_BENCH_SCLC_BUILD)
 	$(RM) $(HOST_CARRIER_POLICY) host/test_carrier_policy_san
+	$(RM) $(HOST_UL_PIN) host/test_ul_pin_inject_san
 	$(RM) $(wildcard tbtun/*.su) $(wildcard host/*.su)
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
 

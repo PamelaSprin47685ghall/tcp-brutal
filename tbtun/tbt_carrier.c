@@ -38,6 +38,7 @@
 #include "tbtun.h"
 #include "tbt_carrier_policy.h"
 #include "tbt_fec_batch.h"
+#include "tbt_ul_pin.h"
 #include "tbt_tx_acct.h"
 
 /* One blocking wait inside kernel_connect(). A connect that has not completed
@@ -1073,8 +1074,19 @@ static void tbt_car_poll_one(struct tbt_carrier *c, bool paused)
                  !atomic_read(&sess->fec_outq_queued) &&
                  !atomic_read(&sess->fec_outq_bytes))
         {
-            if (!tbt_tx_control_pinned(sess, NULL, c->index, TBT_F_PAD, 0, 0, NULL, 0,
-                                       false, GFP_ATOMIC))
+            /* 0.8.0 Step 3: a DATA carrier carries shares and nothing else.
+             * A PAD between two chunks would break the far side's
+             * block-id-to-byte-position map, so keepalive rides a parity
+             * slot. The drip path above is non-FEC only, so it is already
+             * off every DATA carrier. */
+            bool keepalive_ok = !sess->fec ||
+                                sess->tunnel->cfg.role != TBT_ROLE_NEAR ||
+                                !tbt_ul_pin_is_data(c->index, sess->fec_n,
+                                                    sess->fec_m);
+
+            if (keepalive_ok &&
+                !tbt_tx_control_pinned(sess, NULL, c->index, TBT_F_PAD, 0, 0,
+                                       NULL, 0, false, GFP_ATOMIC))
                 atomic64_inc(&sess->pad_tx);
         }
     }
@@ -1248,7 +1260,8 @@ static int tbt_car_rx_actor(read_descriptor_t *desc, struct sk_buff *skb, unsign
         size_t n = 0;
         size_t take = min_t(size_t, len - used, TBT_RX_RUN_SLICE);
 
-        err = tbt_rx_skb(c, skb, offset + used, take, &n);
+        err = tbt_rx_skb(c, skb, offset + used, take,
+                         TCP_SKB_CB(skb)->seq + offset + (u32)used, &n);
         used += n;
         tbt_rx_budget_charge(&c->rx_budget, n);
         if (err)
@@ -2710,6 +2723,10 @@ static void tbt_carrier_close(struct tbt_carrier *c)
     if (c->parser->have)
         sess->recv_partial_discard++;
     c->parser->have = 0;
+    c->parser->seq = 0;
+    /* The next socket starts a new byte stream: no chunk position from this
+     * one may name a replay's injection point. */
+    tbt_ul_pin_body_end(c);
     tbt_http_rx_new_message(c->http_rx);
     if (c->part_len || c->part_off)
         sess->recv_partial_discard++;

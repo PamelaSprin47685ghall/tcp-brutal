@@ -31,6 +31,7 @@
 #include "tbtun.h"
 #include "tbt_fec.h"
 #include "tbt_rec.h"
+#include "tbt_ul_pin.h"
 
 /* The receiver's hole budget. Explicit config wins; auto is k x SRTT with
  * k's upper bound (5), floored at 2 s. The floor must cover the carrier TCP's
@@ -956,6 +957,7 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
             c->http_have += take;
             p->have -= take;
             memmove(p->buf, p->buf + take, p->have);
+            p->seq += (u32)take;
 
             if (near)
             {
@@ -1022,10 +1024,17 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                     memmove(p->buf + extra, p->buf, p->have);
                     memcpy(p->buf, c->http_hdr + hlen, extra);
                     p->have += extra;
+                    /* The extra bytes are the body bytes that shared the
+                     * last header read; they precede the buffered tail, so
+                     * the origin moves back by exactly that many bytes. */
+                    p->seq -= (u32)extra;
                 }
             }
             c->http_have = 0;
             c->http_hdr_done = true;
+            /* The first chunk starts here. Its TCP sequence is the origin
+             * every replayed share is measured from. */
+            tbt_ul_pin_body_start(c, p->seq);
             continue;
         }
         while (p->have)
@@ -1044,10 +1053,14 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                                               &flen, &ferr);
                 p->have -= n;
                 memmove(p->buf, p->buf + n, p->have);
+                p->seq += (u32)n;
                 if (ferr == TBT_RX_OK)
                 {
                     int err;
 
+                    /* One complete chunk left the stream: the next chunk's
+                     * expected sequence moves by its whole wire length. */
+                    tbt_ul_pin_chunk_seen(c, (u32)n);
                     /* The record-type gate lives in one place: the FEC range
                      * 0x30..0x35 must not fall into the old-frame scanner. */
                     if (tbt_fec_record_type(frec[0]))
@@ -1075,6 +1088,7 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                     if (tbt_http_rx_done(c->http_rx))
                     {
                         tbt_http_rx_new_message(c->http_rx);
+                        tbt_ul_pin_body_end(c);
                         c->http_hdr_done = false;
                         c->http_have = 0;
                     }
@@ -1087,9 +1101,12 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
             n = tbt_http_frame_decode(c->http_rx, p->buf, p->have, &rec, &derr);
             p->have -= n;
             memmove(p->buf, p->buf + n, p->have);
+            p->seq += (u32)n;
             if (derr == TBT_RX_OK)
             {
                 int err = tbt_http_record(c, &rec);
+
+                tbt_ul_pin_chunk_seen(c, (u32)n);
 
                 if (err == -EAGAIN)
                 {
@@ -1107,6 +1124,7 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                 if (tbt_http_rx_done(c->http_rx))
                 {
                     tbt_http_rx_new_message(c->http_rx);
+                    tbt_ul_pin_body_end(c);
                     c->http_hdr_done = false;
                     c->http_have = 0;
                 }
@@ -1153,6 +1171,7 @@ static int tbt_rx_parse_raw(struct tbt_carrier *c)
              * error into a stream of payload-CRC failures. */
             p->have -= need;
             memmove(p->buf, p->buf + need, p->have);
+            p->seq += (u32)need;
             if (ferr)
                 return ferr;
             continue;
@@ -1215,6 +1234,7 @@ static int tbt_rx_parse_raw(struct tbt_carrier *c)
         }
         p->have -= used;
         memmove(p->buf, p->buf + used, p->have);
+        p->seq += (u32)used;
     }
     return 0;
 }
@@ -1251,7 +1271,7 @@ int tbt_rx_parse_pending(struct tbt_carrier *c)
 // into the per-carrier parse buffer, so there is no bounce buffer.
 // Sleepable: the caller is w_rx, never softirq.
 int tbt_rx_skb(struct tbt_carrier *c, struct sk_buff *skb, unsigned int offset,
-               size_t len, size_t *consumed)
+               size_t len, u32 seq, size_t *consumed)
 {
     struct tbt_parser *p = c->parser;
     size_t done = 0;
@@ -1267,6 +1287,12 @@ int tbt_rx_skb(struct tbt_carrier *c, struct sk_buff *skb, unsigned int offset,
         size_t take = min(len - done, sizeof(p->buf) - p->have);
         int err;
 
+        /* buf[0] is the oldest unconsumed byte of one TCP stream, so its
+         * sequence is the run's first byte plus everything already handed to
+         * the parser. A non-empty buffer keeps the value it has: the parse
+         * advanced it past every byte it consumed. */
+        if (!p->have)
+            p->seq = seq + (u32)done;
         // p->buf is full: either a record larger than the buffer (impossible
         // while TBT_PARSER_BUF == TBT_REC_MAX) or a paused record that the
         // drain has not made room for yet. Both mean "stop reading".

@@ -7,6 +7,28 @@ and moves independently of the module version.
 
 ### Added
 
+- 0.8.0 Step 3: deterministic uplink carrier pinning. On the near side's
+  uplink a DATA record is bound to the carrier its share names
+  (`c = group*(n+m)+share`) and is never re-routed; a control record (ACK,
+  NACK, CFG, FBK, PAD) is dispatched only on a parity slot (`share >= n`).
+  Because every full DATA chunk on one carrier has the same wire length, the
+  far side records the first chunk's TCP sequence and derives any lost
+  chunk's position as `body_start + block_id*chunk_len`. A share the codec
+  recovered from parity is rebuilt byte-for-byte (chunk size line, sealed
+  48-byte header, ChaCha8 ciphertext, CRLF) and replayed into that carrier's
+  own receive queue, so TCP trims what it already has, merges the
+  out-of-order tree, advances `rcv_nxt`, and sends the cumulative ACK. The
+  replay only runs when the stream end is known, because neither parity nor
+  the block carries the LAST flag; without that proof the segment cannot be
+  promised identical and TCP retransmission keeps ownership. Both ends of
+  every carrier are this module; nothing here looks at a socket the module
+  did not create. `host/test_ul_pin_inject` pins the mapping, the wrap-safe
+  chunk position, the slice bounds and the byte identity in both crypto
+  modes.
+- `docs/coexist-fairness.md`: the measurement design for the competing plain
+  TCP flow's throughput loss on a shared bottleneck (topology, load matrix,
+  metrics, pass/fail thresholds, and what each Step 3 change is expected to
+  move).
 - IPv6 endpoints. `listen=`, `peer=`, `target=` and `srcaddrs=` accept an IPv4
   literal or a bracketed IPv6 literal (`[2001:db8::1]:9000`), and one tunnel
   line may mix families. The listener, carrier dial and target dial create the
