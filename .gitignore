@@ -315,8 +315,8 @@ host/test_fec_adapt_sclc
 host/test_fec_adapt_sclc_san
 host/test_fec_sclc
 host/test_fec_sclc_san
-host/test_fec_sclc_ladder
-host/test_fec_sclc_ladder_san
+host/test_fec_sclc_shapes
+host/test_fec_sclc_shapes_san
 host/test_fec_sclc_data
 host/test_fec_sclc_data_san
 host/test_close_wake_san

@@ -1,0 +1,427 @@
+section,level,pct,n,m,rate_ppm,boundary,param,param2,metric,value,events,trials,ci_lo,ci_hi,note
+construct,0,0,1,15,62500,0,w=16,n=1,build,1,-1,-1,0.000000,0.000000,codes=16 npar=15360 nsym=16384 rate=0.0625 slack=0
+construct,0,0,2,14,125000,0,w=16,n=2,build,1,-1,-1,0.000000,0.000000,codes=32 npar=7168 nsym=8192 rate=0.1250 slack=0
+construct,0,0,3,13,187500,0,w=16,n=3,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,4,12,250000,0,w=16,n=4,build,1,-1,-1,0.000000,0.000000,codes=64 npar=3072 nsym=4096 rate=0.2500 slack=0
+construct,0,0,5,11,312500,0,w=16,n=5,build,1,-1,-1,0.000000,0.000000,codes=80 npar=2252 nsym=3276 rate=0.3126 slack=64
+construct,0,0,6,10,375000,0,w=16,n=6,build,1,-1,-1,0.000000,0.000000,codes=96 npar=1706 nsym=2730 rate=0.3751 slack=64
+construct,0,0,7,9,437500,0,w=16,n=7,build,1,-1,-1,0.000000,0.000000,codes=112 npar=1316 nsym=2340 rate=0.4376 slack=64
+construct,0,0,8,8,500000,0,w=16,n=8,build,1,-1,-1,0.000000,0.000000,codes=128 npar=1024 nsym=2048 rate=0.5000 slack=0
+construct,0,0,9,7,562500,0,w=16,n=9,build,1,-1,-1,0.000000,0.000000,codes=144 npar=768 nsym=1792 rate=0.5714 slack=4096
+construct,0,0,10,6,625000,0,w=16,n=10,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,11,5,687500,0,w=16,n=11,build,1,-1,-1,0.000000,0.000000,codes=176 npar=448 nsym=1472 rate=0.6957 slack=3072
+construct,0,0,12,4,750000,0,w=16,n=12,build,1,-1,-1,0.000000,0.000000,codes=192 npar=320 nsym=1344 rate=0.7619 slack=4096
+construct,0,0,13,3,812500,0,w=16,n=13,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,14,2,875000,0,w=16,n=14,build,1,-1,-1,0.000000,0.000000,codes=224 npar=128 nsym=1152 rate=0.8889 slack=4096
+construct,0,0,15,1,937500,0,w=16,n=15,build,1,-1,-1,0.000000,0.000000,codes=240 npar=64 nsym=1088 rate=0.9412 slack=1024
+construct,0,0,1,31,31250,0,w=32,n=1,build,1,-1,-1,0.000000,0.000000,codes=16 npar=31744 nsym=32768 rate=0.0312 slack=0
+construct,0,0,2,30,62500,0,w=32,n=2,build,1,-1,-1,0.000000,0.000000,codes=32 npar=15360 nsym=16384 rate=0.0625 slack=0
+construct,0,0,3,29,93750,0,w=32,n=3,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,4,28,125000,0,w=32,n=4,build,1,-1,-1,0.000000,0.000000,codes=64 npar=7168 nsym=8192 rate=0.1250 slack=0
+construct,0,0,5,27,156250,0,w=32,n=5,build,1,-1,-1,0.000000,0.000000,codes=80 npar=5529 nsym=6553 rate=0.1563 slack=48
+construct,0,0,6,26,187500,0,w=32,n=6,build,1,-1,-1,0.000000,0.000000,codes=96 npar=4437 nsym=5461 rate=0.1875 slack=32
+construct,0,0,7,25,218750,0,w=32,n=7,build,1,-1,-1,0.000000,0.000000,codes=112 npar=3657 nsym=4681 rate=0.2188 slack=16
+construct,0,0,8,24,250000,0,w=32,n=8,build,1,-1,-1,0.000000,0.000000,codes=128 npar=3072 nsym=4096 rate=0.2500 slack=0
+construct,0,0,9,23,281250,0,w=32,n=9,build,1,-1,-1,0.000000,0.000000,codes=144 npar=2616 nsym=3640 rate=0.2813 slack=128
+construct,0,0,10,22,312500,0,w=32,n=10,build,1,-1,-1,0.000000,0.000000,codes=160 npar=2252 nsym=3276 rate=0.3126 slack=128
+construct,0,0,11,21,343750,0,w=32,n=11,build,1,-1,-1,0.000000,0.000000,codes=176 npar=1954 nsym=2978 rate=0.3439 slack=160
+construct,0,0,12,20,375000,0,w=32,n=12,build,1,-1,-1,0.000000,0.000000,codes=192 npar=1706 nsym=2730 rate=0.3751 slack=128
+construct,0,0,13,19,406250,0,w=32,n=13,build,1,-1,-1,0.000000,0.000000,codes=208 npar=1496 nsym=2520 rate=0.4063 slack=128
+construct,0,0,14,18,437500,0,w=32,n=14,build,1,-1,-1,0.000000,0.000000,codes=224 npar=1316 nsym=2340 rate=0.4376 slack=128
+construct,0,0,15,17,468750,0,w=32,n=15,build,1,-1,-1,0.000000,0.000000,codes=240 npar=1160 nsym=2184 rate=0.4689 slack=128
+construct,0,0,16,16,500000,0,w=32,n=16,build,1,-1,-1,0.000000,0.000000,codes=256 npar=1024 nsym=2048 rate=0.5000 slack=0
+construct,0,0,17,15,531250,0,w=32,n=17,build,1,-1,-1,0.000000,0.000000,codes=272 npar=896 nsym=1920 rate=0.5333 slack=2048
+construct,0,0,18,14,562500,0,w=32,n=18,build,1,-1,-1,0.000000,0.000000,codes=288 npar=768 nsym=1792 rate=0.5714 slack=8192
+construct,0,0,19,13,593750,0,w=32,n=19,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,20,12,625000,0,w=32,n=20,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,21,11,656250,0,w=32,n=21,build,1,-1,-1,0.000000,0.000000,codes=336 npar=512 nsym=1536 rate=0.6667 slack=8192
+construct,0,0,22,10,687500,0,w=32,n=22,build,1,-1,-1,0.000000,0.000000,codes=352 npar=448 nsym=1472 rate=0.6957 slack=6144
+construct,0,0,23,9,718750,0,w=32,n=23,build,1,-1,-1,0.000000,0.000000,codes=368 npar=384 nsym=1408 rate=0.7273 slack=6144
+construct,0,0,24,8,750000,0,w=32,n=24,build,1,-1,-1,0.000000,0.000000,codes=384 npar=320 nsym=1344 rate=0.7619 slack=8192
+construct,0,0,25,7,781250,0,w=32,n=25,build,1,-1,-1,0.000000,0.000000,codes=400 npar=256 nsym=1280 rate=0.8000 slack=12288
+construct,0,0,26,6,812500,0,w=32,n=26,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,27,5,843750,0,w=32,n=27,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,28,4,875000,0,w=32,n=28,build,1,-1,-1,0.000000,0.000000,codes=448 npar=128 nsym=1152 rate=0.8889 slack=8192
+construct,0,0,29,3,906250,0,w=32,n=29,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,30,2,937500,0,w=32,n=30,build,1,-1,-1,0.000000,0.000000,codes=480 npar=64 nsym=1088 rate=0.9412 slack=2048
+construct,0,0,31,1,968750,0,w=32,n=31,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,1,63,15625,0,w=64,n=1,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,2,62,31250,0,w=64,n=2,build,1,-1,-1,0.000000,0.000000,codes=32 npar=31744 nsym=32768 rate=0.0312 slack=0
+construct,0,0,3,61,46875,0,w=64,n=3,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,4,60,62500,0,w=64,n=4,build,1,-1,-1,0.000000,0.000000,codes=64 npar=15360 nsym=16384 rate=0.0625 slack=0
+construct,0,0,5,59,78125,0,w=64,n=5,build,1,-1,-1,0.000000,0.000000,codes=80 npar=12083 nsym=13107 rate=0.0781 slack=16
+construct,0,0,6,58,93750,0,w=64,n=6,build,1,-1,-1,0.000000,0.000000,codes=96 npar=9898 nsym=10922 rate=0.0938 slack=64
+construct,0,0,7,57,109375,0,w=64,n=7,build,1,-1,-1,0.000000,0.000000,codes=112 npar=8338 nsym=9362 rate=0.1094 slack=32
+construct,0,0,8,56,125000,0,w=64,n=8,build,1,-1,-1,0.000000,0.000000,codes=128 npar=7168 nsym=8192 rate=0.1250 slack=0
+construct,0,0,9,55,140625,0,w=64,n=9,build,1,-1,-1,0.000000,0.000000,codes=144 npar=6257 nsym=7281 rate=0.1406 slack=112
+construct,0,0,10,54,156250,0,w=64,n=10,build,1,-1,-1,0.000000,0.000000,codes=160 npar=5529 nsym=6553 rate=0.1563 slack=96
+construct,0,0,11,53,171875,0,w=64,n=11,build,1,-1,-1,0.000000,0.000000,codes=176 npar=4933 nsym=5957 rate=0.1719 slack=144
+construct,0,0,12,52,187500,0,w=64,n=12,build,1,-1,-1,0.000000,0.000000,codes=192 npar=4437 nsym=5461 rate=0.1875 slack=64
+construct,0,0,13,51,203125,0,w=64,n=13,build,1,-1,-1,0.000000,0.000000,codes=208 npar=4017 nsym=5041 rate=0.2031 slack=48
+construct,0,0,14,50,218750,0,w=64,n=14,build,1,-1,-1,0.000000,0.000000,codes=224 npar=3657 nsym=4681 rate=0.2188 slack=32
+construct,0,0,15,49,234375,0,w=64,n=15,build,1,-1,-1,0.000000,0.000000,codes=240 npar=3345 nsym=4369 rate=0.2344 slack=16
+construct,0,0,16,48,250000,0,w=64,n=16,build,1,-1,-1,0.000000,0.000000,codes=256 npar=3072 nsym=4096 rate=0.2500 slack=0
+construct,0,0,17,47,265625,0,w=64,n=17,build,1,-1,-1,0.000000,0.000000,codes=272 npar=2831 nsym=3855 rate=0.2656 slack=16
+construct,0,0,18,46,281250,0,w=64,n=18,build,1,-1,-1,0.000000,0.000000,codes=288 npar=2616 nsym=3640 rate=0.2813 slack=256
+construct,0,0,19,45,296875,0,w=64,n=19,build,1,-1,-1,0.000000,0.000000,codes=304 npar=2425 nsym=3449 rate=0.2969 slack=80
+construct,0,0,20,44,312500,0,w=64,n=20,build,1,-1,-1,0.000000,0.000000,codes=320 npar=2252 nsym=3276 rate=0.3126 slack=256
+construct,0,0,21,43,328125,0,w=64,n=21,build,1,-1,-1,0.000000,0.000000,codes=336 npar=2096 nsym=3120 rate=0.3282 slack=256
+construct,0,0,22,42,343750,0,w=64,n=22,build,1,-1,-1,0.000000,0.000000,codes=352 npar=1954 nsym=2978 rate=0.3439 slack=320
+construct,0,0,23,41,359375,0,w=64,n=23,build,1,-1,-1,0.000000,0.000000,codes=368 npar=1825 nsym=2849 rate=0.3594 slack=144
+construct,0,0,24,40,375000,0,w=64,n=24,build,1,-1,-1,0.000000,0.000000,codes=384 npar=1706 nsym=2730 rate=0.3751 slack=256
+construct,0,0,25,39,390625,0,w=64,n=25,build,1,-1,-1,0.000000,0.000000,codes=400 npar=1597 nsym=2621 rate=0.3907 slack=176
+construct,0,0,26,38,406250,0,w=64,n=26,build,1,-1,-1,0.000000,0.000000,codes=416 npar=1496 nsym=2520 rate=0.4063 slack=256
+construct,0,0,27,37,421875,0,w=64,n=27,build,1,-1,-1,0.000000,0.000000,codes=432 npar=1403 nsym=2427 rate=0.4219 slack=112
+construct,0,0,28,36,437500,0,w=64,n=28,build,1,-1,-1,0.000000,0.000000,codes=448 npar=1316 nsym=2340 rate=0.4376 slack=256
+construct,0,0,29,35,453125,0,w=64,n=29,build,1,-1,-1,0.000000,0.000000,codes=464 npar=1235 nsym=2259 rate=0.4533 slack=400
+construct,0,0,30,34,468750,0,w=64,n=30,build,1,-1,-1,0.000000,0.000000,codes=480 npar=1160 nsym=2184 rate=0.4689 slack=256
+construct,0,0,31,33,484375,0,w=64,n=31,build,1,-1,-1,0.000000,0.000000,codes=496 npar=1090 nsym=2114 rate=0.4844 slack=32
+construct,0,0,32,32,500000,0,w=64,n=32,build,1,-1,-1,0.000000,0.000000,codes=512 npar=1024 nsym=2048 rate=0.5000 slack=0
+construct,0,0,33,31,515625,0,w=64,n=33,build,1,-1,-1,0.000000,0.000000,codes=528 npar=960 nsym=1984 rate=0.5161 slack=1024
+construct,0,0,34,30,531250,0,w=64,n=34,build,1,-1,-1,0.000000,0.000000,codes=544 npar=896 nsym=1920 rate=0.5333 slack=4096
+construct,0,0,35,29,546875,0,w=64,n=35,build,1,-1,-1,0.000000,0.000000,codes=560 npar=832 nsym=1856 rate=0.5517 slack=9216
+construct,0,0,36,28,562500,0,w=64,n=36,build,1,-1,-1,0.000000,0.000000,codes=576 npar=768 nsym=1792 rate=0.5714 slack=16384
+construct,0,0,37,27,578125,0,w=64,n=37,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,38,26,593750,0,w=64,n=38,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,39,25,609375,0,w=64,n=39,build,1,-1,-1,0.000000,0.000000,codes=624 npar=640 nsym=1664 rate=0.6154 slack=10240
+construct,0,0,40,24,625000,0,w=64,n=40,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,41,23,640625,0,w=64,n=41,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,42,22,656250,0,w=64,n=42,build,1,-1,-1,0.000000,0.000000,codes=672 npar=512 nsym=1536 rate=0.6667 slack=16384
+construct,0,0,43,21,671875,0,w=64,n=43,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,44,20,687500,0,w=64,n=44,build,1,-1,-1,0.000000,0.000000,codes=704 npar=448 nsym=1472 rate=0.6957 slack=12288
+construct,0,0,45,19,703125,0,w=64,n=45,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,46,18,718750,0,w=64,n=46,build,1,-1,-1,0.000000,0.000000,codes=736 npar=384 nsym=1408 rate=0.7273 slack=12288
+construct,0,0,47,17,734375,0,w=64,n=47,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,48,16,750000,0,w=64,n=48,build,1,-1,-1,0.000000,0.000000,codes=768 npar=320 nsym=1344 rate=0.7619 slack=16384
+construct,0,0,49,15,765625,0,w=64,n=49,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,50,14,781250,0,w=64,n=50,build,1,-1,-1,0.000000,0.000000,codes=800 npar=256 nsym=1280 rate=0.8000 slack=24576
+construct,0,0,51,13,796875,0,w=64,n=51,build,1,-1,-1,0.000000,0.000000,codes=816 npar=256 nsym=1280 rate=0.8000 slack=4096
+construct,0,0,52,12,812500,0,w=64,n=52,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,53,11,828125,0,w=64,n=53,build,1,-1,-1,0.000000,0.000000,codes=848 npar=192 nsym=1216 rate=0.8421 slack=17408
+construct,0,0,54,10,843750,0,w=64,n=54,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,55,9,859375,0,w=64,n=55,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,56,8,875000,0,w=64,n=56,build,1,-1,-1,0.000000,0.000000,codes=896 npar=128 nsym=1152 rate=0.8889 slack=16384
+construct,0,0,57,7,890625,0,w=64,n=57,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,58,6,906250,0,w=64,n=58,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,59,5,921875,0,w=64,n=59,build,1,-1,-1,0.000000,0.000000,codes=944 npar=64 nsym=1088 rate=0.9412 slack=21504
+construct,0,0,60,4,937500,0,w=64,n=60,build,1,-1,-1,0.000000,0.000000,codes=960 npar=64 nsym=1088 rate=0.9412 slack=4096
+construct,0,0,61,3,953125,0,w=64,n=61,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,62,2,968750,0,w=64,n=62,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,63,1,984375,0,w=64,n=63,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,1,127,7812,0,w=128,n=1,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,2,126,15625,0,w=128,n=2,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,3,125,23437,0,w=128,n=3,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,4,124,31250,0,w=128,n=4,build,1,-1,-1,0.000000,0.000000,codes=64 npar=31744 nsym=32768 rate=0.0312 slack=0
+construct,0,0,5,123,39062,0,w=128,n=5,build,1,-1,-1,0.000000,0.000000,codes=80 npar=25190 nsym=26214 rate=0.0391 slack=32
+construct,0,0,6,122,46875,0,w=128,n=6,build,1,-1,-1,0.000000,0.000000,codes=96 npar=20821 nsym=21845 rate=0.0469 slack=32
+construct,0,0,7,121,54687,0,w=128,n=7,build,1,-1,-1,0.000000,0.000000,codes=112 npar=17700 nsym=18724 rate=0.0547 slack=64
+construct,0,0,8,120,62500,0,w=128,n=8,build,1,-1,-1,0.000000,0.000000,codes=128 npar=15360 nsym=16384 rate=0.0625 slack=0
+construct,0,0,9,119,70312,0,w=128,n=9,build,1,-1,-1,0.000000,0.000000,codes=144 npar=13539 nsym=14563 rate=0.0703 slack=80
+construct,0,0,10,118,78125,0,w=128,n=10,build,1,-1,-1,0.000000,0.000000,codes=160 npar=12083 nsym=13107 rate=0.0781 slack=32
+construct,0,0,11,117,85937,0,w=128,n=11,build,1,-1,-1,0.000000,0.000000,codes=176 npar=10891 nsym=11915 rate=0.0859 slack=112
+construct,0,0,12,116,93750,0,w=128,n=12,build,1,-1,-1,0.000000,0.000000,codes=192 npar=9898 nsym=10922 rate=0.0938 slack=128
+construct,0,0,13,115,101562,0,w=128,n=13,build,1,-1,-1,0.000000,0.000000,codes=208 npar=9058 nsym=10082 rate=0.1016 slack=96
+construct,0,0,14,114,109375,0,w=128,n=14,build,1,-1,-1,0.000000,0.000000,codes=224 npar=8338 nsym=9362 rate=0.1094 slack=64
+construct,0,0,15,113,117187,0,w=128,n=15,build,1,-1,-1,0.000000,0.000000,codes=240 npar=7714 nsym=8738 rate=0.1172 slack=32
+construct,0,0,16,112,125000,0,w=128,n=16,build,1,-1,-1,0.000000,0.000000,codes=256 npar=7168 nsym=8192 rate=0.1250 slack=0
+construct,0,0,17,111,132812,0,w=128,n=17,build,1,-1,-1,0.000000,0.000000,codes=272 npar=6686 nsym=7710 rate=0.1328 slack=32
+construct,0,0,18,110,140625,0,w=128,n=18,build,1,-1,-1,0.000000,0.000000,codes=288 npar=6257 nsym=7281 rate=0.1406 slack=224
+construct,0,0,19,109,148437,0,w=128,n=19,build,1,-1,-1,0.000000,0.000000,codes=304 npar=5874 nsym=6898 rate=0.1484 slack=160
+construct,0,0,20,108,156250,0,w=128,n=20,build,1,-1,-1,0.000000,0.000000,codes=320 npar=5529 nsym=6553 rate=0.1563 slack=192
+construct,0,0,21,107,164062,0,w=128,n=21,build,1,-1,-1,0.000000,0.000000,codes=336 npar=5217 nsym=6241 rate=0.1641 slack=176
+construct,0,0,22,106,171875,0,w=128,n=22,build,1,-1,-1,0.000000,0.000000,codes=352 npar=4933 nsym=5957 rate=0.1719 slack=288
+construct,0,0,23,105,179687,0,w=128,n=23,build,1,-1,-1,0.000000,0.000000,codes=368 npar=4674 nsym=5698 rate=0.1797 slack=288
+construct,0,0,24,104,187500,0,w=128,n=24,build,1,-1,-1,0.000000,0.000000,codes=384 npar=4437 nsym=5461 rate=0.1875 slack=128
+construct,0,0,25,103,195312,0,w=128,n=25,build,1,-1,-1,0.000000,0.000000,codes=400 npar=4218 nsym=5242 rate=0.1953 slack=352
+construct,0,0,26,102,203125,0,w=128,n=26,build,1,-1,-1,0.000000,0.000000,codes=416 npar=4017 nsym=5041 rate=0.2031 slack=96
+construct,0,0,27,101,210937,0,w=128,n=27,build,1,-1,-1,0.000000,0.000000,codes=432 npar=3830 nsym=4854 rate=0.2110 slack=224
+construct,0,0,28,100,218750,0,w=128,n=28,build,1,-1,-1,0.000000,0.000000,codes=448 npar=3657 nsym=4681 rate=0.2188 slack=64
+construct,0,0,29,99,226562,0,w=128,n=29,build,1,-1,-1,0.000000,0.000000,codes=464 npar=3495 nsym=4519 rate=0.2266 slack=336
+construct,0,0,30,98,234375,0,w=128,n=30,build,1,-1,-1,0.000000,0.000000,codes=480 npar=3345 nsym=4369 rate=0.2344 slack=32
+construct,0,0,31,97,242187,0,w=128,n=31,build,1,-1,-1,0.000000,0.000000,codes=496 npar=3204 nsym=4228 rate=0.2422 slack=64
+construct,0,0,32,96,250000,0,w=128,n=32,build,1,-1,-1,0.000000,0.000000,codes=512 npar=3072 nsym=4096 rate=0.2500 slack=0
+construct,0,0,33,95,257812,0,w=128,n=33,build,1,-1,-1,0.000000,0.000000,codes=528 npar=2947 nsym=3971 rate=0.2579 slack=464
+construct,0,0,34,94,265625,0,w=128,n=34,build,1,-1,-1,0.000000,0.000000,codes=544 npar=2831 nsym=3855 rate=0.2656 slack=32
+construct,0,0,35,93,273437,0,w=128,n=35,build,1,-1,-1,0.000000,0.000000,codes=560 npar=2720 nsym=3744 rate=0.2735 slack=512
+construct,0,0,36,92,281250,0,w=128,n=36,build,1,-1,-1,0.000000,0.000000,codes=576 npar=2616 nsym=3640 rate=0.2813 slack=512
+construct,0,0,37,91,289062,0,w=128,n=37,build,1,-1,-1,0.000000,0.000000,codes=592 npar=2518 nsym=3542 rate=0.2891 slack=288
+construct,0,0,38,90,296875,0,w=128,n=38,build,1,-1,-1,0.000000,0.000000,codes=608 npar=2425 nsym=3449 rate=0.2969 slack=160
+construct,0,0,39,89,304687,0,w=128,n=39,build,1,-1,-1,0.000000,0.000000,codes=624 npar=2336 nsym=3360 rate=0.3048 slack=512
+construct,0,0,40,88,312500,0,w=128,n=40,build,1,-1,-1,0.000000,0.000000,codes=640 npar=2252 nsym=3276 rate=0.3126 slack=512
+construct,0,0,41,87,320312,0,w=128,n=41,build,1,-1,-1,0.000000,0.000000,codes=656 npar=2172 nsym=3196 rate=0.3204 slack=576
+construct,0,0,42,86,328125,0,w=128,n=42,build,1,-1,-1,0.000000,0.000000,codes=672 npar=2096 nsym=3120 rate=0.3282 slack=512
+construct,0,0,43,85,335937,0,w=128,n=43,build,1,-1,-1,0.000000,0.000000,codes=688 npar=2024 nsym=3048 rate=0.3360 slack=128
+construct,0,0,44,84,343750,0,w=128,n=44,build,1,-1,-1,0.000000,0.000000,codes=704 npar=1954 nsym=2978 rate=0.3439 slack=640
+construct,0,0,45,83,351562,0,w=128,n=45,build,1,-1,-1,0.000000,0.000000,codes=720 npar=1888 nsym=2912 rate=0.3516 slack=512
+construct,0,0,46,82,359375,0,w=128,n=46,build,1,-1,-1,0.000000,0.000000,codes=736 npar=1825 nsym=2849 rate=0.3594 slack=288
+construct,0,0,47,81,367187,0,w=128,n=47,build,1,-1,-1,0.000000,0.000000,codes=752 npar=1764 nsym=2788 rate=0.3673 slack=576
+construct,0,0,48,80,375000,0,w=128,n=48,build,1,-1,-1,0.000000,0.000000,codes=768 npar=1706 nsym=2730 rate=0.3751 slack=512
+construct,0,0,49,79,382812,0,w=128,n=49,build,1,-1,-1,0.000000,0.000000,codes=784 npar=1650 nsym=2674 rate=0.3829 slack=736
+construct,0,0,50,78,390625,0,w=128,n=50,build,1,-1,-1,0.000000,0.000000,codes=800 npar=1597 nsym=2621 rate=0.3907 slack=352
+construct,0,0,51,77,398437,0,w=128,n=51,build,1,-1,-1,0.000000,0.000000,codes=816 npar=1546 nsym=2570 rate=0.3984 slack=32
+construct,0,0,52,76,406250,0,w=128,n=52,build,1,-1,-1,0.000000,0.000000,codes=832 npar=1496 nsym=2520 rate=0.4063 slack=512
+construct,0,0,53,75,414062,0,w=128,n=53,build,1,-1,-1,0.000000,0.000000,codes=848 npar=1449 nsym=2473 rate=0.4141 slack=48
+construct,0,0,54,74,421875,0,w=128,n=54,build,1,-1,-1,0.000000,0.000000,codes=864 npar=1403 nsym=2427 rate=0.4219 slack=224
+construct,0,0,55,73,429687,0,w=128,n=55,build,1,-1,-1,0.000000,0.000000,codes=880 npar=1359 nsym=2383 rate=0.4297 slack=112
+construct,0,0,56,72,437500,0,w=128,n=56,build,1,-1,-1,0.000000,0.000000,codes=896 npar=1316 nsym=2340 rate=0.4376 slack=512
+construct,0,0,57,71,445312,0,w=128,n=57,build,1,-1,-1,0.000000,0.000000,codes=912 npar=1275 nsym=2299 rate=0.4454 slack=464
+construct,0,0,58,70,453125,0,w=128,n=58,build,1,-1,-1,0.000000,0.000000,codes=928 npar=1235 nsym=2259 rate=0.4533 slack=800
+construct,0,0,59,69,460937,0,w=128,n=59,build,1,-1,-1,0.000000,0.000000,codes=944 npar=1197 nsym=2221 rate=0.4611 slack=528
+construct,0,0,60,68,468750,0,w=128,n=60,build,1,-1,-1,0.000000,0.000000,codes=960 npar=1160 nsym=2184 rate=0.4689 slack=512
+construct,0,0,61,67,476562,0,w=128,n=61,build,1,-1,-1,0.000000,0.000000,codes=976 npar=1124 nsym=2148 rate=0.4767 slack=704
+construct,0,0,62,66,484375,0,w=128,n=62,build,1,-1,-1,0.000000,0.000000,codes=992 npar=1090 nsym=2114 rate=0.4844 slack=64
+construct,0,0,63,65,492187,0,w=128,n=63,build,1,-1,-1,0.000000,0.000000,codes=1008 npar=1056 nsym=2080 rate=0.4923 slack=512
+construct,0,0,64,64,500000,0,w=128,n=64,build,1,-1,-1,0.000000,0.000000,codes=1024 npar=1024 nsym=2048 rate=0.5000 slack=0
+construct,0,0,65,63,507812,0,w=128,n=65,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,66,62,515625,0,w=128,n=66,build,1,-1,-1,0.000000,0.000000,codes=1056 npar=960 nsym=1984 rate=0.5161 slack=2048
+construct,0,0,67,61,523437,0,w=128,n=67,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,68,60,531250,0,w=128,n=68,build,1,-1,-1,0.000000,0.000000,codes=1088 npar=896 nsym=1920 rate=0.5333 slack=8192
+construct,0,0,69,59,539062,0,w=128,n=69,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,70,58,546875,0,w=128,n=70,build,1,-1,-1,0.000000,0.000000,codes=1120 npar=832 nsym=1856 rate=0.5517 slack=18432
+construct,0,0,71,57,554687,0,w=128,n=71,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,72,56,562500,0,w=128,n=72,build,1,-1,-1,0.000000,0.000000,codes=1152 npar=768 nsym=1792 rate=0.5714 slack=32768
+construct,0,0,73,55,570312,0,w=128,n=73,build,1,-1,-1,0.000000,0.000000,codes=1168 npar=768 nsym=1792 rate=0.5714 slack=4096
+construct,0,0,74,54,578125,0,w=128,n=74,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,75,53,585937,0,w=128,n=75,build,1,-1,-1,0.000000,0.000000,codes=1200 npar=704 nsym=1728 rate=0.5926 slack=23552
+construct,0,0,76,52,593750,0,w=128,n=76,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,77,51,601562,0,w=128,n=77,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,78,50,609375,0,w=128,n=78,build,1,-1,-1,0.000000,0.000000,codes=1248 npar=640 nsym=1664 rate=0.6154 slack=20480
+construct,0,0,79,49,617187,0,w=128,n=79,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,80,48,625000,0,w=128,n=80,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,81,47,632812,0,w=128,n=81,build,1,-1,-1,0.000000,0.000000,codes=1296 npar=576 nsym=1600 rate=0.6400 slack=23552
+construct,0,0,82,46,640625,0,w=128,n=82,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,83,45,648437,0,w=128,n=83,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,84,44,656250,0,w=128,n=84,build,1,-1,-1,0.000000,0.000000,codes=1344 npar=512 nsym=1536 rate=0.6667 slack=32768
+construct,0,0,85,43,664062,0,w=128,n=85,build,1,-1,-1,0.000000,0.000000,codes=1360 npar=512 nsym=1536 rate=0.6667 slack=8192
+construct,0,0,86,42,671875,0,w=128,n=86,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,87,41,679687,0,w=128,n=87,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,88,40,687500,0,w=128,n=88,build,1,-1,-1,0.000000,0.000000,codes=1408 npar=448 nsym=1472 rate=0.6957 slack=24576
+construct,0,0,89,39,695312,0,w=128,n=89,build,1,-1,-1,0.000000,0.000000,codes=1424 npar=448 nsym=1472 rate=0.6957 slack=1024
+construct,0,0,90,38,703125,0,w=128,n=90,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,91,37,710937,0,w=128,n=91,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,92,36,718750,0,w=128,n=92,build,1,-1,-1,0.000000,0.000000,codes=1472 npar=384 nsym=1408 rate=0.7273 slack=24576
+construct,0,0,93,35,726562,0,w=128,n=93,build,1,-1,-1,0.000000,0.000000,codes=1488 npar=384 nsym=1408 rate=0.7273 slack=2048
+construct,0,0,94,34,734375,0,w=128,n=94,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,95,33,742187,0,w=128,n=95,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,96,32,750000,0,w=128,n=96,build,1,-1,-1,0.000000,0.000000,codes=1536 npar=320 nsym=1344 rate=0.7619 slack=32768
+construct,0,0,97,31,757812,0,w=128,n=97,build,1,-1,-1,0.000000,0.000000,codes=1552 npar=320 nsym=1344 rate=0.7619 slack=11264
+construct,0,0,98,30,765625,0,w=128,n=98,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,99,29,773437,0,w=128,n=99,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,100,28,781250,0,w=128,n=100,build,1,-1,-1,0.000000,0.000000,codes=1600 npar=256 nsym=1280 rate=0.8000 slack=49152
+construct,0,0,101,27,789062,0,w=128,n=101,build,1,-1,-1,0.000000,0.000000,codes=1616 npar=256 nsym=1280 rate=0.8000 slack=28672
+construct,0,0,102,26,796875,0,w=128,n=102,build,1,-1,-1,0.000000,0.000000,codes=1632 npar=256 nsym=1280 rate=0.8000 slack=8192
+construct,0,0,103,25,804687,0,w=128,n=103,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,104,24,812500,0,w=128,n=104,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,105,23,820312,0,w=128,n=105,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,106,22,828125,0,w=128,n=106,build,1,-1,-1,0.000000,0.000000,codes=1696 npar=192 nsym=1216 rate=0.8421 slack=34816
+construct,0,0,107,21,835937,0,w=128,n=107,build,1,-1,-1,0.000000,0.000000,codes=1712 npar=192 nsym=1216 rate=0.8421 slack=15360
+construct,0,0,108,20,843750,0,w=128,n=108,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,109,19,851562,0,w=128,n=109,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,110,18,859375,0,w=128,n=110,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,111,17,867187,0,w=128,n=111,build,1,-1,-1,0.000000,0.000000,codes=1776 npar=128 nsym=1152 rate=0.8889 slack=51200
+construct,0,0,112,16,875000,0,w=128,n=112,build,1,-1,-1,0.000000,0.000000,codes=1792 npar=128 nsym=1152 rate=0.8889 slack=32768
+construct,0,0,113,15,882812,0,w=128,n=113,build,1,-1,-1,0.000000,0.000000,codes=1808 npar=128 nsym=1152 rate=0.8889 slack=14336
+construct,0,0,114,14,890625,0,w=128,n=114,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,115,13,898437,0,w=128,n=115,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,116,12,906250,0,w=128,n=116,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,117,11,914062,0,w=128,n=117,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,118,10,921875,0,w=128,n=118,build,1,-1,-1,0.000000,0.000000,codes=1888 npar=64 nsym=1088 rate=0.9412 slack=43008
+construct,0,0,119,9,929687,0,w=128,n=119,build,1,-1,-1,0.000000,0.000000,codes=1904 npar=64 nsym=1088 rate=0.9412 slack=25600
+construct,0,0,120,8,937500,0,w=128,n=120,build,1,-1,-1,0.000000,0.000000,codes=1920 npar=64 nsym=1088 rate=0.9412 slack=8192
+construct,0,0,121,7,945312,0,w=128,n=121,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,122,6,953125,0,w=128,n=122,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,123,5,960937,0,w=128,n=123,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,124,4,968750,0,w=128,n=124,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,125,3,976562,0,w=128,n=125,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,126,2,984375,0,w=128,n=126,build,0,-1,-1,0.000000,0.000000,codec build failed
+construct,0,0,127,1,992187,0,w=128,n=127,build,0,-1,-1,0.000000,0.000000,codec build failed
+analyze,0,25,8,24,250000,550000,m_eff,mds,shares,24,-1,-1,0.000000,0.000000,floor(n_par*n/n_data); perfect-code share threshold
+analyze,0,25,8,24,250000,550000,delta_mds,mds,shares,0,-1,-1,0.000000,0.000000,m - m_eff; parity rounding loss
+analyze,0,25,8,24,250000,550000,k_star,rank,shares,24,-1,-1,0.000000,0.000000,k*=3072*8/1024=24.000
+analyze,0,25,8,24,250000,550000,p_fail_at_k_rank,rank,probability,4.66146296e-156,-1,-1,0.000000,0.000000,16^-((k*-k)*1024/8+1)
+analyze,0,25,8,24,250000,550000,p_fail_at_k_rank_plus_1,rank,probability,0.0625,-1,-1,0.000000,0.000000,16^-((k*-k)*1024/8+1)
+analyze,0,25,8,24,250000,550000,delta_rank,rank,shares,1,-1,-1,0.000000,0.000000,m - k_rank; one share lost vs nominal m
+analyze,0,25,8,24,250000,550000,k_core,core,shares,2,-1,-1,0.000000,0.000000,floor(core*32/nsym); erasure that fits the core
+analyze,0,25,8,24,250000,550000,delta_core,core,shares,22,-1,-1,0.000000,0.000000,m - k_core; sufficient-recovery bound
+analyze,0,25,8,24,250000,550000,code_rate_ppm,shape,value,250000,-1,-1,0.000000,0.000000,
+analyze,0,25,8,24,250000,550000,share_rate_ppm,shape,value,250000,-1,-1,0.000000,0.000000,n/(n+m)
+analyze,0,25,8,24,250000,550000,ladder_ppm,shape,value,250000,-1,-1,0.000000,0.000000,rate_ppm on the wire; not n/(n+m) for 30/60/70
+analyze,0,25,8,24,250000,550000,pg=1e-04,combine,super_independent,0.000799720056,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,0,25,8,24,250000,550000,pg=1e-04,combine,super_union_bound,0.0008,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,0,25,8,24,250000,550000,pg=1e-04,combine,super_correlated,0.0001,-1,-1,0.000000,0.000000,all groups fail together
+analyze,0,25,8,24,250000,550000,pg=1e-03,combine,super_independent,0.00797205593,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,0,25,8,24,250000,550000,pg=1e-03,combine,super_union_bound,0.008,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,0,25,8,24,250000,550000,pg=1e-03,combine,super_correlated,0.001,-1,-1,0.000000,0.000000,all groups fail together
+analyze,0,25,8,24,250000,550000,pg=1e-02,combine,super_independent,0.0772553056,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,0,25,8,24,250000,550000,pg=1e-02,combine,super_union_bound,0.08,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,0,25,8,24,250000,550000,pg=1e-02,combine,super_correlated,0.01,-1,-1,0.000000,0.000000,all groups fail together
+analyze,1,30,9,23,299985,500015,m_eff,mds,shares,22,-1,-1,0.000000,0.000000,floor(n_par*n/n_data); perfect-code share threshold
+analyze,1,30,9,23,299985,500015,delta_mds,mds,shares,1,-1,-1,0.000000,0.000000,m - m_eff; parity rounding loss
+analyze,1,30,9,23,299985,500015,k_star,rank,shares,22.9921875,-1,-1,0.000000,0.000000,k*=2616*9/1024=22.992
+analyze,1,30,9,23,299985,500015,p_fail_at_k_rank,rank,probability,7.3132949e-138,-1,-1,0.000000,0.000000,16^-((k*-k)*1024/9+1)
+analyze,1,30,9,23,299985,500015,p_fail_at_k_rank_plus_1,rank,probability,1,-1,-1,0.000000,0.000000,16^-((k*-k)*1024/9+1)
+analyze,1,30,9,23,299985,500015,delta_rank,rank,shares,1,-1,-1,0.000000,0.000000,m - k_rank; one share lost vs nominal m
+analyze,1,30,9,23,299985,500015,k_core,core,shares,2,-1,-1,0.000000,0.000000,floor(core*32/nsym); erasure that fits the core
+analyze,1,30,9,23,299985,500015,delta_core,core,shares,21,-1,-1,0.000000,0.000000,m - k_core; sufficient-recovery bound
+analyze,1,30,9,23,299985,500015,code_rate_ppm,shape,value,281318.681,-1,-1,0.000000,0.000000,
+analyze,1,30,9,23,299985,500015,share_rate_ppm,shape,value,281250,-1,-1,0.000000,0.000000,n/(n+m)
+analyze,1,30,9,23,299985,500015,ladder_ppm,shape,value,299985,-1,-1,0.000000,0.000000,rate_ppm on the wire; not n/(n+m) for 30/60/70
+analyze,1,30,9,23,299985,500015,pg=1e-04,combine,super_independent,0.000799720056,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,1,30,9,23,299985,500015,pg=1e-04,combine,super_union_bound,0.0008,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,1,30,9,23,299985,500015,pg=1e-04,combine,super_correlated,0.0001,-1,-1,0.000000,0.000000,all groups fail together
+analyze,1,30,9,23,299985,500015,pg=1e-03,combine,super_independent,0.00797205593,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,1,30,9,23,299985,500015,pg=1e-03,combine,super_union_bound,0.008,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,1,30,9,23,299985,500015,pg=1e-03,combine,super_correlated,0.001,-1,-1,0.000000,0.000000,all groups fail together
+analyze,1,30,9,23,299985,500015,pg=1e-02,combine,super_independent,0.0772553056,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,1,30,9,23,299985,500015,pg=1e-02,combine,super_union_bound,0.08,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,1,30,9,23,299985,500015,pg=1e-02,combine,super_correlated,0.01,-1,-1,0.000000,0.000000,all groups fail together
+analyze,2,40,12,20,400000,400000,m_eff,mds,shares,19,-1,-1,0.000000,0.000000,floor(n_par*n/n_data); perfect-code share threshold
+analyze,2,40,12,20,400000,400000,delta_mds,mds,shares,1,-1,-1,0.000000,0.000000,m - m_eff; parity rounding loss
+analyze,2,40,12,20,400000,400000,k_star,rank,shares,19.9921875,-1,-1,0.000000,0.000000,k*=1706*12/1024=19.992
+analyze,2,40,12,20,400000,400000,p_fail_at_k_rank,rank,probability,7.03161071e-104,-1,-1,0.000000,0.000000,16^-((k*-k)*1024/12+1)
+analyze,2,40,12,20,400000,400000,p_fail_at_k_rank_plus_1,rank,probability,1,-1,-1,0.000000,0.000000,16^-((k*-k)*1024/12+1)
+analyze,2,40,12,20,400000,400000,delta_rank,rank,shares,1,-1,-1,0.000000,0.000000,m - k_rank; one share lost vs nominal m
+analyze,2,40,12,20,400000,400000,k_core,core,shares,3,-1,-1,0.000000,0.000000,floor(core*32/nsym); erasure that fits the core
+analyze,2,40,12,20,400000,400000,delta_core,core,shares,17,-1,-1,0.000000,0.000000,m - k_core; sufficient-recovery bound
+analyze,2,40,12,20,400000,400000,code_rate_ppm,shape,value,375091.575,-1,-1,0.000000,0.000000,
+analyze,2,40,12,20,400000,400000,share_rate_ppm,shape,value,375000,-1,-1,0.000000,0.000000,n/(n+m)
+analyze,2,40,12,20,400000,400000,ladder_ppm,shape,value,400000,-1,-1,0.000000,0.000000,rate_ppm on the wire; not n/(n+m) for 30/60/70
+analyze,2,40,12,20,400000,400000,pg=1e-04,combine,super_independent,0.000799720056,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,2,40,12,20,400000,400000,pg=1e-04,combine,super_union_bound,0.0008,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,2,40,12,20,400000,400000,pg=1e-04,combine,super_correlated,0.0001,-1,-1,0.000000,0.000000,all groups fail together
+analyze,2,40,12,20,400000,400000,pg=1e-03,combine,super_independent,0.00797205593,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,2,40,12,20,400000,400000,pg=1e-03,combine,super_union_bound,0.008,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,2,40,12,20,400000,400000,pg=1e-03,combine,super_correlated,0.001,-1,-1,0.000000,0.000000,all groups fail together
+analyze,2,40,12,20,400000,400000,pg=1e-02,combine,super_independent,0.0772553056,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,2,40,12,20,400000,400000,pg=1e-02,combine,super_union_bound,0.08,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,2,40,12,20,400000,400000,pg=1e-02,combine,super_correlated,0.01,-1,-1,0.000000,0.000000,all groups fail together
+analyze,3,50,16,16,500000,300000,m_eff,mds,shares,16,-1,-1,0.000000,0.000000,floor(n_par*n/n_data); perfect-code share threshold
+analyze,3,50,16,16,500000,300000,delta_mds,mds,shares,0,-1,-1,0.000000,0.000000,m - m_eff; parity rounding loss
+analyze,3,50,16,16,500000,300000,k_star,rank,shares,16,-1,-1,0.000000,0.000000,k*=1024*16/1024=16.000
+analyze,3,50,16,16,500000,300000,p_fail_at_k_rank,rank,probability,5.39760535e-79,-1,-1,0.000000,0.000000,16^-((k*-k)*1024/16+1)
+analyze,3,50,16,16,500000,300000,p_fail_at_k_rank_plus_1,rank,probability,0.0625,-1,-1,0.000000,0.000000,16^-((k*-k)*1024/16+1)
+analyze,3,50,16,16,500000,300000,delta_rank,rank,shares,1,-1,-1,0.000000,0.000000,m - k_rank; one share lost vs nominal m
+analyze,3,50,16,16,500000,300000,k_core,core,shares,4,-1,-1,0.000000,0.000000,floor(core*32/nsym); erasure that fits the core
+analyze,3,50,16,16,500000,300000,delta_core,core,shares,12,-1,-1,0.000000,0.000000,m - k_core; sufficient-recovery bound
+analyze,3,50,16,16,500000,300000,code_rate_ppm,shape,value,500000,-1,-1,0.000000,0.000000,
+analyze,3,50,16,16,500000,300000,share_rate_ppm,shape,value,500000,-1,-1,0.000000,0.000000,n/(n+m)
+analyze,3,50,16,16,500000,300000,ladder_ppm,shape,value,500000,-1,-1,0.000000,0.000000,rate_ppm on the wire; not n/(n+m) for 30/60/70
+analyze,3,50,16,16,500000,300000,pg=1e-04,combine,super_independent,0.000799720056,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,3,50,16,16,500000,300000,pg=1e-04,combine,super_union_bound,0.0008,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,3,50,16,16,500000,300000,pg=1e-04,combine,super_correlated,0.0001,-1,-1,0.000000,0.000000,all groups fail together
+analyze,3,50,16,16,500000,300000,pg=1e-03,combine,super_independent,0.00797205593,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,3,50,16,16,500000,300000,pg=1e-03,combine,super_union_bound,0.008,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,3,50,16,16,500000,300000,pg=1e-03,combine,super_correlated,0.001,-1,-1,0.000000,0.000000,all groups fail together
+analyze,3,50,16,16,500000,300000,pg=1e-02,combine,super_independent,0.0772553056,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,3,50,16,16,500000,300000,pg=1e-02,combine,super_union_bound,0.08,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,3,50,16,16,500000,300000,pg=1e-02,combine,super_correlated,0.01,-1,-1,0.000000,0.000000,all groups fail together
+analyze,4,60,18,14,592593,207407,m_eff,mds,shares,13,-1,-1,0.000000,0.000000,floor(n_par*n/n_data); perfect-code share threshold
+analyze,4,60,18,14,592593,207407,delta_mds,mds,shares,1,-1,-1,0.000000,0.000000,m - m_eff; parity rounding loss
+analyze,4,60,18,14,592593,207407,k_star,rank,shares,13.5,-1,-1,0.000000,0.000000,k*=768*18/1024=13.500
+analyze,4,60,18,14,592593,207407,p_fail_at_k_rank,rank,probability,3.51039564e-36,-1,-1,0.000000,0.000000,16^-((k*-k)*1024/18+1)
+analyze,4,60,18,14,592593,207407,p_fail_at_k_rank_plus_1,rank,probability,1,-1,-1,0.000000,0.000000,16^-((k*-k)*1024/18+1)
+analyze,4,60,18,14,592593,207407,delta_rank,rank,shares,1,-1,-1,0.000000,0.000000,m - k_rank; one share lost vs nominal m
+analyze,4,60,18,14,592593,207407,k_core,core,shares,4,-1,-1,0.000000,0.000000,floor(core*32/nsym); erasure that fits the core
+analyze,4,60,18,14,592593,207407,delta_core,core,shares,10,-1,-1,0.000000,0.000000,m - k_core; sufficient-recovery bound
+analyze,4,60,18,14,592593,207407,code_rate_ppm,shape,value,571428.571,-1,-1,0.000000,0.000000,
+analyze,4,60,18,14,592593,207407,share_rate_ppm,shape,value,562500,-1,-1,0.000000,0.000000,n/(n+m)
+analyze,4,60,18,14,592593,207407,ladder_ppm,shape,value,592593,-1,-1,0.000000,0.000000,rate_ppm on the wire; not n/(n+m) for 30/60/70
+analyze,4,60,18,14,592593,207407,pg=1e-04,combine,super_independent,0.000799720056,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,4,60,18,14,592593,207407,pg=1e-04,combine,super_union_bound,0.0008,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,4,60,18,14,592593,207407,pg=1e-04,combine,super_correlated,0.0001,-1,-1,0.000000,0.000000,all groups fail together
+analyze,4,60,18,14,592593,207407,pg=1e-03,combine,super_independent,0.00797205593,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,4,60,18,14,592593,207407,pg=1e-03,combine,super_union_bound,0.008,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,4,60,18,14,592593,207407,pg=1e-03,combine,super_correlated,0.001,-1,-1,0.000000,0.000000,all groups fail together
+analyze,4,60,18,14,592593,207407,pg=1e-02,combine,super_independent,0.0772553056,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,4,60,18,14,592593,207407,pg=1e-02,combine,super_union_bound,0.08,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,4,60,18,14,592593,207407,pg=1e-02,combine,super_correlated,0.01,-1,-1,0.000000,0.000000,all groups fail together
+analyze,5,70,22,10,695652,104348,m_eff,mds,shares,9,-1,-1,0.000000,0.000000,floor(n_par*n/n_data); perfect-code share threshold
+analyze,5,70,22,10,695652,104348,delta_mds,mds,shares,1,-1,-1,0.000000,0.000000,m - m_eff; parity rounding loss
+analyze,5,70,22,10,695652,104348,k_star,rank,shares,9.625,-1,-1,0.000000,0.000000,k*=448*22/1024=9.625
+analyze,5,70,22,10,695652,104348,p_fail_at_k_rank,rank,probability,5.84702657e-37,-1,-1,0.000000,0.000000,16^-((k*-k)*1024/22+1)
+analyze,5,70,22,10,695652,104348,p_fail_at_k_rank_plus_1,rank,probability,1,-1,-1,0.000000,0.000000,16^-((k*-k)*1024/22+1)
+analyze,5,70,22,10,695652,104348,delta_rank,rank,shares,1,-1,-1,0.000000,0.000000,m - k_rank; one share lost vs nominal m
+analyze,5,70,22,10,695652,104348,k_core,core,shares,5,-1,-1,0.000000,0.000000,floor(core*32/nsym); erasure that fits the core
+analyze,5,70,22,10,695652,104348,delta_core,core,shares,5,-1,-1,0.000000,0.000000,m - k_core; sufficient-recovery bound
+analyze,5,70,22,10,695652,104348,code_rate_ppm,shape,value,695652.174,-1,-1,0.000000,0.000000,
+analyze,5,70,22,10,695652,104348,share_rate_ppm,shape,value,687500,-1,-1,0.000000,0.000000,n/(n+m)
+analyze,5,70,22,10,695652,104348,ladder_ppm,shape,value,695652,-1,-1,0.000000,0.000000,rate_ppm on the wire; not n/(n+m) for 30/60/70
+analyze,5,70,22,10,695652,104348,pg=1e-04,combine,super_independent,0.000799720056,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,5,70,22,10,695652,104348,pg=1e-04,combine,super_union_bound,0.0008,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,5,70,22,10,695652,104348,pg=1e-04,combine,super_correlated,0.0001,-1,-1,0.000000,0.000000,all groups fail together
+analyze,5,70,22,10,695652,104348,pg=1e-03,combine,super_independent,0.00797205593,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,5,70,22,10,695652,104348,pg=1e-03,combine,super_union_bound,0.008,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,5,70,22,10,695652,104348,pg=1e-03,combine,super_correlated,0.001,-1,-1,0.000000,0.000000,all groups fail together
+analyze,5,70,22,10,695652,104348,pg=1e-02,combine,super_independent,0.0772553056,-1,-1,0.000000,0.000000,1-(1-pg)^8
+analyze,5,70,22,10,695652,104348,pg=1e-02,combine,super_union_bound,0.08,-1,-1,0.000000,0.000000,min(1;8*pg); any correlation
+analyze,5,70,22,10,695652,104348,pg=1e-02,combine,super_correlated,0.01,-1,-1,0.000000,0.000000,all groups fail together
+spot,0,25,8,24,250000,550000,0.1000,group,group_fail_rate,0,0,8000,0.000000,0.000480,retained spot check; core=256
+spot,0,25,8,24,250000,550000,0.1000,super,super_fail_rate,0,0,1000,0.000000,0.003827,any of 8 groups; core=256
+spot,0,25,8,24,250000,550000,0.2000,group,group_fail_rate,0,0,8000,0.000000,0.000480,retained spot check; core=256
+spot,0,25,8,24,250000,550000,0.2000,super,super_fail_rate,0,0,1000,0.000000,0.003827,any of 8 groups; core=256
+spot,0,25,8,24,250000,550000,0.3000,group,group_fail_rate,0,0,8000,0.000000,0.000480,retained spot check; core=256
+spot,0,25,8,24,250000,550000,0.3000,super,super_fail_rate,0,0,1000,0.000000,0.003827,any of 8 groups; core=256
+spot,0,25,8,24,250000,550000,0.4000,group,group_fail_rate,0.001125,9,8000,0.000592,0.002137,retained spot check; core=256
+spot,0,25,8,24,250000,550000,0.4000,super,super_fail_rate,0.009,9,1000,0.004742,0.017016,any of 8 groups; core=256
+spot,0,25,8,24,250000,550000,0.5000,group,group_fail_rate,0.020875,167,8000,0.017964,0.024246,retained spot check; core=256
+spot,0,25,8,24,250000,550000,0.5000,super,super_fail_rate,0.16,160,1000,0.138585,0.184017,any of 8 groups; core=256
+spot,1,30,9,23,299985,500015,0.1000,group,group_fail_rate,0,0,8000,0.000000,0.000480,retained spot check; core=256
+spot,1,30,9,23,299985,500015,0.1000,super,super_fail_rate,0,0,1000,0.000000,0.003827,any of 8 groups; core=256
+spot,1,30,9,23,299985,500015,0.2000,group,group_fail_rate,0,0,8000,0.000000,0.000480,retained spot check; core=256
+spot,1,30,9,23,299985,500015,0.2000,super,super_fail_rate,0,0,1000,0.000000,0.003827,any of 8 groups; core=256
+spot,1,30,9,23,299985,500015,0.3000,group,group_fail_rate,0.000125,1,8000,0.000022,0.000708,retained spot check; core=256
+spot,1,30,9,23,299985,500015,0.3000,super,super_fail_rate,0.001,1,1000,0.000177,0.005643,any of 8 groups; core=256
+spot,1,30,9,23,299985,500015,0.4000,group,group_fail_rate,0.004375,35,8000,0.003148,0.006078,retained spot check; core=256
+spot,1,30,9,23,299985,500015,0.4000,super,super_fail_rate,0.033,33,1000,0.023593,0.045982,any of 8 groups; core=256
+spot,1,30,9,23,299985,500015,0.5000,group,group_fail_rate,0.062375,499,8000,0.057283,0.067887,retained spot check; core=256
+spot,1,30,9,23,299985,500015,0.5000,super,super_fail_rate,0.413,413,1000,0.382872,0.443794,any of 8 groups; core=256
+spot,2,40,12,20,400000,400000,0.1000,group,group_fail_rate,0,0,8000,0.000000,0.000480,retained spot check; core=256
+spot,2,40,12,20,400000,400000,0.1000,super,super_fail_rate,0,0,1000,0.000000,0.003827,any of 8 groups; core=256
+spot,2,40,12,20,400000,400000,0.2000,group,group_fail_rate,0,0,8000,0.000000,0.000480,retained spot check; core=256
+spot,2,40,12,20,400000,400000,0.2000,super,super_fail_rate,0,0,1000,0.000000,0.003827,any of 8 groups; core=256
+spot,2,40,12,20,400000,400000,0.3000,group,group_fail_rate,0.003375,27,8000,0.002321,0.004906,retained spot check; core=256
+spot,2,40,12,20,400000,400000,0.3000,super,super_fail_rate,0.027,27,1000,0.018621,0.038999,any of 8 groups; core=256
+spot,2,40,12,20,400000,400000,0.4000,group,group_fail_rate,0.0655,524,8000,0.060284,0.071133,retained spot check; core=256
+spot,2,40,12,20,400000,400000,0.4000,super,super_fail_rate,0.416,416,1000,0.385828,0.446814,any of 8 groups; core=256
+spot,2,40,12,20,400000,400000,0.5000,group,group_fail_rate,0.321125,2569,8000,0.310981,0.331440,retained spot check; core=256
+spot,2,40,12,20,400000,400000,0.5000,super,super_fail_rate,0.946,946,1000,0.930208,0.958379,any of 8 groups; core=256
+spot,3,50,16,16,500000,300000,0.1000,group,group_fail_rate,0,0,8000,0.000000,0.000480,retained spot check; core=256
+spot,3,50,16,16,500000,300000,0.1000,super,super_fail_rate,0,0,1000,0.000000,0.003827,any of 8 groups; core=256
+spot,3,50,16,16,500000,300000,0.2000,group,group_fail_rate,0.00325,26,8000,0.002219,0.004758,retained spot check; core=256
+spot,3,50,16,16,500000,300000,0.2000,super,super_fail_rate,0.026,26,1000,0.017804,0.037824,any of 8 groups; core=256
+spot,3,50,16,16,500000,300000,0.3000,group,group_fail_rate,0.075375,603,8000,0.069792,0.081366,retained spot check; core=256
+spot,3,50,16,16,500000,300000,0.3000,super,super_fail_rate,0.476,476,1000,0.445196,0.506987,any of 8 groups; core=256
+spot,3,50,16,16,500000,300000,0.4000,group,group_fail_rate,0.41075,3286,8000,0.400015,0.421571,retained spot check; core=256
+spot,3,50,16,16,500000,300000,0.4000,super,super_fail_rate,0.976,976,1000,0.964537,0.983820,any of 8 groups; core=256
+spot,3,50,16,16,500000,300000,0.5000,group,group_fail_rate,0.814125,6513,8000,0.805450,0.822498,retained spot check; core=256
+spot,3,50,16,16,500000,300000,0.5000,super,super_fail_rate,1,1000,1000,0.996173,1.000000,any of 8 groups; core=256
+spot,4,60,18,14,592593,207407,0.1000,group,group_fail_rate,0.000125,1,8000,0.000022,0.000708,retained spot check; core=256
+spot,4,60,18,14,592593,207407,0.1000,super,super_fail_rate,0.001,1,1000,0.000177,0.005643,any of 8 groups; core=256
+spot,4,60,18,14,592593,207407,0.2000,group,group_fail_rate,0.02825,226,8000,0.024839,0.032113,retained spot check; core=256
+spot,4,60,18,14,592593,207407,0.2000,super,super_fail_rate,0.2,200,1000,0.176377,0.225919,any of 8 groups; core=256
+spot,4,60,18,14,592593,207407,0.3000,group,group_fail_rate,0.275,2200,8000,0.265325,0.284891,retained spot check; core=256
+spot,4,60,18,14,592593,207407,0.3000,super,super_fail_rate,0.92,920,1000,0.901533,0.935252,any of 8 groups; core=256
+spot,4,60,18,14,592593,207407,0.4000,group,group_fail_rate,0.718875,5751,8000,0.708921,0.728619,retained spot check; core=256
+spot,4,60,18,14,592593,207407,0.4000,super,super_fail_rate,1,1000,1000,0.996173,1.000000,any of 8 groups; core=256
+spot,4,60,18,14,592593,207407,0.5000,group,group_fail_rate,0.9545,7636,8000,0.949711,0.958853,retained spot check; core=256
+spot,4,60,18,14,592593,207407,0.5000,super,super_fail_rate,1,1000,1000,0.996173,1.000000,any of 8 groups; core=256
+spot,5,70,22,10,695652,104348,0.1000,group,group_fail_rate,0.01375,110,8000,0.011421,0.016545,retained spot check; core=256
+spot,5,70,22,10,695652,104348,0.1000,super,super_fail_rate,0.104,104,1000,0.086571,0.124460,any of 8 groups; core=256
+spot,5,70,22,10,695652,104348,0.2000,group,group_fail_rate,0.28625,2290,8000,0.276449,0.296256,retained spot check; core=256
+spot,5,70,22,10,695652,104348,0.2000,super,super_fail_rate,0.93,930,1000,0.912485,0.944224,any of 8 groups; core=256
+spot,5,70,22,10,695652,104348,0.3000,group,group_fail_rate,0.762875,6103,8000,0.753430,0.772068,retained spot check; core=256
+spot,5,70,22,10,695652,104348,0.3000,super,super_fail_rate,1,1000,1000,0.996173,1.000000,any of 8 groups; core=256
+spot,5,70,22,10,695652,104348,0.4000,group,group_fail_rate,0.972,7776,8000,0.968152,0.975395,retained spot check; core=256
+spot,5,70,22,10,695652,104348,0.4000,super,super_fail_rate,1,1000,1000,0.996173,1.000000,any of 8 groups; core=256
+spot,5,70,22,10,695652,104348,0.5000,group,group_fail_rate,0.9985,7988,8000,0.997380,0.999142,retained spot check; core=256
+spot,5,70,22,10,695652,104348,0.5000,super,super_fail_rate,1,1000,1000,0.996173,1.000000,any of 8 groups; core=256
+spot,5,70,22,10,695652,104348,0.1000,group,group_fail_rate,0.001375,11,8000,0.000768,0.002461,retained spot check; core=512
+spot,5,70,22,10,695652,104348,0.1000,super,super_fail_rate,0.011,11,1000,0.006153,0.019590,any of 8 groups; core=512
+spot,5,70,22,10,695652,104348,0.2000,group,group_fail_rate,0.090125,721,8000,0.084045,0.096598,retained spot check; core=512
+spot,5,70,22,10,695652,104348,0.2000,super,super_fail_rate,0.529,529,1000,0.498010,0.559768,any of 8 groups; core=512
+spot,5,70,22,10,695652,104348,0.3000,group,group_fail_rate,0.500875,4007,8000,0.489920,0.511829,retained spot check; core=512
+spot,5,70,22,10,695652,104348,0.3000,super,super_fail_rate,0.999,999,1000,0.994357,0.999823,any of 8 groups; core=512
+spot,5,70,22,10,695652,104348,0.4000,group,group_fail_rate,0.88775,7102,8000,0.880646,0.894482,retained spot check; core=512
+spot,5,70,22,10,695652,104348,0.4000,super,super_fail_rate,1,1000,1000,0.996173,1.000000,any of 8 groups; core=512
+spot,5,70,22,10,695652,104348,0.5000,group,group_fail_rate,0.99,7920,8000,0.987572,0.991957,retained spot check; core=512
+spot,5,70,22,10,695652,104348,0.5000,super,super_fail_rate,1,1000,1000,0.996173,1.000000,any of 8 groups; core=512

@@ -1835,7 +1835,7 @@ static void test_parse_bomb(void)
                  TBT_PARSE_EINVAL);
     parse_expect("adaptive off-ladder n/m",
                  "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-                 " n=14 m=18 fec=on mode=sc-ldpc adaptive=on w=128"
+                 " n=19 m=13 fec=on mode=sc-ldpc adaptive=on w=128"
                  " carriers=256 L=16",
                  TBT_PARSE_EINVAL);
 
