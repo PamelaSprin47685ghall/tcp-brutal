@@ -395,6 +395,10 @@ tunnel 1 role=far listen=0.0.0.0:19002 target=127.0.0.1:19001 n=4 m=4 fec=on mod
   由 far 的 `target=` 决定。
 - far 的 `peer=` 是允许加入的 near 源地址锚点（`README.md:380`），必须是 near 的
   公网出口 IP；地址只接受字面量，不做 DNS（`README.md:598-602`）。
+- 除 `role`/`listen`/`peer`/`target` 的侧别差异外，两行的 `n`、`m`、`fec`、`mode`、
+  `carriers`、`crypto` 必须一致。`crypto` 未写时默认跟随 `fec`（`README.md:402`），
+  所以 `fec=on` 两端都会加密；`crypto_key` 由 near 生成并在 HELLO 下发
+  （`README.md:403`），不要只在一端手写。
 
 启动顺序：
 
