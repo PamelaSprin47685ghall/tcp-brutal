@@ -76,7 +76,6 @@ struct tbt_cc_state
     u32 magic;
     u32 rate_cap_bps; /* tunnel_rate, 0 = the operator left it unset */
     u32 loss_ppm;     /* pushed by the FEC feedback path */
-    u32 min_cwnd;     /* cached from the module parameter at attach */
     u32 clamp_hits;   /* ssthresh calls the clamp actually raised */
     u64 max_bw_bps;   /* windowed-max delivery rate */
     u64 win_start_ns; /* start of the current bandwidth window */
@@ -114,7 +113,6 @@ static void tbt_cc_state_init(struct tbt_cc_state *st)
 {
     memset(st, 0, sizeof(*st));
     st->magic = TBT_CC_MAGIC;
-    st->min_cwnd = READ_ONCE(tbt_cc_min_cwnd) ?: 1;
 }
 
 static struct tbt_cc_state *tbt_cc_get(struct sock *sk)
@@ -221,14 +219,15 @@ static u32 tbt_cc_floor_pkts(const struct tcp_sock *tp,
 {
     u32 mss = READ_ONCE(tp->mss_cache) ?: 1;
     u32 srtt = READ_ONCE(st->srtt_us) ?: TBT_CC_MIN_RTT_US;
+    u32 min_cwnd = READ_ONCE(tbt_cc_min_cwnd) ?: 1;
     u64 bdp_pkts;
     u64 floor;
 
     bdp_pkts = div64_u64(READ_ONCE(st->max_bw_bps) * (u64)srtt,
                          (u64)USEC_PER_SEC * mss);
     floor = 2 * bdp_pkts;
-    if (floor < READ_ONCE(st->min_cwnd))
-        floor = READ_ONCE(st->min_cwnd);
+    if (floor < min_cwnd)
+        floor = min_cwnd;
     return floor > U32_MAX ? U32_MAX : (u32)floor;
 }
 
