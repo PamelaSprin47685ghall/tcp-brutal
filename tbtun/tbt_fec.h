@@ -1,4 +1,4 @@
-/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x100a), control frames, and the
+/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x100b), control frames, and the
  * GF(2) sliding-window RLNC codec.
  *
  * This file and tbt_fec.c compile twice: into the module and into the host
@@ -109,7 +109,7 @@ struct tbt_fec_hdr
     u16 win_len;
     u16 payload_len;
     u16 conv;
-    u16 reserved;
+    u16 reserved; /* DATA/PARITY: group index; control records: 0 */
     /* DATA/PARITY only: the stream this share belongs to. The receiver drops
      * a share whose sid is not its current stream; control records carry 0. */
     u64 sid;
@@ -125,26 +125,55 @@ int tbt_fec_hdr_pack(const struct tbt_fec_hdr *h, u8 out[TBT_FEC_HDR_LEN]);
  * bytes only; a caller must still run tbt_fec_hdr_check() and the CRC checks. */
 int tbt_fec_hdr_unpack(const u8 in[TBT_FEC_HDR_LEN], struct tbt_fec_hdr *h);
 
-/* Structural check, in this order: conv, type, flags, reserved, lengths,
+/* Structural check, in this order: conv, type, flags, group, lengths,
  * share bounds. `max_payload` is the configured S. Returns 0 or -EPROTO.
  *
  * DATA: n>=1, m>=1, n+m<=256, share_index < n, payload_len 1..max_payload
  *       (a short packet is legal anywhere: the packetizer flushes a partial
  *       packet when the application goes quiet, and the receiver places
  *       shares by the sum of the payload lengths, so only LAST marks the
- *       end), win_len == 0, epoch == 0.
+ *       end), win_len == 0, epoch == 0, seq >= group*n + share_index
+ *       (block_seq0 must not underflow).
  * PARITY: share_index >= n, seq < 2^63.
  *       win_len == 0 is the empty-block marker: share_index == n (parity 0),
  *       flags == 0, payload_len == 0, epoch == 0.
  *       win_len > 0: win_len <= n, payload_len == max_payload,
  *       epoch <= max_payload. The first PARITY of a block fixes
  *       (win_len, epoch); the receiver refuses a later PARITY that disagrees.
- * ACK/NACK/CFG/FBK: n==0, m==0, share_index==0, win_len==0, exact body
- *              lengths, payload_len <= max_payload.
+ * ACK/NACK/CFG/FBK: n==0, m==0, share_index==0, win_len==0, group==0,
+ *              exact body lengths, payload_len <= max_payload.
  *
  * The caller must check header_crc32c before trusting any field; this
  * function is the second gate, not the first. */
 int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload);
+
+/* Route-A block sequence. `block_seq0` is the absolute seq of the block's
+ * group-0/share-0 DATA packet:
+ *   DATA:   seq = block_seq0 + (u64)group * n + share_index
+ *   PARITY: seq = block_seq0
+ * One group: seq = block_seq0 + share_index. Eight groups: each group owns
+ * n contiguous packets, so group g spans
+ * [block_seq0 + g*n, block_seq0 + (g+1)*n).
+ *
+ * tbt_fec_data_seq0() refuses a DATA seq below its own offset; that is the
+ * only underflow the formula admits. */
+static inline bool tbt_fec_data_seq0(u64 seq, u16 group, u16 n, u16 share,
+                                     u64 *block_seq0)
+{
+    u64 off = (u64)group * n + share;
+
+    if (seq < off)
+        return false;
+    if (block_seq0)
+        *block_seq0 = seq - off;
+    return true;
+}
+
+static inline u64 tbt_fec_data_seq(u64 block_seq0, u16 group, u16 n,
+                                   u16 share)
+{
+    return block_seq0 + (u64)group * n + share;
+}
 
 /* Packet frontier -> stream byte offset acknowledged, for one ACK.
  * `pkt_base` is the stream's first global FEC packet seq, `tx_seq` the byte
@@ -447,7 +476,7 @@ struct tbt_fec_nack
 };
 
 
-/* Shape change request (0x100a, 64 bytes). See tbt_uapi.h for the byte
+/* Shape change request (0x100b, 64 bytes). See tbt_uapi.h for the byte
  * offsets; this struct is the host-side mirror, not the wire layout. The
  * extension fields name the codec explicitly; `codec_variant == 2` leaves
  * the wire w/k/d bytes zero, and w/k/d below carry the equivalent legacy
@@ -1162,7 +1191,9 @@ static inline u16 tbt_fec_group_of_seq_base(u64 seq, u64 base_pkt, u16 groups)
     return groups ? (u16)((seq - base_pkt) % groups) : 0;
 }
 
-/* Application seq is striped across groups: group = seq % groups. */
+/* Legacy stripe helpers. Route-A DATA placement uses h.reserved and
+ * h.share_index instead; these remain for the old host models and the
+ * carrier-of-seq map. group = seq % groups. */
 static inline u16 tbt_fec_group_of_seq(u64 seq, u16 groups)
 {
     return tbt_fec_group_of_seq_base(seq, 0, groups);
@@ -1189,15 +1220,19 @@ static inline u16 tbt_fec_share_of_carrier(u16 carrier, u16 shares)
     return shares ? (u16)(carrier % shares) : 0;
 }
 
-/* block_id is the group-local generation: base_block + ((seq - base_pkt) /
- * groups) / n. It does not encode the group and does not demux streams. */
+/* block_id is the group-local generation. Route-A lays every block's
+ * groups*n packets contiguously, so the block is the span quotient:
+ *   block_id = base_block + (seq - base_pkt) / (groups * n).
+ * It does not encode the group and does not demux streams. */
 static inline u64 tbt_fec_block_of_seq_base(u64 seq, u64 base_pkt,
                                             u64 base_block, u16 groups,
                                             u16 n)
 {
-    if (!groups || !n)
+    u64 span = (u64)groups * n;
+
+    if (!span || seq < base_pkt)
         return 0;
-    return base_block + ((seq - base_pkt) / groups) / n;
+    return base_block + (seq - base_pkt) / span;
 }
 
 static inline u64 tbt_fec_block_of_seq(u64 seq, u16 groups, u16 k)
@@ -1303,15 +1338,17 @@ static inline u16 tbt_fec_carrier_of_seq_map(u64 seq, u64 base_pkt, u16 groups,
     return (u16)(tbt_fec_phys_group(g, map) * (n + m) + share);
 }
 
-/* Global seq of packet p (0..n-1) of group `group` inside `block_id`. The
- * stripe is group = seq % groups, so a block of every group covers one
- * contiguous span of groups*n global packets: the "super-block". */
+/* Global seq of packet p (0..n-1) of group `group` inside `block_id`.
+ * Route-A packs a block's groups*n packets contiguously, group-major:
+ *   seq = base_pkt + (block-base_block)*groups*n + group*n + p.
+ * This is the inverse of tbt_fec_block_of_seq_base() for one share. */
 static inline u64 tbt_fec_seq_of_block_pkt_base(u64 block_id, u16 group,
                                                 u16 p, u64 base_pkt,
                                                 u64 base_block, u16 groups,
                                                 u16 n)
 {
-    return base_pkt + ((block_id - base_block) * n + p) * groups + group;
+    return base_pkt + (block_id - base_block) * (u64)groups * n +
+           (u64)group * n + p;
 }
 
 static inline u64 tbt_fec_seq_of_block_pkt(u64 block_id, u16 group, u16 p,
@@ -1342,14 +1379,16 @@ static inline u64 tbt_fec_final_block_of_total(u64 total_pkts, u16 groups,
 /* Number of real DATA packets group `group` has in its final block when the
  * stream holds `total_pkts` packets. 0 means the group has no packet in that
  * super-block. The sender zero-fills the remaining positions before encoding
- * parity; the receiver marks them known-zero and never delivers them. */
+ * parity; the receiver marks them known-zero and never delivers them.
+ * Route-A's group-major layout makes the group's share run contiguous:
+ * [first, first+n) with first = block_seq0 + group*n. */
 static inline u16 tbt_fec_group_tail_len_base(u64 total_pkts, u64 base_pkt,
                                               u64 base_block, u16 groups,
                                               u16 n, u16 group)
 {
     u64 final_block;
     u64 first;
-    u64 last_local;
+    u64 avail;
 
     if (!total_pkts || total_pkts <= base_pkt || !groups || !n ||
         group >= groups)
@@ -1360,8 +1399,8 @@ static inline u16 tbt_fec_group_tail_len_base(u64 total_pkts, u64 base_pkt,
                                           base_block, groups, n);
     if (total_pkts <= first)
         return 0;
-    last_local = (total_pkts - 1 - base_pkt - group) / groups;
-    return (u16)(last_local - (final_block - base_block) * n + 1);
+    avail = total_pkts - first;
+    return (u16)(avail < n ? avail : n);
 }
 
 static inline u16 tbt_fec_group_tail_len(u64 total_pkts, u16 groups, u16 n,
@@ -1404,6 +1443,28 @@ static inline u16 tbt_fec_blk_real_len_from_tail(u16 nreal, u16 n,
     return tbt_fec_blk_real_len_from_tail_base(
         nreal, n, total_known, total_pkts, 0, 0, groups, block_id, group,
         has_data);
+}
+
+/* Route-A real length from the block's own origin. The group's share run is
+ * [seq0 + group*n, seq0 + (group+1)*n); only the part before FIN's packet
+ * end is real. A present DATA share in a block the stream end predates keeps
+ * n: a stale LAST must not turn a real share into padding. */
+static inline u16 tbt_fec_blk_real_len_seq0(u16 nreal, u16 n,
+                                            bool total_known, u64 total_pkts,
+                                            u64 seq0, u16 group,
+                                            bool has_data)
+{
+    u64 first, avail;
+
+    if (nreal)
+        return nreal;
+    if (!total_known || !n)
+        return n;
+    first = seq0 + (u64)group * n;
+    if (total_pkts <= first)
+        return has_data ? n : 0;
+    avail = total_pkts - first;
+    return (u16)(avail < n ? avail : n);
 }
 
 /* A block that holds only parity: its DATA shares are the missing ones. The
@@ -1771,24 +1832,86 @@ static inline bool tbt_fec_sclc_down_split(u16 n, u16 m)
     }
 }
 
+/* The uplink GF(16) codec builds exactly these splits of 32 shares. The
+ * 8/24 fallback is the same point as the 25% ladder step. */
+static inline bool tbt_fec_sclc_up_split(u16 n, u16 m)
+{
+    switch (n)
+    {
+    case 8:
+        return m == 24;
+    case 9:
+        return m == 23;
+    case 12:
+        return m == 20;
+    case 16:
+        return m == 16;
+    case 18:
+        return m == 14;
+    case 22:
+        return m == 10;
+    default:
+        return false;
+    }
+}
+
+/* A block shape the receiver may place. `shares` is the direction's fixed
+ * n+m (256 downlink, 32 uplink); `groups` selects the direction. The
+ * SC-LDPC downlink binary codec builds any split with n <= 192 (m >= 64);
+ * the SC-LDPC uplink GF(16) codec builds only its six ladder splits. An
+ * RLNC codec builds any non-empty split of the same share count. */
+static inline bool tbt_fec_block_shape_ok(u16 n, u16 m, u16 shares,
+                                          u16 groups, bool block_code)
+{
+    if (!n || !m || (u16)(n + m) != shares)
+        return false;
+    if (!block_code)
+        return true;
+    if (groups == 1)
+        return n <= 192;
+    return tbt_fec_sclc_up_split(n, m);
+}
+
 /* The extra present shares beyond the block's real DATA length that an
- * SC-LDPC attempt needs before it is worth waking. The downlink 1x256 block
- * (one group of 256 shares, n=128/m=128) keeps eight spare rows, so a block
- * missing 120 shares still attempts; the uplink 8x32 block (one group of
- * 32 shares, n=8/m=24) keeps two. Both are below that block's m, so the
- * attempt is the honest limit of its parity, never an over-claim. A decode
- * that fails is retried at TBT_FEC_DECODE_RETRY_MS, and a new share clears
- * that backoff: an arriving share is new evidence, not a reason to wait. */
-#define TBT_FEC_SCLC_WAKE_EXTRA_DOWN 8u
+ * SC-LDPC attempt needs before it is worth waking. The downlink margin comes
+ * from tbt_fec_sclc_wake_extra_down() below (delta0 of the measured split);
+ * the uplink 8x32 block keeps two. A decode that fails is retried at
+ * TBT_FEC_DECODE_RETRY_MS, and a new share clears that backoff: an arriving
+ * share is new evidence, not a reason to wait. */
 #define TBT_FEC_SCLC_WAKE_EXTRA_UP 2u
 #define TBT_FEC_DECODE_RETRY_MS 50u
 #define TBT_FEC_DECODE_RETRY_MAX_MS 400u
 
+/* Minimum present parity a downlink block needs before an SC-LDPC attempt,
+ * by DATA-share count. The values are the measured delta0 of the sclc-down
+ * table:
+ *   64:13, 76:14, 102:15, 128:16, 151:13, 178:12.
+ * A split between two points takes the larger neighbour; a split outside
+ * the measured range takes the largest measured value. Both choices delay
+ * an attempt rather than start one the graph cannot finish. */
+static inline u16 tbt_fec_sclc_wake_extra_down(u16 n)
+{
+    static const u16 split[6] = {64, 76, 102, 128, 151, 178};
+    static const u16 extra[6] = {13, 14, 15, 16, 13, 12};
+    u16 i;
+
+    for (i = 0; i < 6; i++)
+        if (n == split[i])
+            return extra[i];
+    if (n < split[0] || n > split[5])
+        return 16;
+    for (i = 1; i < 6; i++)
+        if (n < split[i])
+            return extra[i] > extra[i - 1] ? extra[i] : extra[i - 1];
+    return 16;
+}
+
 /* All real DATA shares are present, or enough shares are present to cover
  * the missing ones with the variant's spare-row margin. No time input: the
  * caller decodes on the share that crosses this line, in the same pass. */
-static inline bool tbt_fec_sclc_decode_wake(u16 real, u16 m, u16 groups,
-                                            u16 ndata, u16 nparity)
+static inline bool tbt_fec_sclc_decode_wake(u16 real, u16 n, u16 m,
+                                            u16 groups, u16 ndata,
+                                            u16 nparity)
 {
     u16 extra;
 
@@ -1799,7 +1922,7 @@ static inline bool tbt_fec_sclc_decode_wake(u16 real, u16 m, u16 groups,
     if (ndata + nparity < real)
         return false;
     extra = groups > 1 ? TBT_FEC_SCLC_WAKE_EXTRA_UP
-                       : TBT_FEC_SCLC_WAKE_EXTRA_DOWN;
+                       : tbt_fec_sclc_wake_extra_down(n);
     return (u32)ndata + nparity >= (u32)real + extra;
 }
 

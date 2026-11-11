@@ -547,7 +547,7 @@ static void case_immediate_decode(void)
                 memcpy(rxdata[i], data[i], TBT_FEC_S);
             memcpy(rxparity[i], parity[i], TBT_FEC_S);
         }
-        ok(tbt_fec_sclc_decode_wake(128, 128, 1, 128 - miss[k], 128),
+        ok(tbt_fec_sclc_decode_wake(128, 128, 128, 1, 128 - miss[k], 128),
            "immediate: missing DATA share reaches the wake line");
         rc = tbt_fec_grouped_decode(rx, 0, rxdata, rxparity, present_d,
                                     present_p, 128);
@@ -583,8 +583,8 @@ static void case_immediate_decode(void)
             }
             memcpy(rxparity[i], parity[i], TBT_FEC_S);
         }
-        ok(tbt_fec_sclc_decode_wake(128, 128, 1, 8, 128),
-           "immediate: 120 missing shares still wake the codec");
+        ok(!tbt_fec_sclc_decode_wake(128, 128, 128, 1, 8, 128),
+           "immediate: 120 missing shares wait for the delta0 margin");
         tbt_fec_grouped_decode(rx, 0, rxdata, rxparity, present_d, present_p,
                                128);
         for (i = 0; i < 128; i++)
@@ -596,12 +596,12 @@ static void case_immediate_decode(void)
     }
 
     /* Missing m shares: no attempt and no delivery. */
-    ok(!tbt_fec_sclc_decode_wake(128, 128, 1, 0, 128),
+    ok(!tbt_fec_sclc_decode_wake(128, 128, 128, 1, 0, 128),
        "immediate: 128 missing shares do not wake");
 
     /* A block missing 120 PARITY shares has all its DATA and is delivered
      * without a decode. */
-    ok(tbt_fec_sclc_decode_wake(128, 128, 1, 128, 8),
+    ok(tbt_fec_sclc_decode_wake(128, 128, 128, 1, 128, 8),
        "immediate: complete DATA with 120 parity missing is ready");
 
     for (i = 0; i < 128; i++)
@@ -659,7 +659,7 @@ static void case_immediate_decode(void)
                 memcpy(up[i], uparity[i], TBT_FEC_S);
                 upp[i] = 1;
             }
-            ok(tbt_fec_sclc_decode_wake(8, 24, 8, 2, 8),
+            ok(tbt_fec_sclc_decode_wake(8, 8, 24, 8, 2, 8),
                "immediate: uplink missing 6 wakes at present 10");
             tbt_fec_grouped_decode(urxcodec, 0, urx, up, upd, upp, 8);
             for (i = 0; i < 8; i++)

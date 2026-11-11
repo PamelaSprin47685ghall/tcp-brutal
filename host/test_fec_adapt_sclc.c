@@ -351,7 +351,8 @@ static void case_late_ledger(void)
     ctx.next_super = 100;
     for (i = 0; i < 51; i++)
         tbt_fec_late_set(sc, (u16)i);
-    ok(tbt_fec_late_note_miss(&ctx, 100, 0, sc, cf, alive, 256, 128),
+    ok(tbt_fec_late_note_miss(&ctx, 100, 0, 128, 128, sc, cf, alive, 256,
+                              128),
        "ledger: note 51 counted misses");
     memset(correct, 0, sizeof(correct));
     tbt_fec_late_finalize(&ctx, 100, 42, correct);
@@ -360,7 +361,7 @@ static void case_late_ledger(void)
     for (i = 0; i < 38; i++)
     {
         enum tbt_fec_late_evt ev = tbt_fec_late_credit(
-            &ctx, 100, 0, (u16)i, &has);
+            &ctx, 100, 0, (u16)i, 128, 128, &has);
 
         ok(ev == TBT_FEC_LATE_SETTLED && has,
            "ledger: post-fold miss settles once");
@@ -368,12 +369,14 @@ static void case_late_ledger(void)
             rec->miss--;
     }
     eq_u32(rec->miss, 13, "ledger: 38 in-flight shares cancel to 13");
-    ok(tbt_fec_late_credit(&ctx, 100, 0, 0, &has) == TBT_FEC_LATE_DUP,
+    ok(tbt_fec_late_credit(&ctx, 100, 0, 0, 128, 128, &has) ==
+           TBT_FEC_LATE_DUP,
        "ledger: repeated late share is a duplicate");
-    ok(tbt_fec_late_credit(&ctx, 100, 0, 40, &has) ==
+    ok(tbt_fec_late_credit(&ctx, 100, 0, 40, 128, 128, &has) ==
            TBT_FEC_LATE_SETTLED && has,
        "ledger: a new late share still settles");
-    ok(tbt_fec_late_credit(&ctx, 100, 0, 40, &has) == TBT_FEC_LATE_DUP,
+    ok(tbt_fec_late_credit(&ctx, 100, 0, 40, 128, 128, &has) ==
+           TBT_FEC_LATE_DUP,
        "ledger: the second copy is a duplicate");
 
     /* Block B's miss is untouched by block A's late share. */
@@ -385,12 +388,12 @@ static void case_late_ledger(void)
     ctx.next_super = 102;
     memset(sc, 0, sizeof(sc));
     tbt_fec_late_set(sc, 0);
-    tbt_fec_late_note_miss(&ctx, 100, 0, sc, cf, alive, 256, 128);
-    tbt_fec_late_note_miss(&ctx, 101, 0, sc, cf, alive, 256, 128);
+    tbt_fec_late_note_miss(&ctx, 100, 0, 128, 128, sc, cf, alive, 256, 128);
+    tbt_fec_late_note_miss(&ctx, 101, 0, 128, 128, sc, cf, alive, 256, 128);
     memset(correct, 0, sizeof(correct));
     tbt_fec_late_finalize(&ctx, 100, 1, correct);
     tbt_fec_late_finalize(&ctx, 101, 2, correct);
-    ok(tbt_fec_late_credit(&ctx, 100, 0, 0, &has) ==
+    ok(tbt_fec_late_credit(&ctx, 100, 0, 0, 128, 128, &has) ==
            TBT_FEC_LATE_SETTLED,
        "ledger: block A settles");
     eq_u32(tbt_fec_late_find(&ctx, 101)->miss, 1,
@@ -398,7 +401,7 @@ static void case_late_ledger(void)
 
     /* Old epoch is unknown, never credited. */
     ctx.epoch = 8;
-    ok(tbt_fec_late_credit(&ctx, 100, 0, 0, &has) ==
+    ok(tbt_fec_late_credit(&ctx, 100, 0, 0, 128, 128, &has) ==
            TBT_FEC_LATE_UNKNOWN,
        "ledger: old epoch is unknown");
 
@@ -413,12 +416,12 @@ static void case_late_ledger(void)
     tbt_fec_late_set(sc, 0);
     for (i = 0; i < TBT_FEC_LATE_RECS + 1; i++)
     {
-        tbt_fec_late_note_miss(&ctx, (u64)(900 + i), 0, sc, cf, alive,
-                               256, 128);
+        tbt_fec_late_note_miss(&ctx, (u64)(900 + i), 0, 128, 128, sc, cf,
+                               alive, 256, 128);
         memset(correct, 0, sizeof(correct));
         tbt_fec_late_finalize(&ctx, (u64)(900 + i), (u64)i, correct);
     }
-    ok(tbt_fec_late_credit(&ctx, 900, 0, 0, &has) ==
+    ok(tbt_fec_late_credit(&ctx, 900, 0, 0, 128, 128, &has) ==
            TBT_FEC_LATE_UNKNOWN,
        "ledger: evicted record is unknown");
 
@@ -430,11 +433,41 @@ static void case_late_ledger(void)
     ctx.groups = 1;
     ctx.next_super = 200;
     memset(out, 0, sizeof(out));
-    ok(tbt_fec_late_credit(&ctx, 200, 0, 255, &has) ==
+    ok(tbt_fec_late_credit(&ctx, 200, 0, 255, 128, 128, &has) ==
            TBT_FEC_LATE_PENDING,
        "ledger: share 255 pending");
     tbt_fec_late_take(&ctx, 200, 0, out);
     ok(out[255] == 1, "ledger: share 255 take is in bounds");
+
+    /* A record keeps the block's own n/m. The bitmap index is
+     * group*(n+m)+share, so n+m must stay direction-constant while n names
+     * the DATA side. */
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.epoch = 11;
+    ctx.n = 4;
+    ctx.m = 4;
+    ctx.groups = 1;
+    ctx.next_super = 300;
+    ok(tbt_fec_late_credit(&ctx, 300, 0, 3, 4, 4, &has) ==
+           TBT_FEC_LATE_PENDING,
+       "ledger: block n/m 4/4 pending");
+    rec = tbt_fec_late_find(&ctx, 300);
+    ok(rec && rec->n == 4 && rec->m == 4,
+       "ledger: record stores the block's n/m");
+    ok(tbt_fec_late_credit(&ctx, 300, 0, 4, 5, 3, &has) ==
+           TBT_FEC_LATE_UNKNOWN,
+       "ledger: one block cannot change n/m");
+    ctx.next_super = 301;
+    ok(tbt_fec_late_credit(&ctx, 301, 0, 5, 5, 3, &has) ==
+           TBT_FEC_LATE_PENDING,
+       "ledger: another block may use 5/3");
+    rec = tbt_fec_late_find(&ctx, 301);
+    ok(rec && rec->n == 5 && rec->m == 3,
+       "ledger: second record keeps 5/3");
+    memset(out, 0, sizeof(out));
+    tbt_fec_late_take(&ctx, 301, 0, out);
+    ok(out[5] == 1 && out[4] == 0,
+       "ledger: 5/3 take indexes the parity share");
 }
 
 static void case_est_late_credit(void)

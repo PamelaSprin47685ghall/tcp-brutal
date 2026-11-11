@@ -39,7 +39,7 @@ from email.utils import formatdate
 from pathlib import Path
 
 TBT_CONV = 0x000A
-TBT_FEC_CONV = 0x100A
+TBT_FEC_CONV = 0x100B
 TBT_HDR_LEN = 32
 TBT_REC_MAX = 32 + 8192
 TBT_FEC_HDR_LEN = 48
@@ -286,7 +286,7 @@ def parse_fec_record(body, audit, ctx):
     header_crc = le32(body, 44)
 
     audit.need(typ in FEC_TYPES, f"{ctx}: FEC type 0x{typ:02x} is defined")
-    audit.need(conv == TBT_FEC_CONV, f"{ctx}: FEC conv is 0x100a")
+    audit.need(conv == TBT_FEC_CONV, f"{ctx}: FEC conv is 0x100b")
     audit.need(reserved == 0, f"{ctx}: FEC reserved is zero")
     audit.need(flags & ~0x01 == 0, f"{ctx}: FEC flags fit TBT_FEC_FF_MASK")
     audit.need(
@@ -674,7 +674,7 @@ def audit_message(msg, direction, carrier, round_no, audit, ctx):
             f"{ctx}: HELLO uses the 66-byte v6 body",
         )
         audit.need(
-            hello["body"][0] == 7,
+            hello["body"][0] == 8,
             f"{ctx}: HELLO body[0] is TBT_WIRE_VERSION_V6",
         )
         audit.need(

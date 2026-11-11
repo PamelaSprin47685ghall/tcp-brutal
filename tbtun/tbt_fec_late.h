@@ -14,6 +14,10 @@ struct tbt_fec_late_rec
     u64 block_id;
     u64 super_id;
     u32 epoch;
+    /* Shape of the block this record names. n+m is direction-constant, so
+     * the bitmap index is stable while n/m still name the DATA side. */
+    u16 n;
+    u16 m;
     u8 used;
     u8 folded;
     u16 miss;
@@ -83,7 +87,7 @@ tbt_fec_late_find(struct tbt_fec_late_ctx *ctx, u64 block_id)
 }
 
 static inline struct tbt_fec_late_rec *
-tbt_fec_late_get(struct tbt_fec_late_ctx *ctx, u64 block_id)
+tbt_fec_late_get(struct tbt_fec_late_ctx *ctx, u64 block_id, u16 n, u16 m)
 {
     struct tbt_fec_late_rec *rec = tbt_fec_late_find(ctx, block_id);
     u16 i, victim = 0;
@@ -105,32 +109,37 @@ tbt_fec_late_get(struct tbt_fec_late_ctx *ctx, u64 block_id)
     rec->used = true;
     rec->epoch = ctx->epoch;
     rec->block_id = block_id;
+    rec->n = n;
+    rec->m = m;
     return rec;
 }
 
 static inline enum tbt_fec_late_evt
 tbt_fec_late_credit(struct tbt_fec_late_ctx *ctx, u64 block_id, u16 group,
-                    u16 share, bool *has_miss)
+                    u16 share, u16 n, u16 m, bool *has_miss)
 {
     struct tbt_fec_late_rec *rec;
     u16 bit;
 
     *has_miss = false;
-    if (!ctx->n || !ctx->m || group >= ctx->groups ||
-        share >= (u16)(ctx->n + ctx->m) ||
-        (u32)ctx->groups * (ctx->n + ctx->m) >
+    if (!ctx->n || !ctx->m || !n || !m ||
+        (u16)(n + m) != (u16)(ctx->n + ctx->m) || group >= ctx->groups ||
+        share >= (u16)(n + m) ||
+        (u32)ctx->groups * (u16)(n + m) >
             TBT_FEC_BITMAP_BYTES * 8u ||
         block_id > ctx->next_super ||
         ctx->next_super - block_id >= TBT_FEC_LATE_RECS)
         return TBT_FEC_LATE_UNKNOWN;
-    bit = (u16)(group * (ctx->n + ctx->m) + share);
+    bit = (u16)(group * (u16)(n + m) + share);
     if (bit >= TBT_FEC_BITMAP_BYTES * 8u)
         return TBT_FEC_LATE_UNKNOWN;
     rec = tbt_fec_late_find(ctx, block_id);
     if (!rec && block_id < ctx->next_super)
         return TBT_FEC_LATE_UNKNOWN;
+    if (rec && (rec->n != n || rec->m != m))
+        return TBT_FEC_LATE_UNKNOWN;
     if (!rec)
-        rec = tbt_fec_late_get(ctx, block_id);
+        rec = tbt_fec_late_get(ctx, block_id, n, m);
     if (tbt_fec_late_bit(rec->pending, bit) ||
         tbt_fec_late_bit(rec->settled, bit))
         return TBT_FEC_LATE_DUP;
@@ -154,7 +163,7 @@ static inline void tbt_fec_late_take(struct tbt_fec_late_ctx *ctx,
 
     if (!rec)
         return;
-    shares = (u16)(ctx->n + ctx->m);
+    shares = (u16)(rec->n + rec->m);
     if ((u32)ctx->groups * shares > TBT_FEC_BITMAP_BYTES * 8u)
         return;
     for (i = 0; i < shares; i++)
@@ -173,19 +182,22 @@ static inline void tbt_fec_late_take(struct tbt_fec_late_ctx *ctx,
 /* Record only the misses that est_block counts: real, alive, under limit,
  * not codec_fail. */
 static inline bool tbt_fec_late_note_miss(struct tbt_fec_late_ctx *ctx,
-                                          u64 block_id, u16 group,
+                                          u64 block_id, u16 group, u16 n,
+                                          u16 m,
                                           const u8 *sc_miss,
                                           const u8 *codec_fail,
                                           const u8 *alive, u32 limit,
                                           u16 real)
 {
     struct tbt_fec_late_rec *rec;
-    u16 i, shares = (u16)(ctx->n + ctx->m);
+    u16 i, shares;
     bool any = false;
 
-    if ((u32)ctx->groups * shares > TBT_FEC_BITMAP_BYTES * 8u ||
+    if (!n || !m || (u16)(n + m) != (u16)(ctx->n + ctx->m) ||
+        (u32)ctx->groups * (u16)(n + m) > TBT_FEC_BITMAP_BYTES * 8u ||
         real > TBT_FEC_MAX_SHARES)
         return false;
+    shares = (u16)(n + m);
     for (i = 0; i < real; i++)
         if ((u32)group * shares + i < TBT_FEC_BITMAP_BYTES * 8u &&
             tbt_fec_late_bit(sc_miss, i) &&
@@ -198,7 +210,8 @@ static inline bool tbt_fec_late_note_miss(struct tbt_fec_late_ctx *ctx,
         }
     if (!any)
         return false;
-    rec = tbt_fec_late_get(ctx, block_id);
+    rec = tbt_fec_late_get(ctx, block_id, n, m);
+    shares = (u16)(rec->n + rec->m);
     for (i = 0; i < real; i++)
     {
         u16 bit = (u16)(group * shares + i);

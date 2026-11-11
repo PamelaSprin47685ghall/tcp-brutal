@@ -367,8 +367,6 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
         return -EPROTO;
     if (h->flags & ~TBT_FEC_FF_MASK)
         return -EPROTO;
-    if (h->reserved != 0)
-        return -EPROTO;
     if (max_payload > TBT_FEC_PAYLOAD_MAX)
         return -EPROTO;
     if (h->payload_len > TBT_FEC_PAYLOAD_MAX)
@@ -377,6 +375,10 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
     if (tbt_fec_is_share_type(h->type))
     {
         if (!h->n || !h->m)
+            return -EPROTO;
+        /* +30 is the group for a share. The wire has at most 256 groups, so
+         * a larger index can never name one. */
+        if (h->reserved >= TBT_FEC_MAX_GROUPS)
             return -EPROTO;
         shares = (u16)h->n + (u16)h->m; /* cast first: 256 must not wrap */
         if (shares > TBT_FEC_MAX_SHARES)
@@ -409,6 +411,9 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
             if (!h->payload_len || h->payload_len > max_payload)
                 return -EPROTO;
             if (h->win_len != 0)
+                return -EPROTO;
+            /* block_seq0 = seq - group*n - share_index must not underflow. */
+            if (h->seq < (u64)h->reserved * h->n + h->share_index)
                 return -EPROTO;
             /* epoch is block-level and belongs to PARITY only. A DATA record
              * that carried it let a mid-block short share overwrite the
@@ -448,7 +453,7 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
 
     if (!tbt_fec_is_control_type(h->type))
         return -EPROTO;
-    if (h->n || h->m || h->share_index || h->win_len)
+    if (h->n || h->m || h->share_index || h->win_len || h->reserved)
         return -EPROTO;
     /* The NACK names its super-block in the header. Every other control
      * record leaves block_id zero. */

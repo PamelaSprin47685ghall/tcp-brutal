@@ -734,6 +734,11 @@ struct tbt_fec_grouped;
 struct tbt_fec_blk
 {
     u64 block_id;
+    /* Absolute seq of this block's group-0/share-0 DATA packet. A block's
+     * own n/m and seq0 replace the fixed-shape seq -> block mapping. */
+    u64 seq0;
+    u16 n; /* DATA shares in this block */
+    u16 m; /* parity shares in this block */
     /* Stream generation this block was placed for. A new stream bind clears
      * every block whose sid differs, so the previous stream's reorder bytes
      * cannot be delivered to the new one. */
@@ -773,6 +778,15 @@ struct tbt_fec_blk
      * every attempt, and masked by dpresent at the estimator fold. */
     u8 codec_fail_bits[TBT_FEC_BITMAP_BYTES];
     bool judged;  /* already folded into tbt_fec_est_super() */
+    /* SC-LDPC wake/decode evidence. wake_ns is the first share that crossed
+     * the wake line; first_ok says whether the first decode attempt
+     * finished the block; attempts counts the attempts so far. */
+    u64 wake_ns;
+    u16 wake_ndata;
+    u16 wake_nparity;
+    u16 wake_real;
+    u8 wake_first_ok;
+    u8 wake_attempts;
     u8 *dpresent; /* n flags */
     u8 *ppresent; /* m flags */
     u16 *dlen;    /* n payload lengths */
@@ -795,9 +809,7 @@ struct tbt_fec_blk
  * shared by all groups because the packetizer is one ordered stream. */
 struct tbt_fec_gtx
 {
-    u8 *buf; /* (n+m)*s bytes: blk and par are slices of it */
-    u8 *blk; /* n * s bytes: this group's current block */
-    u8 *par; /* m * s bytes: this group's parity scratch */
+    u8 *buf; /* (n+m)*s bytes: this block's data then parity shares */
     /* Block this group's nreal/last_len belong to. A block that already
      * emitted its parity has nreal == 0, so nreal alone cannot tell "full and
      * done" from "no packet in this block"; blk_id makes the difference
@@ -867,6 +879,12 @@ struct tbt_fec_tx
     /* This flow is closing: its replay admission uses the close budget. */
     bool closing;
     u64 cur_block; /* block being built, shared by every group */
+    /* Shape and first seq of the block being built. blk_n/blk_m default to
+     * tx->n/tx->m and reset after every block; a scheduler may set them
+     * directly for the next block. */
+    u64 blk_seq0;
+    u16 blk_n;
+    u16 blk_m;
     /* Last share the packetizer built or queued. Diagnostics only: the
      * TXSTALLKILL log reads it to name the share that was in flight. The TX
      * work is the only writer; a u16 store/load is atomic. */
@@ -965,6 +983,9 @@ struct tbt_fec_rx
     bool closing;
     spinlock_t lock; /* carrier rx works assemble blocks concurrently */
     u16 n, m, s;
+    /* Direction-fixed n+m: 256 downlink, 32 uplink. A block may choose any
+     * n/m split that adds up to this value. */
+    u16 shares;
     u16 groups;
     u16 slots; /* block slots per group */
     u64 next_super;   /* next super-block to deliver */

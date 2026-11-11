@@ -2314,38 +2314,204 @@ static void test_rx_poll(void)
  * codec on the share that brings it to the wake line, and a new share
  * clears the failure backoff. The two shipped blocks are the asymmetric
  * downlink 1x256 and uplink 8x32 groups. */
+/* Route-A block sequence: a DATA share names its block origin, and PARITY
+ * repeats that origin. One group packs share_index directly; eight groups
+ * give each group n contiguous packets. */
+static void test_block_seq_formula(void)
+{
+    u64 s0;
+    u16 g, p;
+
+    ok(tbt_fec_data_seq(100, 0, 4, 3) == 103, "1 group: seq0+share");
+    ok(tbt_fec_data_seq0(103, 0, 4, 3, &s0) && s0 == 100,
+       "1 group: inverse");
+    ok(!tbt_fec_data_seq0(2, 0, 4, 3, &s0),
+       "1 group: underflow is refused");
+
+    for (g = 0; g < 8; g++)
+        for (p = 0; p < 4; p++)
+        {
+            u64 seq = tbt_fec_data_seq(200, g, 4, p);
+
+            ok(seq == 200 + (u64)g * 4 + p,
+               "8 groups: group-major seq");
+            ok(tbt_fec_data_seq0(seq, g, 4, p, &s0) && s0 == 200,
+               "8 groups: inverse");
+        }
+
+    /* Direction shapes: downlink n <= 192 of 256; uplink only the six
+     * GF(16) ladder splits of 32. */
+    ok(tbt_fec_block_shape_ok(64, 192, 256, 1, true),
+       "downlink 64/192 is buildable");
+    ok(tbt_fec_block_shape_ok(192, 64, 256, 1, true),
+       "downlink 192/64 is buildable");
+    ok(!tbt_fec_block_shape_ok(193, 63, 256, 1, true),
+       "downlink 193/63 is refused");
+    ok(!tbt_fec_block_shape_ok(64, 192, 256, 8, true),
+       "uplink 64/192 is not a 32-share split");
+    ok(tbt_fec_block_shape_ok(8, 24, 32, 8, true), "uplink 8/24");
+    ok(tbt_fec_block_shape_ok(9, 23, 32, 8, true), "uplink 9/23");
+    ok(tbt_fec_block_shape_ok(12, 20, 32, 8, true), "uplink 12/20");
+    ok(tbt_fec_block_shape_ok(16, 16, 32, 8, true), "uplink 16/16");
+    ok(tbt_fec_block_shape_ok(18, 14, 32, 8, true), "uplink 18/14");
+    ok(tbt_fec_block_shape_ok(22, 10, 32, 8, true), "uplink 22/10");
+    ok(!tbt_fec_block_shape_ok(10, 22, 32, 8, true),
+       "uplink 10/22 is refused");
+    ok(!tbt_fec_block_shape_ok(8, 24, 64, 8, true), "wrong n+m is refused");
+    ok(tbt_fec_block_shape_ok(4, 4, 8, 8, false),
+       "RLNC builds any split of the share count");
+
+    /* A FIN tail uses the block's own origin and n. */
+    ok(tbt_fec_blk_real_len_seq0(0, 6, true, 12, 4, 0, false) == 6,
+       "tail: block 1 is full before the stream end");
+    ok(tbt_fec_blk_real_len_seq0(0, 3, true, 12, 10, 0, false) == 2,
+       "tail: block 2 has two real shares");
+    ok(tbt_fec_blk_real_len_seq0(0, 3, true, 11, 10, 0, false) == 1,
+       "tail: one share before the stream end");
+    ok(tbt_fec_blk_real_len_seq0(0, 3, true, 10, 10, 0, true) == 3,
+       "tail: a present share keeps n when LAST is stale");
+    ok(tbt_fec_blk_real_len_seq0(0, 3, true, 10, 10, 0, false) == 0,
+       "tail: no share at the end is empty");
+}
+
+/* Mixed n/m blocks interleaved and out of order. Every block names its own
+ * origin and shape; the delivery order is the block origin plus the
+ * group-major share offset, never a fixed n. */
+static void test_mixed_block_shapes(void)
+{
+    struct mblk
+    {
+        u64 seq0;
+        u16 n, m;
+        u16 real;
+        u8 dpresent[8];
+        u8 ppresent[8];
+    } b[3];
+    static const struct
+    {
+        u16 block, type, share;
+    } order[] = {
+        {1, TBT_FEC_PARITY, 6}, /* parity before any DATA of block 1 */
+        {0, TBT_FEC_DATA, 2},
+        {2, TBT_FEC_DATA, 1},
+        {1, TBT_FEC_DATA, 0},
+        {1, TBT_FEC_DATA, 5},
+        {1, TBT_FEC_DATA, 1},
+        {1, TBT_FEC_DATA, 2},
+        {1, TBT_FEC_DATA, 4},
+        {0, TBT_FEC_PARITY, 4},
+        {2, TBT_FEC_PARITY, 3},
+        {1, TBT_FEC_DATA, 3},
+        {0, TBT_FEC_DATA, 0},
+        {0, TBT_FEC_DATA, 1},
+        {0, TBT_FEC_DATA, 3},
+        {2, TBT_FEC_DATA, 0},
+    };
+    size_t i;
+    u64 next = 0;
+    u16 k;
+
+    memset(b, 0, sizeof(b));
+    b[0].seq0 = 0;
+    b[0].n = 4;
+    b[0].m = 4;
+    b[0].real = 4;
+    b[1].seq0 = 4;
+    b[1].n = 6;
+    b[1].m = 2;
+    b[1].real = 6;
+    b[2].seq0 = 10;
+    b[2].n = 3;
+    b[2].m = 5;
+    b[2].real = 2;
+
+    for (i = 0; i < sizeof(order) / sizeof(order[0]); i++)
+    {
+        const struct mblk *mb = &b[order[i].block];
+        u64 seq0 = 0;
+        u16 share = order[i].share;
+
+        if (order[i].type == TBT_FEC_DATA)
+        {
+            u64 seq = tbt_fec_data_seq(mb->seq0, 0, mb->n, share);
+
+            ok(tbt_fec_data_seq0(seq, 0, mb->n, share, &seq0),
+               "mixed: DATA inverse");
+            ok(seq0 == mb->seq0, "mixed: DATA block origin");
+            ok(share < mb->n, "mixed: DATA share is a data share");
+            b[order[i].block].dpresent[share] = 1;
+        }
+        else
+        {
+            seq0 = mb->seq0;
+            ok(share >= mb->n && share < (u16)(mb->n + mb->m),
+               "mixed: PARITY share is a parity share");
+            b[order[i].block].ppresent[share - mb->n] = 1;
+        }
+        ok(seq0 == mb->seq0, "mixed: block origin is stable");
+    }
+
+    /* All three blocks are complete: every real share present and enough
+     * parity to decode. */
+    for (k = 0; k < 3; k++)
+    {
+        u16 nd = 0, np = 0, p;
+
+        for (p = 0; p < b[k].n; p++)
+            nd = (u16)(nd + b[k].dpresent[p]);
+        for (p = 0; p < b[k].m; p++)
+            np = (u16)(np + b[k].ppresent[p]);
+        ok(nd >= b[k].real, "mixed: block has its real DATA");
+        ok(np > 0, "mixed: block has parity");
+    }
+
+    /* Delivery follows the block origin, then the group-major share. */
+    for (k = 0; k < 3; k++)
+        for (i = 0; i < b[k].real; i++)
+        {
+            ok(tbt_fec_data_seq(b[k].seq0, 0, b[k].n, (u16)i) == next,
+               "mixed: delivery is contiguous");
+            next++;
+        }
+    ok(next == 12, "mixed: FIN end is the last real share + 1");
+    ok(tbt_fec_blk_real_len_seq0(0, b[2].n, true, next, b[2].seq0, 0,
+                                 true) == b[2].real,
+       "mixed: tail block length");
+}
+
 static void test_decode_wake(void)
 {
-    /* Downlink 1x256: n=128, m=128, one group. Present = n + 8 wakes. */
-    ok(tbt_fec_sclc_decode_wake(128, 128, 1, 128, 0),
+    /* Downlink 1x256: n=128, m=128, one group. The sclc-down table gives
+     * delta0(128) = 16, so present = real + 16 wakes. */
+    ok(tbt_fec_sclc_decode_wake(128, 128, 128, 1, 128, 0),
        "downlink: complete DATA wakes without parity");
-    ok(tbt_fec_sclc_decode_wake(128, 128, 1, 127, 9),
-       "downlink: missing 1 with 9 parity wakes");
-    ok(!tbt_fec_sclc_decode_wake(128, 128, 1, 127, 8),
-       "downlink: missing 1 with 8 parity still waits");
-    ok(tbt_fec_sclc_decode_wake(128, 128, 1, 124, 12),
+    ok(tbt_fec_sclc_decode_wake(128, 128, 128, 1, 127, 17),
+       "downlink: missing 1 with 17 parity wakes");
+    ok(!tbt_fec_sclc_decode_wake(128, 128, 128, 1, 127, 16),
+       "downlink: missing 1 with 16 parity still waits");
+    ok(tbt_fec_sclc_decode_wake(128, 128, 128, 1, 124, 20),
        "downlink: missing 4 wakes");
-    ok(!tbt_fec_sclc_decode_wake(128, 128, 1, 124, 11),
+    ok(!tbt_fec_sclc_decode_wake(128, 128, 128, 1, 124, 19),
        "downlink: missing 4 still waits");
-    ok(tbt_fec_sclc_decode_wake(128, 128, 1, 96, 40),
+    ok(tbt_fec_sclc_decode_wake(128, 128, 128, 1, 96, 48),
        "downlink: missing 32 wakes");
-    ok(!tbt_fec_sclc_decode_wake(128, 128, 1, 96, 39),
+    ok(!tbt_fec_sclc_decode_wake(128, 128, 128, 1, 96, 47),
        "downlink: missing 32 still waits");
-    ok(tbt_fec_sclc_decode_wake(128, 128, 1, 8, 128),
-       "downlink: missing 120 (< m) wakes at once");
-    ok(!tbt_fec_sclc_decode_wake(128, 128, 1, 7, 128),
+    ok(!tbt_fec_sclc_decode_wake(128, 128, 128, 1, 8, 128),
+       "downlink: missing 120 never reaches real + delta0");
+    ok(!tbt_fec_sclc_decode_wake(128, 128, 128, 1, 7, 128),
        "downlink: missing 121 waits for another share");
-    ok(!tbt_fec_sclc_decode_wake(128, 128, 1, 0, 128),
+    ok(!tbt_fec_sclc_decode_wake(128, 128, 128, 1, 0, 128),
        "downlink: missing 128 == m does not wake");
 
     /* Uplink 8x32 group: n=8, m=24, wakes at present n + 2 = 10. */
-    ok(tbt_fec_sclc_decode_wake(8, 24, 8, 8, 0),
+    ok(tbt_fec_sclc_decode_wake(8, 8, 24, 8, 8, 0),
        "uplink: complete DATA wakes without parity");
-    ok(tbt_fec_sclc_decode_wake(8, 24, 8, 2, 8),
+    ok(tbt_fec_sclc_decode_wake(8, 8, 24, 8, 2, 8),
        "uplink: missing 6 with 8 parity wakes");
-    ok(!tbt_fec_sclc_decode_wake(8, 24, 8, 2, 7),
+    ok(!tbt_fec_sclc_decode_wake(8, 8, 24, 8, 2, 7),
        "uplink: missing 6 with 7 parity still waits");
-    ok(!tbt_fec_sclc_decode_wake(8, 24, 8, 0, 9),
+    ok(!tbt_fec_sclc_decode_wake(8, 8, 24, 8, 0, 9),
        "uplink: present 9 does not wake");
 
     /* A failed attempt backs off; a fresh share clears the deadline, so the
@@ -2483,6 +2649,8 @@ int main(void)
     test_admission_groups();
     test_ack_split();
     test_rx_poll();
+    test_block_seq_formula();
+    test_mixed_block_shapes();
     test_decode_wake();
     test_block_late();
     test_credit_window();

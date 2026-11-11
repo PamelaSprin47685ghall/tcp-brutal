@@ -132,12 +132,17 @@ static inline u16 tbt_port_host16(u16 net)
  * OPEN with route_slot and target_port, and 64-byte FEC_CFG/FEC_FBK bodies.
  * Version 6 was the merged 0.6.0 cut. Version 7 is the 0.7.0 cut: the
  * multiplexer and its window/rebalance records are gone, DATA/PARITY carry
- * application bytes, and TBT_FEC_CONV is 0x100a. */
+ * application bytes, and TBT_FEC_CONV is 0x100a. Version 8 is the route-A
+ * cut: TBT_FEC_CONV is 0x100b, the header word at +30 carries the group for
+ * DATA/PARITY, and each block names its own n/m. The block sequence is
+ *   DATA:   seq = block_seq0 + group * n + share_index
+ *   PARITY: seq = block_seq0
+ * so a block's first packet no longer follows from the shape alone. */
 #define TBT_WIRE_VERSION 1
-#define TBT_WIRE_VERSION_V6 7
+#define TBT_WIRE_VERSION_V6 8
 
 /* ------------------------------------------------------------------ *
- * FEC wire: an independent record format, TBT_FEC_CONV 0x100a.
+ * FEC wire: an independent record format, TBT_FEC_CONV 0x100b.
  *
  * The old ARQ record above is frozen at 16 carriers: its path_ack_mask is
  * u16 and its FBK/WINDOW bodies have 16 entries. FEC never reuses those
@@ -160,11 +165,13 @@ static inline u16 tbt_port_host16(u16 net)
  *                       PARITY of a block fixes (win_len, epoch); every later
  *                       PARITY must repeat them exactly.
  *   +8  u64 block_id    block/window identity chosen by the sender
- *   +16 u64 seq         DATA: packet sequence; PARITY: window end
+ *   +16 u64 seq         DATA: block_seq0 + group*n + share_index;
+ *                       PARITY: block_seq0 (the block's first packet)
  *   +24 u16 win_len     PARITY: covered packets; DATA: 0
  *   +26 u16 payload_len payload bytes following this header
- *   +28 u16 conv        0x100a
- *   +30 u16 reserved    must be 0
+ *   +28 u16 conv        0x100b
+ *   +30 u16 group       DATA/PARITY: group index 0..groups-1.
+ *                       Control records (ACK/NACK/CFG/FBK): must be 0.
  *   +32 u64 sid         stream id this record belongs to. DATA/PARITY and
  *                       every per-stream control record (ACK/NACK/CFG/FBK)
  *                       carry the flow's sid; 0 is reserved for a
@@ -177,7 +184,7 @@ static inline u16 tbt_port_host16(u16 net)
  * Control frames are complete records of their own and must never be queued
  * behind a partial DATA record (the carrier writer emits each record whole).
  * ------------------------------------------------------------------ */
-#define TBT_FEC_CONV 0x100au
+#define TBT_FEC_CONV 0x100bu
 /* 0.2.0 raises TBT_FEC_CONV from 0x1001 to 0x1004 in three wire steps;
  * 0.2.2 adds M5 below.
  * M2 (0x1002): a PARITY record may be a block marker: win_len == 0 &&
@@ -228,7 +235,10 @@ static inline u16 tbt_port_host16(u16 net)
  * bytes for route_slot and target_port.
  * M9 (0x1009, 0.6.0) merged the 0.5.0 cuts under one revision.
  * M10 (0x100a, 0.7.0) removes the multiplexed payload format and the two
- * extra record types; every length and offset above is the 0.7.0 contract. */
+ * extra record types.
+ * M11 (0x100b, 0.8.0) makes the header word at +30 the group for DATA and
+ * PARITY, and gives every block its own n/m; every length and offset above
+ * is the 0.8.0 contract. */
 
 /* FEC record types. */
 #define TBT_FEC_DATA 0x30

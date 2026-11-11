@@ -1,7 +1,7 @@
 /* test_wire_compat.c - cross-version wire refusal regression.
  *
- * The 0.7.0 wire (TBT_CONV 0x000a, TBT_FEC_CONV 0x100a, HELLO v7) is a hard
- * cutover: a peer from 0.6.0 or older must be refused by the first record,
+ * The 0.8.0 wire (TBT_CONV 0x000a, TBT_FEC_CONV 0x100b, HELLO v8) is a hard
+ * cutover: a peer from 0.7.0 or older must be refused by the first record,
  * never guessed at. This test builds the historical byte vectors and feeds
  * them to the same functions the receive path runs:
  *
@@ -426,9 +426,9 @@ static void test_legacy_framing(void)
 
 static void test_hello_versions(void)
 {
-    ok(TBT_CONV == 0x000au && TBT_FEC_CONV == 0x100au &&
-           TBT_WIRE_VERSION_V6 == 7,
-       "0.7.0 wire constants", "the current constants are not the v10 cut");
+    ok(TBT_CONV == 0x000au && TBT_FEC_CONV == 0x100bu &&
+           TBT_WIRE_VERSION_V6 == 8,
+       "0.8.0 wire constants", "the current constants are not the v11 cut");
 
     expect_hello_refused(1, TBT_HELLO_BODY_LEN, "HELLO v1 (0.1.x/0.2.x ARQ)");
     expect_hello_refused(2, TBT_HELLO_BODY_LEN_V6, "HELLO v2 (0.2.x FEC)");
@@ -436,10 +436,11 @@ static void test_hello_versions(void)
     expect_hello_refused(4, TBT_HELLO_BODY_LEN_V6, "HELLO v4 (0.4.0 FEC)");
     expect_hello_refused(5, TBT_HELLO_BODY_LEN_V6, "HELLO v5 (0.5.0 FEC)");
     expect_hello_refused(6, TBT_HELLO_BODY_LEN_V6, "HELLO v6 (0.6.0 FEC)");
+    expect_hello_refused(7, TBT_HELLO_BODY_LEN_V6, "HELLO v7 (0.7.0 FEC)");
     expect_hello_refused(99, TBT_HELLO_BODY_LEN_V6, "HELLO v99 (future)");
 
     expect_hello_ok(TBT_WIRE_VERSION_V6, TBT_HELLO_BODY_LEN_V6, true,
-                    TBT_ROLE_FAR, "HELLO v7 passes the FEC gate");
+                    TBT_ROLE_FAR, "HELLO v8 passes the FEC gate");
     expect_hello_ok(TBT_WIRE_VERSION, TBT_HELLO_BODY_LEN, false,
                     TBT_ROLE_FAR, "HELLO v1 still passes the ARQ gate");
 
@@ -517,19 +518,19 @@ static void test_fec_headers(void)
 {
     static const u8 types[] = {TBT_FEC_DATA, TBT_FEC_PARITY, TBT_FEC_CFG,
                                TBT_FEC_FBK, TBT_FEC_NACK};
-    static const u16 old_convs[] = {0x1005, 0x1006, 0x1009};
+    static const u16 old_convs[] = {0x1005, 0x1006, 0x1009, 0x100a};
     size_t i, j;
 
     for (j = 0; j < sizeof(old_convs) / sizeof(old_convs[0]); j++)
         for (i = 0; i < sizeof(types) / sizeof(types[0]); i++)
             expect_historical_fec(old_convs[j], types[i]);
 
-    expect_current_fec_ok(TBT_FEC_DATA, "0.7.0 DATA header passes");
-    expect_current_fec_ok(TBT_FEC_PARITY, "0.7.0 PARITY header passes");
-    expect_current_fec_ok(TBT_FEC_ACK, "0.7.0 ACK header passes");
-    expect_current_fec_ok(TBT_FEC_NACK, "0.7.0 NACK header passes");
-    expect_current_fec_ok(TBT_FEC_CFG, "0.7.0 CFG header passes");
-    expect_current_fec_ok(TBT_FEC_FBK, "0.7.0 FBK header passes");
+    expect_current_fec_ok(TBT_FEC_DATA, "0.8.0 DATA header passes");
+    expect_current_fec_ok(TBT_FEC_PARITY, "0.8.0 PARITY header passes");
+    expect_current_fec_ok(TBT_FEC_ACK, "0.8.0 ACK header passes");
+    expect_current_fec_ok(TBT_FEC_NACK, "0.8.0 NACK header passes");
+    expect_current_fec_ok(TBT_FEC_CFG, "0.8.0 CFG header passes");
+    expect_current_fec_ok(TBT_FEC_FBK, "0.8.0 FBK header passes");
 }
 
 static void test_fec_short_records(void)
@@ -586,8 +587,36 @@ static void test_fec_tamper(void)
 
     rec[TBT_FEC_H_RESERVED] = 1;
     expect_fec_rc(rec, TBT_FEC_HDR_LEN + h.payload_len, -EPROTO,
-                  "nonzero FEC header reserved is refused");
+                  "DATA group that underflows block_seq0 is refused");
     rec[TBT_FEC_H_RESERVED] = 0;
+
+    /* +30 is the group for DATA/PARITY. A group that fits the block is
+     * legal; a control record must still keep it zero. */
+    {
+        struct tbt_fec_hdr gh;
+        u8 *gpay, *grec;
+
+        fec_current_header(&gh, TBT_FEC_DATA, TBT_FEC_CONV);
+        gh.reserved = 1;
+        gh.seq = gh.n; /* block_seq0 = 0 */
+        gpay = xalloc(gh.payload_len);
+        fill_pattern(gpay, gh.payload_len, 0x30);
+        grec = fec_record(&gh, gpay);
+        expect_fec_rc(grec, TBT_FEC_HDR_LEN + gh.payload_len, 0,
+                      "DATA group 1 with block_seq0=0 passes");
+        free(grec);
+        free(gpay);
+
+        fec_current_header(&gh, TBT_FEC_ACK, TBT_FEC_CONV);
+        gh.reserved = 1;
+        gpay = xalloc(gh.payload_len);
+        fill_pattern(gpay, gh.payload_len, 0x31);
+        grec = fec_record(&gh, gpay);
+        expect_fec_rc(grec, TBT_FEC_HDR_LEN + gh.payload_len, -EPROTO,
+                      "control record with a nonzero group is refused");
+        free(grec);
+        free(gpay);
+    }
 
     rec[TBT_FEC_H_FLAGS] = 0x02;
     expect_fec_rc(rec, TBT_FEC_HDR_LEN + h.payload_len, -EPROTO,

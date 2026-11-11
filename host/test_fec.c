@@ -219,8 +219,8 @@ static void test_header_roundtrip(void)
        "header offsets", NULL);
     /* 0x1005 adds the stream sid and grows the header to 48 bytes; 0x1007
      * makes FEC_CFG/FEC_FBK carry the adaptive shape; 0x1008 grows CFG/FBK
-     * to 64 bytes; 0x100a is the 0.7.0 cut. */
-    ok(TBT_FEC_CONV == 0x100au, "TBT_FEC_CONV", NULL);
+     * to 64 bytes; 0x100b is the 0.8.0 cut. */
+    ok(TBT_FEC_CONV == 0x100bu, "TBT_FEC_CONV", NULL);
 
     /* NULL arguments are refused, not dereferenced. */
     ok_int(tbt_fec_hdr_pack(NULL, wire), -EINVAL, "pack NULL header");
@@ -242,7 +242,7 @@ static struct tbt_fec_hdr data_hdr(void)
     h.m = 4;
     h.epoch = 0; /* DATA never carries the block epoch */
     h.block_id = 1;
-    h.seq = 1;
+    h.seq = 4; /* block_seq0 = 0 for every DATA share of this 4/4 block */
     h.payload_len = 64;
     h.conv = TBT_FEC_CONV;
     return h;
@@ -400,7 +400,17 @@ static void test_hdr_check(void)
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "flags bit0+bit1");
     h = data_hdr();
     h.reserved = 1;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "reserved != 0");
+    h.seq = h.n; /* block_seq0 = 0 */
+    ok_int(tbt_fec_hdr_check(&h, 64), 0, "DATA group 1 is legal");
+    h = data_hdr();
+    h.reserved = 1;
+    h.seq = h.n - 1; /* block_seq0 would underflow */
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO,
+           "DATA group makes block_seq0 underflow");
+    h = data_hdr();
+    h.reserved = TBT_FEC_MAX_GROUPS;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO,
+           "DATA group at the wire ceiling");
     h = data_hdr();
     h.type = 0x37;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "unknown type 0x37");
@@ -2299,20 +2309,21 @@ static void test_base_mapping(void)
     ok_u64(tbt_fec_seq_of_block_pkt_base(bb + 1, 0, 0, bp, bb, G, N),
            bp + 128, "base seq of second block");
 
-    /* The four coordinates are a bijection around the origin. */
+    /* The four coordinates are a bijection around the origin under the
+     * route-A group-major layout. */
     for (block = bb; block < bb + 2; block++)
         for (group = 0; group < G; group++)
             for (p = 0; p < N; p++)
             {
-                u64 s = tbt_fec_seq_of_block_pkt_base(block, group, p, bp, bb,
-                                                      G, N);
+                u64 block_seq0 = bp + (block - bb) * (u64)G * N;
+                u64 s = tbt_fec_data_seq(block_seq0, group, N, p);
+                u64 s0 = 0;
 
                 ok_u64(tbt_fec_block_of_seq_base(s, bp, bb, G, N), block,
                        "base round-trip block");
-                ok_u32(tbt_fec_group_of_seq_base(s, bp, G), group,
-                       "base round-trip group");
-                ok_u32(tbt_fec_share_of_seq_base(s, bp, G, N), p,
-                       "base round-trip share");
+                ok(tbt_fec_data_seq0(s, group, N, p, &s0),
+                   "base round-trip seq0", NULL);
+                ok_u64(s0, block_seq0, "base round-trip origin");
             }
 
     /* FIN alignment, delivery frontier and the final block all measure from
@@ -2357,8 +2368,8 @@ static void test_base_mapping(void)
            "base real len matches legacy");
 }
 
-/* A 0.6.0 peer sends HELLO body[0] == 6 and conv 0x1009. 0.7.0 names 7 and
- * 0x100a; tbt_rx_hello() and tbt_fec_hdr_check() compare exactly, so the
+/* A 0.7.0 peer sends HELLO body[0] == 7 and conv 0x100a. 0.8.0 names 8 and
+ * 0x100b; tbt_rx_hello() and tbt_fec_hdr_check() compare exactly, so the
  * first HELLO and the first FEC record fail with -EPROTO and the carrier
  * closes. */
 static void test_wire_version(void)
@@ -2367,12 +2378,12 @@ static void test_wire_version(void)
 
     memset(hello, 0, sizeof(hello));
     hello[0] = TBT_WIRE_VERSION_V6;
-    ok(hello[0] == 7, "0.7.0 FEC HELLO names version 7", NULL);
-    hello[0] = 6;
+    ok(hello[0] == 8, "0.8.0 FEC HELLO names version 8", NULL);
+    hello[0] = 7;
     ok(hello[0] != TBT_WIRE_VERSION_V6,
-       "0.6.0 HELLO version 6 is refused", NULL);
+       "0.7.0 HELLO version 7 is refused", NULL);
     ok(TBT_WIRE_VERSION == 1, "legacy ARQ HELLO stays version 1", NULL);
-    ok(TBT_FEC_CONV == 0x100au, "0x100a is the v10 FEC revision", NULL);
+    ok(TBT_FEC_CONV == 0x100bu, "0x100b is the v11 FEC revision", NULL);
     ok(TBT_CONV == 0x000au, "0x000a is the v10 ARQ revision", NULL);
     ok(TBT_OPEN_BODY_LEN == 36, "OPEN body is 36 bytes", NULL);
     ok(TBT_OPEN_ROUTE_SLOT == 32 && TBT_OPEN_TARGET_PORT == 34,
@@ -2436,12 +2447,13 @@ static void test_group_reassembly(void)
     ok_u32(tbt_fec_group_tail_len(0, G, N, 0), 0, "tail length of an empty stream");
     ok_u32(tbt_fec_group_tail_len(G * N, G, N, 0), N, "exact multiple is a full block");
 
-    /* seq -> (group, block, p) -> seq must round-trip for every packet. */
+    /* seq -> (block, group, p) -> seq must round-trip for every packet. */
     for (seq = 0; seq < total_pkts; seq++)
     {
-        u16 g = tbt_fec_group_of_seq(seq, G);
-        u64 b = tbt_fec_block_of_seq(seq, G, N);
-        u16 p = (u16)((seq / G) % N);
+        u64 b = seq / ((u64)G * N);
+        u16 rel = (u16)(seq % ((u64)G * N));
+        u16 g = (u16)(rel / N);
+        u16 p = (u16)(rel % N);
 
         if (tbt_fec_seq_of_block_pkt(b, g, p, G, N) != seq)
         {
@@ -2978,6 +2990,54 @@ static void test_replay(void)
     for (i = 0; i < (int)len; i++)
         rec[i] = (u8)(i * 7 + 3);
     ok_int(tbt_fec_replay_store(r, 7, 1, 5, rec, len), 0, "replay store");
+
+    /* A block's own n/m travels in its record; the ring is sized by the
+     * direction's n+m, so a 6/2 block is stored in a 4/4 ring and comes
+     * back with its shape, group and block_seq0 intact. */
+    {
+        struct tbt_fec_replay *rs = tbt_fec_replay_new(1, 4, 4, 64);
+        struct tbt_fec_hdr bh, got;
+        u8 bpay[40];
+        u8 brec[TBT_FEC_HDR_LEN + sizeof(bpay)];
+        u8 bout[TBT_FEC_HDR_LEN + sizeof(bpay)];
+
+        ok(rs != NULL, "block-shape replay ring allocated", NULL);
+        memset(&bh, 0, sizeof(bh));
+        memset(bpay, 0x5a, sizeof(bpay));
+        bh.type = TBT_FEC_DATA;
+        bh.n = 6;
+        bh.m = 2;
+        bh.share_index = 5;
+        bh.block_id = 21;
+        bh.seq = 100 + 3 * 6 + 5; /* group 3, share 5, block_seq0 100 */
+        bh.payload_len = sizeof(bpay);
+        bh.conv = TBT_FEC_CONV;
+        bh.reserved = 3;
+        ok_int(tbt_fec_hdr_seal(&bh, bpay), 0, "block-shape replay seal");
+        ok_int(tbt_fec_hdr_pack(&bh, brec), 0, "block-shape replay pack");
+        memcpy(brec + TBT_FEC_HDR_LEN, bpay, sizeof(bpay));
+        ok_int(tbt_fec_replay_store(rs, 21, 0, 5, brec, sizeof(brec)), 0,
+               "replay stores a block's own n/m");
+        memset(bout, 0, sizeof(bout));
+        ok_int(tbt_fec_replay_get(rs, 21, 0, 5, bout, sizeof(bout)),
+               sizeof(brec), "replay returns the block-shape record");
+        ok_int(tbt_fec_hdr_unpack(bout, &got), 0,
+               "replay header unpacks");
+        ok(got.n == 6 && got.m == 2 && got.reserved == 3 &&
+               got.seq == 123 && got.share_index == 5,
+           "replay keeps block n/m/group/block_seq0", NULL);
+        {
+            u64 s0 = 0;
+
+            ok(tbt_fec_data_seq0(got.seq, got.reserved, got.n,
+                                 got.share_index, &s0) &&
+                   s0 == 100,
+               "replayed DATA still names block_seq0=100", NULL);
+        }
+        ok_int(tbt_fec_hdr_check(&got, 64), 0,
+               "replayed block header is valid");
+        tbt_fec_replay_free(rs);
+    }
     ok(tbt_fec_replay_has(r, 7, 1, 5), "replay has", NULL);
     memset(out, 0, sizeof(out));
     ok_int(tbt_fec_replay_get(r, 7, 1, 5, out, sizeof(out)), len,
@@ -3090,11 +3150,12 @@ static void test_replay(void)
 
 static void test_tail_guard(void)
 {
-    /* total_pkts=2, groups=4, n=4: final block 0; groups 0/1 have one packet,
-     * groups 2/3 are empty. A tail of 0 with a present DATA share is a stale
-     * stream end and must not mark the block empty. */
-    ok_u32(tbt_fec_blk_real_len_from_tail(0, 4, true, 2, 4, 0, 0, true), 1,
-           "final tail 1 for a group with a packet");
+    /* total_pkts=2, groups=4, n=4: final block 0. Route-A packs group 0's
+     * share run first, so group 0 has two packets and groups 1..3 are empty.
+     * A tail of 0 with a present DATA share is a stale stream end and must
+     * not mark the block empty. */
+    ok_u32(tbt_fec_blk_real_len_from_tail(0, 4, true, 2, 4, 0, 0, true), 2,
+           "final tail 2 for group 0");
     ok_u32(tbt_fec_blk_real_len_from_tail(0, 4, true, 2, 4, 0, 2, false), 0,
            "final empty group has length 0");
     ok_u32(tbt_fec_blk_real_len_from_tail(0, 4, true, 2, 4, 0, 2, true), 4,
