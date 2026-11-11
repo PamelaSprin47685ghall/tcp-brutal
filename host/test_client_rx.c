@@ -147,6 +147,49 @@ static void send_parity(u64 block, u64 seq0, u16 n, u16 m, u16 group,
     flow_rx_store(&f, &h, payload);
 }
 
+static void send_data_payload(u64 block, u64 seq0, u16 n, u16 m, u16 group,
+                              u16 share, u16 len, bool padded, const u8 *p)
+{
+    struct tbt_fec_hdr h;
+
+    memset(&h, 0, sizeof(h));
+    h.type = TBT_FEC_DATA;
+    h.flags = padded ? TBT_FEC_FF_PADDED : 0;
+    h.share_index = share;
+    h.n = (u8)n;
+    h.m = (u8)m;
+    h.block_id = block;
+    h.seq = seq0 + (u64)group * n + share;
+    h.payload_len = padded ? TBT_FEC_S : len;
+    h.win_len = padded ? len : 0;
+    h.conv = TBT_FEC_CONV;
+    h.sid = f.sid;
+    h.reserved = group;
+    flow_rx_store(&f, &h, p);
+}
+
+static void send_parity_payload(u64 block, u64 seq0, u16 n, u16 m,
+                                u16 group, u16 parity_index, u16 win_len,
+                                u16 epoch, const u8 *p)
+{
+    struct tbt_fec_hdr h;
+
+    memset(&h, 0, sizeof(h));
+    h.type = TBT_FEC_PARITY;
+    h.share_index = (u16)(n + parity_index);
+    h.n = (u8)n;
+    h.m = (u8)m;
+    h.block_id = block;
+    h.seq = seq0;
+    h.win_len = win_len;
+    h.payload_len = TBT_FEC_S;
+    h.epoch = epoch;
+    h.conv = TBT_FEC_CONV;
+    h.sid = f.sid;
+    h.reserved = group;
+    flow_rx_store(&f, &h, p);
+}
+
 static void send_marker(u64 block, u64 seq0, u16 n, u16 m, u16 group)
 {
     struct tbt_fec_hdr h;
@@ -334,9 +377,8 @@ static void test_multishape_sequence(void)
 
 /* The downlink split may move without a new CFG; drive the user's observed
  * 132/124 and 146/110 shapes through the same receive path. */
-static void test_downlink_shapes(void)
+static void set_downlink_shape(void)
 {
-    clear_engine();
     f.rx_shape.variant = TBT_FEC_SCLC_DOWN;
     f.rx_shape.n = 128;
     f.rx_shape.m = 128;
@@ -347,6 +389,12 @@ static void test_downlink_shapes(void)
     f.rx_shares = 256;
     f.rx_n = 128;
     f.rx_m = 128;
+}
+
+static void test_downlink_shapes(void)
+{
+    clear_engine();
+    set_downlink_shape();
 
     send_marker(0, 0, 132, 124, 0);
     CHECK(f.rx_next_block == 1 && f.rx_next_deliver == 0,
@@ -369,6 +417,91 @@ static void test_downlink_shapes(void)
           "down: 146/110 codec builds");
     CHECK(!flow_commit_shape(&f, 200, 56),
           "down: a split above 192 is refused");
+}
+
+/* The far ladder observed in .92: 128 -> 139/117 -> 140/116 -> 146/110
+ * with markers and a short block in between. Each block must place and
+ * decode with its own header. */
+static void test_far_shape_ladder(void)
+{
+    clear_engine();
+    set_downlink_shape();
+
+    marker_block(0, 0, 128, 128);
+    short_block(1, 128, 139, 117);
+    marker_block(2, 256, 140, 116);
+    full_block(3, 384, 146, 110);
+
+    CHECK(f.rx_next_block == 4, "ladder: four blocks delivered");
+    CHECK(f.rx_next_deliver == 148, "ladder: frontier 2 + 146");
+    CHECK(f.rx_n == 146 && f.rx_m == 110,
+          "ladder: current split follows the latest block");
+    CHECK(last_ack_credit() == (int)(TBT_RX_SLOTS * 146u),
+          "ladder: credit follows the latest rx_n");
+    CHECK(f.rx_shape_bad == 0, "ladder: no shape rejection");
+    CHECK(flow_rx_codec(&f, 139, 117) != NULL,
+          "ladder: 139/117 codec builds");
+    CHECK(flow_rx_codec(&f, 140, 116) != NULL,
+          "ladder: 140/116 codec builds");
+    CHECK(flow_rx_codec(&f, 146, 110) != NULL,
+          "ladder: 146/110 codec builds");
+}
+
+/* A real decode at 139/117: encode one full block with the same codec the RX
+ * builds, drop three DATA shares, send all parity, and require delivery. */
+static void test_downlink_erasure(void)
+{
+    u8 *data_ptrs[139];
+    u8 *parity_ptrs[117];
+    u8 *parity[117];
+    struct tbt_fec_grouped *codec;
+    int i;
+
+    clear_engine();
+    set_downlink_shape();
+    codec = flow_rx_codec(&f, 139, 117);
+    CHECK(codec != NULL, "erasure: 139/117 codec");
+    if (!codec)
+        return;
+    for (i = 0; i < 139; i++)
+        data_ptrs[i] = payload;
+    for (i = 0; i < 117; i++)
+    {
+        parity[i] = calloc(1, TBT_FEC_S);
+        parity_ptrs[i] = parity[i];
+    }
+    CHECK(tbt_fec_grouped_encode(codec, 0, data_ptrs, 139, parity_ptrs) == 0,
+          "erasure: encode 139/117");
+
+    for (i = 0; i < 139; i++)
+    {
+        if (i == 5 || i == 77 || i == 138)
+            continue;
+        send_data_payload(0, 0, 139, 117, 0, (u16)i, TBT_FEC_S, false,
+                          payload);
+    }
+    for (i = 0; i < 117; i++)
+        send_parity_payload(0, 0, 139, 117, 0, (u16)i, 139, 0, parity[i]);
+    CHECK(f.rx_next_block == 1, "erasure: block delivered");
+    CHECK(f.rx_next_deliver == 139, "erasure: frontier is 139 packets");
+    CHECK(f.rx_deliver_bytes == 139u * TBT_FEC_S,
+          "erasure: all 139 shares delivered");
+    CHECK(f.rx_shape_bad == 0, "erasure: no shape rejection");
+    for (i = 0; i < 117; i++)
+        free(parity[i]);
+}
+
+/* The shape gate must count a bad share sum, a bad block ladder and a
+ * second n/m for an existing block id. */
+static void test_shape_rejection(void)
+{
+    clear_engine();
+    set_downlink_shape();
+    send_data(0, 0, 132, 124, 0, 0, TBT_FEC_S, false);
+    send_data(0, 0, 140, 116, 0, 0, TBT_FEC_S, false);
+    send_data(1, 0, 200, 56, 0, 0, TBT_FEC_S, false);
+    send_data(2, 0, 131, 124, 0, 0, TBT_FEC_S, false);
+    CHECK(f.rx_shape_bad == 3, "reject: three inconsistent shapes counted");
 }
 
 /* The FBK target is a commitment: the reported m_current/m_target and
@@ -408,6 +541,9 @@ int main(void)
     test_window_and_nack_base();
     test_multishape_sequence();
     test_downlink_shapes();
+    test_far_shape_ladder();
+    test_downlink_erasure();
+    test_shape_rejection();
     test_fbk_commit();
 
     printf("test_client_rx: %d checks, %d failures\n", checks, failures);

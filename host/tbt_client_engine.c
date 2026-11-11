@@ -1361,8 +1361,13 @@ static bool flow_commit_shape(struct flow *f, u16 n, u16 m)
     if (!tbt_fec_block_shape_ok(n, m, 0, 0, f->rx_shares, f->rx_groups,
                                true))
         return false;
-    f->rx_n = n;
-    f->rx_m = m;
+    if (f->rx_n != n || f->rx_m != m)
+    {
+        f->rx_n = n;
+        f->rx_m = m;
+        logmsg(f->e, "tbt_client: flow %llu cfg rx n=%u m=%u (fbk)\n",
+               (unsigned long long)f->sid, n, m);
+    }
     if (f->rx_shape_block < f->rx_next_block)
         f->rx_shape_block = f->rx_next_block;
     return true;
