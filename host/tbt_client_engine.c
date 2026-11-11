@@ -61,6 +61,9 @@
 #define TBT_CTL_PENDING 64
 #define TBT_HDR_STAGE_MAX TBT_HTTP_HDR_MAX
 #define TBT_OPEN_DELAY_NS (50ull * 1000 * 1000)
+/* 0.7.x TBT_SW_FEC_TICK semantics: a partial packet is flushed after the
+ * application goes quiet, so a small request is not held behind S bytes. */
+#define TBT_TX_IDLE_SEAL_NS (25ull * 1000 * 1000)
 #define TBT_NACK_FIRST_NS (30ull * 1000 * 1000)
 #define TBT_NACK_RETRY_NS (20ull * 1000 * 1000)
 #define TBT_FBK_NS (100ull * 1000 * 1000)
@@ -217,7 +220,8 @@ struct flow
     u64 rx_shape_bad;
     struct rx_block rx[TBT_RX_SLOTS];
     u64 rx_next_block;
-    u64 rx_next_deliver;
+    u64 rx_next_deliver;  /* real packets, for FIN/delivery */
+    u64 rx_ack_frontier;  /* block-aligned packets, for ACK credit */
     bool rx_deliver_started;
     u64 rx_late_share;
     u64 rx_stale_nack;
@@ -846,7 +850,7 @@ static void flow_out_flush(struct flow *f);
 static void flow_fin_maybe(struct flow *f);
 static void flow_app_close(struct flow *f);
 static void flow_tx_finish(struct flow *f);
-static void flow_tx_seal_block(struct flow *f, bool force);
+static bool flow_tx_seal_block(struct flow *f, bool finish);
 static int flow_send_fin(struct flow *f);
 static void flow_tick(struct flow *f, u64 now);
 static int flow_target_connect(struct flow *f, u16 port);
@@ -1299,7 +1303,7 @@ static int flow_send_ack(struct flow *f)
     u8 body[TBT_FEC_ACK_LEN];
 
     memset(&a, 0, sizeof(a));
-    a.next_deliver = f->rx_next_deliver;
+    a.next_deliver = f->rx_ack_frontier;
     /* The peer may only send the blocks this side can buffer. One slot must
      * stay free for the block being delivered: N in-flight + 1 head <=
      * TBT_RX_SLOTS, so the grant is TBT_RX_SLOTS - 1 blocks of packets. */
@@ -1799,9 +1803,15 @@ static void flow_rx_check(struct flow *f)
         if (!f->rx_deliver_started)
         {
             f->rx_next_deliver = b->seq0;
+            f->rx_ack_frontier = b->seq0;
             f->rx_deliver_started = true;
         }
         f->rx_next_deliver += blk_pkts;
+        /* Credit is spent in whole blocks on the sender side. A short or
+         * marker block still advances the sender's block origin by
+         * groups*n, so the ACK frontier must do the same even though the
+         * byte/packet delivery cursor advances only by real packets. */
+        f->rx_ack_frontier = b->seq0 + (u64)b->groups * b->n;
         f->rx_next_block = b->id + 1;
         rx_block_release(f, b);
         flow_fin_maybe(f);
@@ -2388,33 +2398,22 @@ static int flow_target_connect(struct flow *f, u16 port)
     return -errno;
 }
 
-static void flow_tx_finish(struct flow *f)
-{
-    if (f->tx_finished)
-        return;
-    logmsg(f->e, "tbt_client: flow %llu finish cur=%zu group=%u share=%u last=%llu\n",
-           (unsigned long long)f->sid, f->tx_cur_len, f->tx_group,
-           f->tx_share, (unsigned long long)f->tx_last_len);
-    flow_tx_seal_block(f, true);
-    f->tx_finished = true;
-}
-
-/* Seal the current block before the application fills it. A request that
- * waits for a reply (a TLS ClientHello, a VLESS header) never reaches a
- * whole block, so without this the peer sees fewer shares than it needs to
- * decode and both directions stall. The short share carries PADDED and its
- * real length; the parity names the valid share count; the remaining groups
- * of a multi-group block get empty markers. The block then advances so a
- * later write uses a fresh id. */
-static void flow_tx_seal_block(struct flow *f, bool force)
+/* Seal the current block. Idle uses finish=false: the short share has no
+ * LAST flag and the stream continues in the next block. EOF uses finish=true:
+ * the short share is LAST and the FIN follows. An empty block is never
+ * emitted; callers check the partial state first. */
+static bool flow_tx_seal_block(struct flow *f, bool finish)
 {
     u16 g;
-    bool pending = f->tx_cur_len || f->tx_share;
+    bool had_data = f->tx_cur_len || f->tx_share || f->tx_group;
 
-    if (f->tx_finished)
-        return;
-    if (!pending && !force)
-        return;
+    if (!had_data)
+        return false;
+    logmsg(f->e,
+           "tbt_client: flow %llu seal%s cur=%zu group=%u share=%u last=%llu\n",
+           (unsigned long long)f->sid, finish ? " finish" : "",
+           f->tx_cur_len, f->tx_group, f->tx_share,
+           (unsigned long long)f->tx_last_len);
     if (f->tx_cur_len)
     {
         u8 *plane = f->tx_plane +
@@ -2424,13 +2423,13 @@ static void flow_tx_seal_block(struct flow *f, bool force)
 
         memcpy(plane, f->tx_cur, len);
         (void)flow_send_data(f, f->tx_group, f->tx_share,
-                             len, true);
+                             (u16)f->tx_cur_len, finish);
         f->tx_cur_len = 0;
         f->tx_share++;
     }
     if (f->tx_share == f->n)
     {
-        (void)flow_send_parity(f, f->tx_group, f->n, 0);
+        (void)flow_send_parity(f, f->tx_group, f->n, f->tx_last_len);
         f->tx_share = 0;
         f->tx_group++;
     }
@@ -2444,13 +2443,28 @@ static void flow_tx_seal_block(struct flow *f, bool force)
     for (g = f->tx_group; g < f->groups; g++)
         (void)flow_send_marker(f, g);
     f->tx_group = 0;
+    f->tx_share = 0;
+    f->tx_cur_len = 0;
+    f->tx_last_len = 0;
     f->tx_block++;
     f->tx_blk_seq0 += (u64)f->groups * f->n;
-    f->tx_last_len = 0;
+    f->tx_activity_ns = 0;
     /* The parity covers the whole plane, so an unused share from the old
      * block would make it agree with bytes the peer never received. */
     memset(f->tx_plane, 0,
            (size_t)f->groups * (f->n + f->m) * TBT_FEC_S);
+    return true;
+}
+
+static void flow_tx_finish(struct flow *f)
+{
+    if (f->tx_finished)
+        return;
+    logmsg(f->e, "tbt_client: flow %llu finish cur=%zu group=%u share=%u last=%llu\n",
+           (unsigned long long)f->sid, f->tx_cur_len, f->tx_group,
+           f->tx_share, (unsigned long long)f->tx_last_len);
+    (void)flow_tx_seal_block(f, true);
+    f->tx_finished = true;
 }
 
 static int flow_tx_ready(struct flow *f, u64 now)
@@ -2595,10 +2609,6 @@ static void flow_tick(struct flow *f, u64 now)
                              EPOLLIN | EPOLLOUT | EPOLLRDHUP, &f->ep);
         }
     }
-    if (!f->tx_finished && (f->tx_cur_len || f->tx_share) &&
-        f->tx_activity_ns &&
-        now - f->tx_activity_ns >= 25ull * 1000 * 1000)
-        flow_tx_seal_block(f, false);
     if (f->rx_shape_set)
     {
         flow_rx_nack(f, now);
@@ -2609,6 +2619,17 @@ static void flow_tick(struct flow *f, u64 now)
     }
     flow_out_flush(f);
     flow_fin_maybe(f);
+    if (!f->tx_finished && f->tx_activity_ns &&
+        now - f->tx_activity_ns >= TBT_TX_IDLE_SEAL_NS &&
+        (f->tx_cur_len || f->tx_share || f->tx_group))
+    {
+        if (flow_tx_seal_block(f, false))
+            logmsg(e,
+                   "tbt_client: flow %llu idle seal tx_seq=%llu block=%llu\n",
+                   (unsigned long long)f->sid,
+                   (unsigned long long)f->tx_seq,
+                   (unsigned long long)f->tx_block);
+    }
     if (f->rx_shape_set)
     {
         u32 hs = (u32)(f->rx_next_block % TBT_RX_SLOTS);

@@ -588,6 +588,224 @@ static void test_shape_rejection(void)
     CHECK(f.rx_shape_bad == 3, "reject: three inconsistent shapes counted");
 }
 
+/* ---- TX idle seal ---------------------------------------------------- */
+
+static struct engine tx_e;
+static struct engine rx_e;
+static int tx_fake_fd = -1;
+
+static void tx_fake_carriers(void)
+{
+    int sv[2];
+    int i;
+
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, sv))
+        abort();
+    tx_fake_fd = sv[1];
+    for (i = 0; i < TBT_CAR_MAX; i++)
+    {
+        struct carrier *c = calloc(1, sizeof(*c));
+
+        c->e = &tx_e;
+        c->fd = sv[1];
+        c->index = i;
+        c->up = true;
+        tx_e.car[i] = c;
+    }
+    tx_e.n_car = TBT_CAR_MAX;
+}
+
+static void tx_clear_carriers(void)
+{
+    int i;
+
+    for (i = 0; i < TBT_CAR_MAX; i++)
+    {
+        free(tx_e.car[i]);
+        tx_e.car[i] = NULL;
+    }
+    tx_e.n_car = 0;
+    if (tx_fake_fd >= 0)
+    {
+        close(tx_fake_fd);
+        tx_fake_fd = -1;
+    }
+}
+
+static struct flow *tx_flow_new(void)
+{
+    memset(&tx_e, 0, sizeof(tx_e));
+    tx_e.near = true;
+    tx_e.tx_seed = 1;
+    tx_e.tx_shape.variant = TBT_FEC_SCLC_UP;
+    tx_e.tx_shape.n = 8;
+    tx_e.tx_shape.m = 24;
+    tx_e.tx_shape.groups = 8;
+    tx_e.tx_shape.block = TBT_FEC_SCLC_BLOCK_UP;
+    tx_e.tx_shape.L = TBT_FEC_SCLC_L_UP;
+    tx_e.tx_shape.rate_ppm = 250;
+    tx_e.tx_shape.rate_256 = 64;
+    tx_e.tx_n = 8;
+    tx_e.tx_m = 24;
+    tx_e.tx_groups = 8;
+    return flow_alloc(&tx_e, 1, -1, true);
+}
+
+/* Feed every record the TX stored for its blocks into a fresh RX flow. */
+static void tx_deliver(struct flow *tx, size_t *bytes, u64 *next)
+{
+    struct flow *rx;
+    int b;
+
+    memset(&rx_e, 0, sizeof(rx_e));
+    rx_e.near = false;
+    rx_e.tx_seed = tx_e.tx_seed;
+    rx_e.tx_n = 8;
+    rx_e.tx_m = 24;
+    rx_e.tx_groups = 8;
+    rx_e.tx_shape = tx_e.tx_shape;
+    rx = flow_alloc(&rx_e, 1, -1, false);
+    rx->rx_shape = tx->tx_shape;
+    rx->rx_shape_set = true;
+    rx->rx_seed = tx_e.tx_seed;
+    rx->rx_n = 8;
+    rx->rx_m = 24;
+    rx->rx_groups = 8;
+    rx->rx_shares = 32;
+    for (b = 0; b < TBT_REPLAY_BLOCKS; b++)
+    {
+        struct replay_block *r = &tx->replay[b];
+        u16 g, sh;
+
+        if (!r->used)
+            continue;
+        for (g = 0; g < r->groups; g++)
+            for (sh = 0; sh < (u16)(r->n + r->m); sh++)
+            {
+                u32 idx = (u32)g * (r->n + r->m) + sh;
+                const u8 *rec;
+                struct tbt_fec_hdr h;
+
+                if (!r->lens[idx])
+                    continue;
+                rec = r->recs + (size_t)idx * TBT_FEC_REC_MAX;
+                if (tbt_fec_rec_check(rec, r->lens[idx], TBT_FEC_S, &h))
+                    continue;
+                flow_rx_store(rx, &h, rec + TBT_FEC_HDR_LEN);
+            }
+    }
+    *bytes = rx->rx_deliver_bytes;
+    *next = rx->rx_next_block;
+    flow_free(&rx_e, rx);
+}
+
+static void tx_feed_byte_pattern(struct flow *tx, size_t n, u8 seed)
+{
+    u8 *p = malloc(n);
+    size_t i;
+
+    for (i = 0; i < n; i++)
+        p[i] = (u8)(seed + i * 7u);
+    flow_tx_feed(tx, p, n);
+    free(p);
+}
+
+static void tx_tick_idle(struct flow *tx)
+{
+    flow_tick(tx, tx->tx_activity_ns + TBT_TX_IDLE_SEAL_NS + 1000000u);
+}
+
+static void test_tx_idle_empty(void)
+{
+    struct flow *tx = tx_flow_new();
+
+    tx_fake_carriers();
+    tx_tick_idle(tx);
+    CHECK(tx->tx_seq == 0 && tx->tx_block == 0,
+          "idle empty: no packet and no block");
+    CHECK(!tx->replay[0].used, "idle empty: no record emitted");
+    flow_free(&tx_e, tx);
+    tx_clear_carriers();
+}
+
+static void test_tx_idle_3(void)
+{
+    struct flow *tx = tx_flow_new();
+    struct tbt_fec_ack a;
+    struct tbt_fec_hdr h;
+    u8 body[TBT_FEC_ACK_LEN];
+    u8 rec[TBT_FEC_HDR_LEN + TBT_FEC_ACK_LEN];
+    u16 rlen;
+    size_t bytes = 0;
+    u64 next = 0;
+
+    tx_fake_carriers();
+    tx_feed_byte_pattern(tx, 3, 0x11);
+    CHECK(tx->tx_cur_len == 3 && tx->tx_seq == 0,
+          "idle3: three bytes stay partial before the timer");
+    tx_tick_idle(tx);
+    CHECK(tx->tx_seq == 1, "idle3: one short packet sealed");
+    CHECK(tx->tx_block == 1, "idle3: block advanced");
+    CHECK(tx->tx_cur_len == 0 && tx->tx_share == 0 && tx->tx_group == 0,
+          "idle3: partial state cleared");
+    tx_deliver(tx, &bytes, &next);
+    CHECK(bytes == 3 && next == 1, "idle3: peer delivers three bytes");
+
+    memset(&a, 0, sizeof(a));
+    a.next_deliver = 1;
+    a.credit_packets = (u32)(TBT_RX_SLOTS - 1) * 8u;
+    a.deliver_bytes = 3;
+    CHECK(tbt_fec_ack_pack(&a, body) == 0, "idle3: pack ACK");
+    memset(&h, 0, sizeof(h));
+    h.type = TBT_FEC_ACK;
+    h.payload_len = TBT_FEC_ACK_LEN;
+    h.conv = TBT_FEC_CONV;
+    h.sid = 1;
+    CHECK(make_record(&tx_e, &h, body, rec, &rlen) == 0, "idle3: make ACK");
+    CHECK(handle_fec(&tx_e, NULL, rec, rlen) == 0, "idle3: receive ACK");
+    CHECK(tx->tx_ack_next == 1, "idle3: ACK advances the TX frontier");
+    flow_free(&tx_e, tx);
+    tx_clear_carriers();
+}
+
+static void test_tx_idle_200(void)
+{
+    struct flow *tx = tx_flow_new();
+    size_t bytes = 0;
+    u64 next = 0;
+
+    tx_fake_carriers();
+    tx_feed_byte_pattern(tx, 200, 0x33);
+    tx_tick_idle(tx);
+    CHECK(tx->tx_seq == 1 && tx->tx_block == 1,
+          "idle200: one short packet and one block");
+    tx_deliver(tx, &bytes, &next);
+    CHECK(bytes == 200 && next == 1, "idle200: peer delivers 200 bytes");
+    flow_free(&tx_e, tx);
+    tx_clear_carriers();
+}
+
+static void test_tx_idle_short_then_long(void)
+{
+    struct flow *tx = tx_flow_new();
+    size_t bytes = 0;
+    u64 next = 0;
+
+    tx_fake_carriers();
+    tx_feed_byte_pattern(tx, 3, 0x55);
+    tx_feed_byte_pattern(tx, 5000, 0x77);
+    tx_tick_idle(tx);
+    CHECK(tx->tx_seq == 5, "idle short+long: four full and one short share");
+    CHECK(tx->tx_block == 1, "idle short+long: one block, no duplicate");
+    CHECK(tx->tx_cur_len == 0 && tx->tx_share == 0 && tx->tx_group == 0,
+          "idle short+long: no partial state left");
+    tx_deliver(tx, &bytes, &next);
+    CHECK(bytes == 5003 && next == 1,
+          "idle short+long: peer delivers all 5003 bytes");
+    flow_free(&tx_e, tx);
+    tx_clear_carriers();
+}
+
 /* The stall dump must fire once for an incomplete head and expose both
  * counters: rx_block_stalled and rx_shape_mismatch (a record whose h.n/h.m
  * differs from the committed split). */
@@ -655,6 +873,10 @@ int main(void)
     test_downlink_erasure();
     test_shape_rejection();
     test_stall_dump();
+    test_tx_idle_empty();
+    test_tx_idle_3();
+    test_tx_idle_200();
+    test_tx_idle_short_then_long();
     test_fbk_commit();
 
     printf("test_client_rx: %d checks, %d failures\n", checks, failures);
