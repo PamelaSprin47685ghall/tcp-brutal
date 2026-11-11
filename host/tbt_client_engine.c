@@ -1420,6 +1420,8 @@ static int flow_send_fbk(struct flow *f, u8 flags, u32 epoch)
     memset(&fb, 0, sizeof(fb));
     tbt_fec_fbk_set_epoch(&fb, epoch);
     fb.flags = flags;
+    if (!flags && !e->cfg.cfg.adaptive)
+        return 0;
     if (f->ctl_ready && !flags)
     {
         u16 n_new;
@@ -2322,7 +2324,8 @@ static int handle_cfg(struct flow *f, const u8 *body)
     variant = sh.groups > 1 ? TBT_FEC_SCLC_UP : TBT_FEC_SCLC_DOWN;
     extra = sh.groups > 1 ? TBT_FEC_SCLC_WAKE_EXTRA_UP
                           : tbt_fec_sclc_wake_extra_down(sh.n);
-    if (!tbt_fec_adapt_sclc_init(&f->ctl, (u16)(sh.n + sh.m), sh.groups,
+    if (e->cfg.cfg.adaptive &&
+        !tbt_fec_adapt_sclc_init(&f->ctl, (u16)(sh.n + sh.m), sh.groups,
                                  extra, sh.n, variant))
         f->ctl_ready = true;
     return flow_send_fbk(f, TBT_FEC_FBK_F_CFG_ACK, c.epoch);
@@ -3052,6 +3055,20 @@ static void engine_tick(struct engine *e)
         e->running = false;
 }
 
+static void engine_init_session_nonce(struct engine *e)
+{
+    if (e->cfg.cfg.nonce_set)
+    {
+        memcpy(e->session_nonce, e->cfg.cfg.nonce, sizeof(e->session_nonce));
+        e->session_nonce_set = true;
+    }
+    else if (e->near)
+    {
+        fill_random(e, e->session_nonce, sizeof(e->session_nonce));
+        e->session_nonce_set = true;
+    }
+}
+
 static int engine_listen(struct engine *e)
 {
     struct sockaddr_storage ss;
@@ -3253,11 +3270,7 @@ int tbt_engine_run(const struct tbt_engine_cfg *cfg)
             return -EINVAL;
         }
     }
-    if (e->near)
-    {
-        fill_random(e, e->session_nonce, sizeof(e->session_nonce));
-        e->session_nonce_set = true;
-    }
+    engine_init_session_nonce(e);
 
     e->epfd = epoll_create1(EPOLL_CLOEXEC);
     e->timerfd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC);
