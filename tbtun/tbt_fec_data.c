@@ -2042,9 +2042,8 @@ static bool tbt_fec_tx_credit_ok(const struct tbt_fec_tx *tx)
      * bug); sending on it would overrun the receiver's block slots and the
      * shares would come back as fec_drop_window. */
     return !tbt_fec_credit_waiting(READ_ONCE(tx->peer_pkts),
-                                   READ_ONCE(tx->seq), READ_ONCE(tx->credit),
-                                   tx->base_pkt, tx->base_block, tx->groups,
-                                   tx->n);
+                                   READ_ONCE(tx->seq),
+                                   READ_ONCE(tx->credit));
 }
 
 /* The session FIFO at or above its high-water mark. The packetizer checks
@@ -2118,8 +2117,8 @@ static void tbt_fec_tx_stall_diag(struct tbt_session *sess,
     u16 groups = READ_ONCE(tx->groups);
     u32 credit = READ_ONCE(tx->credit);
     u32 credit_blocks = tbt_fec_credit_blocks(credit, groups, n);
-    u64 frontier = tbt_fec_block_of_seq_base(
-        peer_pkts, tx->base_pkt, tx->base_block, groups, n);
+    u64 base_pkt = READ_ONCE(tx->base_pkt);
+    u64 base_block = READ_ONCE(tx->base_block);
     u32 rq, rb;
 
     /* An idle stream has nothing outstanding: ack == txseq is not a stall.
@@ -2138,14 +2137,15 @@ static void tbt_fec_tx_stall_diag(struct tbt_session *sess,
      * compares packets, so a byte-count difference is not a packet lead. At
      * S=1024, 9152 "packets" derived from bytes is 9152*1024 bytes of
      * submitted application data, most of it still in the TX ring. */
-    pr_info_ratelimited("tbtun: fec TX stall diag ack_bytes=%llu tx_bytes=%llu tx_pkts=%llu peer_pkts=%llu lead_pkts=%lld credit_pkts=%u credit_blocks=%u n=%u groups=%u frontier=%llu cur=%llu g=%u s=%u replay_q=%u replay_bytes=%u high=%d throttled=%llu age_us=%llu\n",
+    pr_info_ratelimited("tbtun: fec TX stall diag ack_bytes=%llu tx_bytes=%llu tx_pkts=%llu peer_pkts=%llu lead_pkts=%lld credit_pkts=%u credit_blocks=%u n=%u groups=%u hdr_n=%u hdr_m=%u want_m=%u peer_epoch=%llu cur_block=%llu base_pkt=%llu base_block=%llu credit_wait=%llu g=%u s=%u replay_q=%u replay_bytes=%u high=%d replay_throttled=%llu age_us=%llu\n",
                         READ_ONCE(st->tx_ack), READ_ONCE(st->tx_seq),
                         tx_pkts, peer_pkts,
                         (long long)(tx_pkts - peer_pkts), credit,
                         credit_blocks, n, groups,
                         READ_ONCE(tx->blk_n), READ_ONCE(tx->blk_m),
                         READ_ONCE(tx->want_m), READ_ONCE(tx->peer_epoch),
-                        frontier, READ_ONCE(tx->cur_block),
+                        READ_ONCE(tx->cur_block), base_pkt, base_block,
+                        atomic64_read(&sess->fec_credit_wait),
                         READ_ONCE(tx->last_group), READ_ONCE(tx->last_share),
                         rq, rb, READ_ONCE(sess->fec_replay_over_high),
                         atomic64_read(&sess->fec_replay_pass_throttled),

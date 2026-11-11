@@ -1260,38 +1260,20 @@ static inline u64 tbt_fec_block_of_seq(u64 seq, u16 groups, u16 k)
     return tbt_fec_block_of_seq_base(seq, 0, 0, groups, (u16)k);
 }
 
-/* The same gate over the fields the TX stall path can read under RCU. Both
- * the packetizer and tbt_tx.c's reset decision must use this one definition:
- * a mirror that still compared packet numbers would call a block-credit wait
- * a dead ACK path and reset a stream the receiver is still draining. */
-static inline bool tbt_fec_credit_waiting(u64 peer_pkts, u64 seq,
-                                          u32 credit, u64 base_pkt,
-                                          u64 base_block, u16 groups, u16 n)
+/* The TX credit gate, in absolute DATA packets.
+ *
+ * Only packets participate: the receiver buffers `credit` DATA packets
+ * ahead of its delivered packet frontier, and that is exact for full
+ * blocks, short blocks and every n/m change. Block ids are not comparable
+ * across a shape switch (base_pkt/base_block move), so a block gate can
+ * report a closed window while the packet lead is below credit. Replay and
+ * NACK use block ids; the sender does not.
+ */
+static inline bool tbt_fec_credit_waiting(u64 peer_pkts, u64 seq, u32 credit)
 {
-    u32 credit_blocks;
-    u64 frontier, blk;
-
-    if (!credit || !groups || !n)
+    if (!credit)
         return true;
-    /*
-     * Absolute packet invariant: the receiver buffers `credit` DATA
-     * packets ahead of the packet frontier, regardless of block cuts or a
-     * shape switch. The block gate below is relative to base_pkt, which is
-     * reset on every shape switch; using only that gate let a switch move
-     * the frontier back to zero and open another full window. O(1), exact,
-     * and independent of n/m changing mid-stream.
-     */
-    if (seq > peer_pkts && seq - peer_pkts >= credit)
-        return true;
-    credit_blocks = tbt_fec_credit_blocks(credit, groups, n);
-    if (peer_pkts < base_pkt)
-        peer_pkts = base_pkt;
-    if (seq < base_pkt)
-        seq = base_pkt;
-    frontier = tbt_fec_block_of_seq_base(peer_pkts, base_pkt, base_block,
-                                         groups, n);
-    blk = tbt_fec_block_of_seq_base(seq, base_pkt, base_block, groups, n);
-    return !tbt_fec_credit_block_ok(blk, frontier, credit_blocks);
+    return seq > peer_pkts && seq - peer_pkts >= credit;
 }
 
 /* A stream owns a subset of the session's physical groups. `mask` is the
