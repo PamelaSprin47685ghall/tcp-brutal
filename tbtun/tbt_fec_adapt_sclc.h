@@ -7,12 +7,13 @@
  * There is no rate ladder. One controller instance owns one direction. It
  * turns per-block repair evidence into a target number of parity shares m:
  *
- *     m* = clamp(round(q + delta + burst), m_min, m_max)
+ *     m* = min{ m' buildable : m' >= q + delta(n') + burst + backup }
  *
  *     q      Robbins-Monro estimate of Q_{1-eps}(E), the DATA shares a block
  *            still misses when it first crosses the decode wake line;
- *     delta  analytic margin from the BEC density evolution plus a slow
- *            online correction from the observed surplus S = T - real;
+ *     delta  base(n) + delta_off: the BEC density-evolution margin at the
+ *            candidate n (plus the finite-length term downlink) and the
+ *            online surplus correction S = T - real;
  *     burst  fast feedforward above a slow mean of E (not above q, which a
  *            short burst never reaches), or the physical
  *            ceil((1 - alive/carriers) * n) term when a carrier is dead.
@@ -21,7 +22,9 @@
  *
  * eps is not a constant: the marginal trade-off between one more parity
  * share and one more failed block sets eps ~ sigma / ((n+m)(1+w)), clamped
- * to [1/(n+m), 5%]. sigma is an EWMA of |E-q|, at least one share.
+ * to [1/(n+m), 5%]. sigma is an EWMA of |E - slow mean(E)|, at least one
+ * share; measuring around q would inflate the scale when the cold seed is
+ * deliberately conservative.
  *
  * The output is mapped onto the splits the codec can build. The downlink
  * builds every n in 1..192 of its 256 shares; the uplink builds the set
@@ -308,8 +311,9 @@ struct tbt_fec_adapt_sclc_out
     u16 backup;      /* safety shares currently added */
     u8 reason;
     u8 frozen;
-    u16 m_req;       /* round(q_act + delta + burst) + backup, before the
-                      * clamp and the buildable mapping */
+    u16 m_req;       /* round(q_act + delta + burst) + backup at the chosen
+                      * n; m_target is never below min(m_req, m_max) */
+    int delta_off_q16; /* the integrated surplus offset, delta - delta0 */
 };
 
 /* One controller per direction. Zeroing is not enough; call init. */
@@ -340,7 +344,7 @@ struct tbt_fec_adapt_sclc_ctl
     u32 q_act_q16;  /* low-passed q used by the output */
     u32 delta_q16;
     u32 delta0_q16; /* analytic margin at the current n, clamp reference */
-    int delta_off_q16; /* delta_q16 - delta0_q16, diagnostic only */
+    int delta_off_q16; /* the only integrated state; delta = base + off */
     u32 eps_q16;
     u32 sigma_q16;
     u32 ewma_fast_q16; /* alpha 1/4, per block */
@@ -364,12 +368,12 @@ struct tbt_fec_adapt_sclc_ctl
  * samples cannot estimate a quantile below 1/16. delta0 is recomputed from
  * the current n on every tick: the density-evolution margin plus the
  * finite-length term downlink, the conservative core bound uplink. The
- * integrated total is preserved when delta0 moves: delta0 sets the clamp
- * window, not a feedforward step, so the steep uplink core-bound slope
- * cannot drive m to its ceiling by itself. The downlink clamp is
- * [delta0/2, delta0+8], the uplink clamp is [1, delta0+8] so the surplus
- * can walk the conservative core bound down to the rank bound. Returns 0,
- * or -1 when the geometry, margin or split is invalid. */
+ * online offset is the only integrated state, and the output is the least
+ * buildable m whose own n satisfies m >= q_act + base(n) + off + burst +
+ * backup; a change of n therefore carries the analytic margin into m. The
+ * offset is clamped to [delta_lo(n), 8] so the total stays at least one
+ * share uplink and base/2 downlink. Returns 0, or -1 when the geometry,
+ * margin or split is invalid. */
 int tbt_fec_adapt_sclc_init(struct tbt_fec_adapt_sclc_ctl *c, u16 shares,
                             u16 groups, u16 extra, u16 n_init, u8 variant);
 

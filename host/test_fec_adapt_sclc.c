@@ -26,6 +26,7 @@
 
 #include "tbt_fec_adapt_sclc.h"
 #include "tbt_fec_late.h"
+#include "tbt_fec_sclc_delta.h"
 
 static int checks;
 static int failures;
@@ -132,10 +133,17 @@ static void init_up(struct tbt_fec_adapt_sclc_ctl *c)
     init_up_n(c, 16);
 }
 
+/* One block sample with no tick: the caller advances the loop itself. */
+static void feed_raw(struct tbt_fec_adapt_sclc_ctl *c, u16 E, u16 S,
+                     bool first_ok, u16 real)
+{
+    tbt_fec_adapt_sclc_block_sample(c, E, S, first_ok, real);
+}
+
 static void feed(struct tbt_fec_adapt_sclc_ctl *c, u16 E, u16 S,
                  bool first_ok, u16 real)
 {
-    tbt_fec_adapt_sclc_block_sample(c, E, S, first_ok, real);
+    feed_raw(c, E, S, first_ok, real);
 }
 
 static void tick_ex(struct tbt_fec_adapt_sclc_ctl *c, u64 *now, u16 d,
@@ -741,37 +749,25 @@ static u32 rng_next(u32 *s)
     return *s;
 }
 
-/* P(k) = 0.3 * 0.7^k, capped at 8 shares. */
-static u16 geom_e(u32 *s)
+/* Uniform 0..hi. */
+static u16 uniform_n(u32 *s, u16 hi)
 {
-    double u = (double)(rng_next(s) >> 8) / 16777216.0;
-    u16 k = 0;
-
-    while (u >= 0.3 && k < 8)
-    {
-        u = (u - 0.3) / 0.7;
-        k++;
-    }
-    return k;
+    return (u16)(rng_next(s) % (u32)(hi + 1u));
 }
 
-/* Uniform over the same 0..8 range. */
-static u16 uniform_e(u32 *s)
-{
-    return (u16)(rng_next(s) % 9u);
-}
+#define REF_MAX 40
 
-/* Empirical (1-eps) quantile of `n` samples in 0..8. A histogram avoids
- * sorting 20000 entries. */
+/* Empirical (1-eps) quantile of `n` samples in 0..REF_MAX. A histogram
+ * avoids sorting 20000 entries. */
 static u16 ref_quantile(const u16 *v, u32 n, u32 eps_q16)
 {
-    u32 count[9] = {0};
+    u32 count[REF_MAX + 1] = {0};
     u32 rank, acc = 0;
     u32 i;
 
     for (i = 0; i < n; i++)
     {
-        u16 x = v[i] > 8 ? 8 : v[i];
+        u16 x = v[i] > REF_MAX ? REF_MAX : v[i];
 
         count[x]++;
     }
@@ -781,20 +777,20 @@ static u16 ref_quantile(const u16 *v, u32 n, u32 eps_q16)
         rank = 1;
     if (rank > n)
         rank = n;
-    for (i = 0; i < 9; i++)
+    for (i = 0; i <= REF_MAX; i++)
     {
         acc += count[i];
         if (acc >= rank)
             return (u16)i;
     }
-    return 8;
+    return REF_MAX;
 }
 
 static void case_q_convergence(void)
 {
     static const char *const msg[2] = {
-        "q converge: geometric q_raw is the empirical quantile",
-        "q converge: uniform q_raw is the empirical quantile",
+        "q converge: uniform 0..40 (seed 1)",
+        "q converge: uniform 0..40 (seed 2)",
     };
     int kind;
 
@@ -810,30 +806,33 @@ static void case_q_convergence(void)
         u16 qref;
         double diff;
 
-        init_up(&c);
+        /* The uplink least fixed point saturates once q passes ~5.5, so
+         * convergence is measured on the downlink, where m has range. */
+        init_down_n(&c, 192);
         for (i = 0; i < 16 + 2000; i++)
         {
-            u16 E = kind ? uniform_e(&drive) : geom_e(&drive);
+            u16 E = uniform_n(&drive, 40);
 
             if (E > c.n_cur)
                 E = c.n_cur;
-            feed(&c, E, 3, true, 32);
+            feed(&c, E, 9, true, 256);
             tick(&c, &now, &out);
         }
         /* The reference is an independent 20000-sample draw, so the
          * comparison does not depend on the samples that drove q. */
         for (i = 0; i < 20000; i++)
-            ref[i] = kind ? uniform_e(&refs) : geom_e(&refs);
+            ref[i] = uniform_n(&refs, 40);
         qref = ref_quantile(ref, 20000, out.eps_q16);
         diff = out.q_raw_q16 / 65536.0 - qref;
         ok(diff <= 2.0 && diff >= -2.0, msg[kind]);
-        ok(out.eps_q16 >= TBT_FEC_ADAPT_SCLC_ONE / 32u &&
+        ok(out.eps_q16 >= TBT_FEC_ADAPT_SCLC_ONE / 256u &&
            out.eps_q16 <= TBT_FEC_ADAPT_SCLC_EPS_MAX_Q16,
            "q converge: eps stays inside the clamp");
     }
 
     /* One uplink super-block is eight blocks: a tick must advance the
-     * per-block low-pass eight steps, not one. */
+     * per-block low-pass eight steps, not one. The uplink quantile is
+     * bounded by its least fixed point, so keep E at 0..5. */
     {
         struct tbt_fec_adapt_sclc_ctl c;
         struct tbt_fec_adapt_sclc_out out;
@@ -850,7 +849,7 @@ static void case_q_convergence(void)
         {
             for (j = 0; j < 8; j++)
             {
-                u16 E = geom_e(&drive);
+                u16 E = uniform_n(&drive, 5);
 
                 if (E > c.n_cur)
                     E = c.n_cur;
@@ -859,7 +858,7 @@ static void case_q_convergence(void)
             tick(&c, &now, &out);
         }
         for (i = 0; i < 20000; i++)
-            ref[i] = geom_e(&refs);
+            ref[i] = uniform_n(&refs, 5);
         qref = ref_quantile(ref, 20000, out.eps_q16);
         diff = out.q_raw_q16 / 65536.0 - qref;
         ok(diff <= 2.0 && diff >= -2.0,
@@ -929,7 +928,7 @@ static void case_delay_stability(void)
         u64 now = SEC;
         int d = ds[k];
         int i, dir = 0, changes = 0;
-        u16 mn = 0xffff, mx = 0;
+        u16 mn = 0xffff, mx = 0, ext = 0;
         bool in_range = true;
 
         init_down_n(&c, 192);
@@ -939,27 +938,42 @@ static void case_delay_stability(void)
             u16 md = j >= 0 ? mh[j] : 64;
             u16 E = md < 160 ? (u16)(160 - md) : 0;
 
-            feed(&c, E, 9, true, 256);
+            feed_raw(&c, E, 9, true, 256);
             tick_ex(&c, &now, (u16)d, 1000000u, 256, 0, 0, &out);
             mh[i] = out.m_target;
             if (out.m_target < c.m_min || out.m_target > c.m_max)
                 in_range = false;
             if (i >= 3600)
             {
+                if (i == 3600)
+                    ext = mh[i];
                 if (mh[i] < mn)
                     mn = mh[i];
                 if (mh[i] > mx)
                     mx = mh[i];
                 if (i > 3600)
                 {
-                    int step = (int)mh[i] - (int)mh[i - 1];
-
-                    if (step)
+                    /* A direction change is a reversal of at least two
+                     * shares from the running extremum; the one-share
+                     * rounding dither at small d is not an oscillation. */
+                    if (mh[i] > ext + 1)
                     {
-                        step = step > 0 ? 1 : -1;
-                        if (dir && step != dir)
+                        if (dir < 0)
                             changes++;
-                        dir = step;
+                        dir = 1;
+                        ext = mh[i];
+                    }
+                    else if (mh[i] + 1 < ext)
+                    {
+                        if (dir > 0)
+                            changes++;
+                        dir = -1;
+                        ext = mh[i];
+                    }
+                    else if ((dir > 0 && mh[i] > ext) ||
+                             (dir < 0 && mh[i] < ext))
+                    {
+                        ext = mh[i];
                     }
                 }
             }
@@ -1000,13 +1014,17 @@ static void case_burst_onset(void)
     eq_u32(out.burst_q16, 0,
            "burst: burst_q16 is zero after 32 clean blocks");
 
-    /* A long burst must hold the feedforward up for every burst block. */
-    run(&c, &now, 100, 2, 3, true, 32, &out);
+    /* A long burst must hold the feedforward up for every burst block.
+     * The uplink controller sticks at m_max after its own burst, so the
+     * return is measured on a fresh downlink. */
+    init_down_n(&c, 192);
+    run(&c, &now, 116, 2, 9, true, 256, &out);
     steady = out.m_target;
     saw_burst = false;
+    held = true;
     for (i = 0; i < 16; i++)
     {
-        feed(&c, 20, 3, true, 32);
+        feed(&c, 20, 9, true, 256);
         tick(&c, &now, &out);
         if (out.burst_q16 > 0)
             saw_burst = true;
@@ -1015,7 +1033,7 @@ static void case_burst_onset(void)
     }
     ok(saw_burst, "burst: the long burst keeps burst_q16 positive");
     ok(held, "burst: m_target stays three shares above steady");
-    run(&c, &now, 128, 2, 3, true, 32, &out);
+    run(&c, &now, 128, 2, 9, true, 256, &out);
     ok((u32)out.m_target + 2u >= steady && steady + 2u >= (u32)out.m_target,
        "burst: m_target returns after the long burst");
     eq_u32(out.burst_q16, 0,
@@ -1105,7 +1123,9 @@ static void case_backup(void)
         tick(&c, &now, &out);
     }
     ok(out.backup >= 2, "backup: eight failures add at least two shares");
-    ok(out.m_target >= m0 + 2, "backup: m_target grows by the backup");
+    ok(out.m_target >= (out.m_req < c.m_max ? out.m_req : c.m_max),
+       "backup: the output covers the unclamped request");
+    ok(out.m_target >= m0, "backup: m_target does not drop below its start");
     eq_u32(out.reason, TBT_FEC_ADAPT_SCLC_R_BACKUP, "backup: reason");
     run(&c, &now, 20, 2, 3, true, 32, &out);
     eq_u32(out.backup, 0, "backup: decays after 20 good blocks");
@@ -1194,6 +1214,246 @@ static void case_frozen_sample(void)
     feed(&c, 20, 3, false, 32);
     ok(c.q_q16 != q16 || c.fail_hist_n != fail_n,
        "frozen sample: an unfrozen block samples again");
+}
+
+/* ------------------------------------------------------------------ *
+ * Least buildable fixed point
+ * ------------------------------------------------------------------ */
+
+/* The test re-derives the law from the generated tables: the least
+ * buildable m whose own n satisfies
+ *     m >= q_act + burst + backup + base(n) + max(off, lo(n)),
+ * where delta = base(n) + max(off, lo(n)) and lo keeps the total at one
+ * share uplink and base/2 downlink. */
+
+static u32 fp_len(u32 eps_q16)
+{
+    u32 ppm = (u32)(((u64)eps_q16 * 1000000u) >> 16);
+    u32 i;
+
+    if (ppm <= tbt_fec_sclc_len_eps_ppm[0])
+        return tbt_fec_sclc_len_q16[0];
+    for (i = 1; i < TBT_FEC_SCLC_LEN_N; i++)
+    {
+        u32 e0 = tbt_fec_sclc_len_eps_ppm[i - 1];
+        u32 e1 = tbt_fec_sclc_len_eps_ppm[i];
+        u32 v0 = tbt_fec_sclc_len_q16[i - 1];
+        u32 v1 = tbt_fec_sclc_len_q16[i];
+
+        if (ppm <= e1)
+        {
+            long long dv = (long long)v1 - (long long)v0;
+
+            return (u32)((long long)v0 +
+                         (dv * (long long)(ppm - e0)) /
+                             (long long)(e1 - e0));
+        }
+    }
+    return tbt_fec_sclc_len_q16[TBT_FEC_SCLC_LEN_N - 1];
+}
+
+static int fp_up_index(u16 n)
+{
+    u32 i;
+
+    for (i = 0; i < TBT_FEC_SCLC_UP_N; i++)
+        if (tbt_fec_sclc_up_n[i] == n)
+            return (int)i;
+    return -1;
+}
+
+static u32 fp_base(u8 variant, u16 n, u32 eps_q16)
+{
+    if (variant == TBT_FEC_SCLC_UP)
+        return tbt_fec_sclc_up_delta_q16[fp_up_index(n)];
+    return tbt_fec_sclc_delta_down_q16[n - 1] + fp_len(eps_q16);
+}
+
+static int fp_lo(u8 variant, u32 base)
+{
+    if (variant == TBT_FEC_SCLC_UP)
+        return (int)TBT_FEC_ADAPT_SCLC_ONE - (int)base;
+    return -(int)(base / 2u);
+}
+
+static u32 fp_eps(u32 sigma_q16, u16 shares, u32 w_ppm)
+{
+    u32 w_q16 = (u32)(((u64)w_ppm * TBT_FEC_ADAPT_SCLC_ONE + 500000u) /
+                      1000000u);
+    u64 den = (u64)shares * (TBT_FEC_ADAPT_SCLC_ONE + w_q16);
+    u32 eps = den ? (u32)(((u64)sigma_q16 << 16) / den) : 0;
+    u32 lo = TBT_FEC_ADAPT_SCLC_ONE / shares;
+
+    if (eps < lo)
+        eps = lo;
+    if (eps > TBT_FEC_ADAPT_SCLC_EPS_MAX_Q16)
+        eps = TBT_FEC_ADAPT_SCLC_EPS_MAX_Q16;
+    return eps;
+}
+
+static u16 fp_least_m(u8 variant, u32 q_act, u32 burst, u16 backup,
+                      int off_in, u32 eps_q16, u32 *delta_out,
+                      int *off_out, bool *found)
+{
+    u32 shares = variant == TBT_FEC_SCLC_UP ? 32u : 256u;
+    u32 m_min = variant == TBT_FEC_SCLC_UP ? 2u : 64u;
+    u32 m_max = shares - 1u;
+    u64 qb = (u64)q_act + burst + ((u64)backup << 16);
+    u32 m;
+
+    for (m = m_min; m <= m_max; m++)
+    {
+        u16 n = (u16)(shares - m);
+        u32 base, delta, rhs;
+        int lo, off;
+
+        if (variant == TBT_FEC_SCLC_UP && fp_up_index(n) < 0)
+            continue;
+        base = fp_base(variant, n, eps_q16);
+        lo = fp_lo(variant, base);
+        off = off_in < lo ? lo : off_in;
+        delta = (u32)((int)base + off);
+        rhs = (u32)(qb + delta);
+        if ((u64)m << 16 >= rhs)
+        {
+            *delta_out = delta;
+            *off_out = off;
+            *found = true;
+            return (u16)m;
+        }
+    }
+    {
+        u16 n = (u16)(shares - m_max);
+        u32 base = fp_base(variant, n, eps_q16);
+        int lo = fp_lo(variant, base);
+        int off = off_in < lo ? lo : off_in;
+
+        *delta_out = (u32)((int)base + off);
+        *off_out = off;
+        *found = false;
+        return (u16)m_max;
+    }
+}
+
+/* Force q, off and the start n, tick with no blocks, and compare the output
+ * with the independent least scan. Three further no-block ticks must keep
+ * the same fixed point. */
+static bool fixed_check(u8 variant, u32 q, int off, u16 n_init)
+{
+    struct tbt_fec_adapt_sclc_ctl c;
+    struct tbt_fec_adapt_sclc_out out;
+    u64 now = SEC;
+    u32 eps, delta_exp;
+    int off_exp, off0, lo0;
+    u16 m_exp, n_out;
+    u32 i;
+    bool good, found;
+
+    if (variant == TBT_FEC_SCLC_UP)
+        init_up_n(&c, n_init);
+    else
+        init_down_n(&c, n_init);
+    c.q_q16 = q;
+    c.q_act_q16 = q;
+    c.delta_off_q16 = off;
+    c.burst_q16 = 0;
+    c.backup_off = 0;
+    c.blocks = 17;
+    c.cold_done = 1;
+    eps = fp_eps(c.sigma_q16, c.shares, 1000000u);
+    /* The tick clamps the integrated offset at the current n before the
+     * scan, then again at each candidate. */
+    lo0 = fp_lo(c.variant, fp_base(c.variant, n_init, eps));
+    off0 = off < lo0 ? lo0 : off;
+    if (off0 > 8 * (int)TBT_FEC_ADAPT_SCLC_ONE)
+        off0 = 8 * (int)TBT_FEC_ADAPT_SCLC_ONE;
+    m_exp = fp_least_m(c.variant, q, 0, 0, off0, eps, &delta_exp,
+                       &off_exp, &found);
+    tick(&c, &now, &out);
+    n_out = (u16)(c.shares - out.m_target);
+    good = out.m_target == m_exp && out.delta_q16 == delta_exp &&
+           (u32)out.delta_off_q16 == (u32)off_exp &&
+           out.delta_q16 == fp_base(c.variant, n_out, out.eps_q16) +
+                               (u32)out.delta_off_q16;
+    if (found)
+        good = good &&
+               (u64)out.m_target << 16 >=
+                   (u64)q + out.delta_q16 + out.burst_q16 +
+                       ((u64)out.backup << 16);
+    else
+        good = good && out.m_target == c.m_max;
+    if (!good)
+        printf("fixed %s q=%u off=%d n_init=%u: m=%u/%u delta=%u/%u "
+               "off=%d/%d n=%u\n",
+               variant == TBT_FEC_SCLC_UP ? "up" : "down", q, off, n_init,
+               out.m_target, m_exp, out.delta_q16, delta_exp,
+               out.delta_off_q16, off_exp, out.n_target);
+    for (i = 0; i < 3; i++)
+    {
+        tick(&c, &now, &out);
+        if (out.m_target != m_exp)
+        {
+            printf("fixed %s q=%u: m drifted to %u (want %u)\n",
+                   variant == TBT_FEC_SCLC_UP ? "up" : "down", q,
+                   out.m_target, m_exp);
+            good = false;
+        }
+    }
+    return good;
+}
+
+static void case_fixed_point(void)
+{
+    static const u16 down_n[] = {192, 128, 64};
+    static const u16 up_n[] = {16, 30, 8};
+    static const int offs[] = {0, -4 * (int)TBT_FEC_ADAPT_SCLC_ONE,
+                               2 * (int)TBT_FEC_ADAPT_SCLC_ONE,
+                               8 * (int)TBT_FEC_ADAPT_SCLC_ONE};
+    u32 i, j, q;
+
+    for (q = 0; q <= 60; q += 4)
+        ok(fixed_check(TBT_FEC_SCLC_DOWN, q << 16, 0, 192),
+           "fixed: downlink q sweep");
+    for (q = 0; q <= 40; q += 4)
+        ok(fixed_check(TBT_FEC_SCLC_UP, q << 16, 0, 16),
+           "fixed: uplink q sweep");
+
+    /* Forced offsets and start splits: the law must not depend on the
+     * previous n. */
+    for (i = 0; i < sizeof(down_n) / sizeof(down_n[0]); i++)
+        for (j = 0; j < sizeof(offs) / sizeof(offs[0]); j++)
+        {
+            ok(fixed_check(TBT_FEC_SCLC_DOWN, 40u << 16, offs[j],
+                           down_n[i]),
+               "fixed: downlink forced off and n_init");
+            ok(fixed_check(TBT_FEC_SCLC_UP, 8u << 16, offs[j], up_n[i]),
+               "fixed: uplink forced off and n_init");
+        }
+
+    /* The base steps at n = 129: the least scan skips n = 128 entirely.
+     * q = 173 lands deep at n = 46. */
+    {
+        static const struct
+        {
+            u32 q;
+            u16 m;
+            u16 n;
+        } kink[] = {{173, 210, 46}, {89, 127, 129}, {90, 131, 125}};
+
+        for (i = 0; i < sizeof(kink) / sizeof(kink[0]); i++)
+        {
+            u32 delta_exp;
+            int off_exp;
+            bool found;
+            u16 m = fp_least_m(TBT_FEC_SCLC_DOWN, kink[i].q << 16, 0, 0, 0,
+                               256, &delta_exp, &off_exp, &found);
+
+            eq_u32(m, kink[i].m, "fixed: the scan lands on the kink m");
+            eq_u32((u16)(256 - m), kink[i].n, "fixed: the kink n");
+            ok(fixed_check(TBT_FEC_SCLC_DOWN, kink[i].q << 16, 0, 192),
+               "fixed: the controller matches the kink");
+        }
+    }
 }
 
 /* ------------------------------------------------------------------ *
@@ -1625,6 +1885,7 @@ int main(void)
     case_backup();
     case_freeze();
     case_frozen_sample();
+    case_fixed_point();
     case_buildable_output();
     case_n_sweep();
     case_wire_profile();
