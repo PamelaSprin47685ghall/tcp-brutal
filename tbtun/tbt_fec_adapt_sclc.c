@@ -40,22 +40,6 @@ static bool tbt_fec_adapt_sclc_up_has(u16 n)
     return false;
 }
 
-/* Largest constructible uplink n not above `max_n`. The list starts at 1, so
- * a max_n of 0 still returns 1. */
-static u16 tbt_fec_adapt_sclc_up_pick(u16 max_n)
-{
-    u16 best = tbt_fec_sclc_up_n[0];
-    u32 i;
-
-    for (i = 0; i < TBT_FEC_SCLC_UP_N; i++)
-    {
-        if (tbt_fec_sclc_up_n[i] > max_n)
-            break;
-        best = tbt_fec_sclc_up_n[i];
-    }
-    return best;
-}
-
 bool tbt_fec_adapt_sclc_buildable(u8 variant, u16 n, u16 m)
 {
     u16 shares = (u16)(n + m);
@@ -590,15 +574,6 @@ void tbt_fec_adapt_sclc_est_sample(const struct tbt_fec_adapt_sclc_est *e,
  * Continuous controller
  * ------------------------------------------------------------------ */
 
-static u32 tbt_fec_adapt_sclc_clamp_u32(u32 v, u32 lo, u32 hi)
-{
-    if (v < lo)
-        return lo;
-    if (v > hi)
-        return hi;
-    return v;
-}
-
 /* Analytic downlink margin at n: the density-evolution delta. The table is
  * generated from review/calib/sclc-de.csv. */
 static u32 tbt_fec_adapt_sclc_delta_down(u16 n)
@@ -726,27 +701,32 @@ static u32 tbt_fec_adapt_sclc_delta_base(const struct tbt_fec_adapt_sclc_ctl *c,
     return base;
 }
 
-/* Place the integrated delta `d` inside the current n's clamp. delta0 is the
- * analytic baseline for this n; the stored offset is only the difference
- * between the total and that baseline. A change of n therefore moves the
- * baseline and the clamp without feeding the baseline slope back into m
- * (the uplink core bound rises steeply as n falls). */
-static void tbt_fec_adapt_sclc_delta_apply(
-    struct tbt_fec_adapt_sclc_ctl *c, long long d)
+/* Lower bound of the online offset for a candidate base. The total
+ * delta = base + off stays at or above one share uplink and base/2
+ * downlink. */
+static int tbt_fec_adapt_sclc_delta_lo(u8 variant, u32 base)
+{
+    if (variant == TBT_FEC_SCLC_UP)
+        return (int)TBT_FEC_ADAPT_SCLC_ONE - (int)base;
+    return -(int)(base / 2u);
+}
+
+/* Clamp the integrated offset at the current n and derive delta. The offset
+ * is the only integrated state; delta0 is recomputed from n. */
+static void tbt_fec_adapt_sclc_delta_clamp(
+    struct tbt_fec_adapt_sclc_ctl *c)
 {
     u32 base = tbt_fec_adapt_sclc_delta_base(c, c->n_cur, c->eps_q16);
-    u32 lo = c->variant == TBT_FEC_SCLC_UP
-                 ? TBT_FEC_ADAPT_SCLC_ONE
-                 : base / 2u;
-    u32 hi = base + (8u << 16);
+    int lo = tbt_fec_adapt_sclc_delta_lo(c->variant, base);
+    int off = c->delta_off_q16;
 
-    if (d < (long long)lo)
-        d = lo;
-    if (d > (long long)hi)
-        d = hi;
+    if (off < lo)
+        off = lo;
+    if (off > (int)(8u << 16))
+        off = (int)(8u << 16);
     c->delta0_q16 = base;
-    c->delta_off_q16 = (int)(d - (long long)base);
-    c->delta_q16 = (u32)d;
+    c->delta_off_q16 = off;
+    c->delta_q16 = (u32)((int)base + off);
 }
 
 /* 128-bit first-failure history, newest bit in bit 0 of [0]. */
@@ -894,7 +874,9 @@ int tbt_fec_adapt_sclc_init(struct tbt_fec_adapt_sclc_ctl *c, u16 shares,
     c->sigma_q16 = 2u * TBT_FEC_ADAPT_SCLC_ONE;
     c->eps_q16 = tbt_fec_adapt_sclc_eps(c->sigma_q16, shares, c->w_ppm);
     delta0 = tbt_fec_adapt_sclc_delta_base(c, n_init, c->eps_q16);
-    tbt_fec_adapt_sclc_delta_apply(c, delta0);
+    c->delta0_q16 = delta0;
+    c->delta_off_q16 = 0;
+    tbt_fec_adapt_sclc_delta_clamp(c);
     if (m_init > (c->delta_q16 >> 16))
         c->q_q16 = (u32)(m_init - (c->delta_q16 >> 16)) << 16;
     else
@@ -995,8 +977,8 @@ void tbt_fec_adapt_sclc_block_sample(struct tbt_fec_adapt_sclc_ctl *c,
             err = -4;
         if (!(grow && c->sat_max) && !(!grow && c->sat_min))
         {
-            tbt_fec_adapt_sclc_delta_apply(
-                c, (long long)c->delta_q16 + (long long)err * 1024);
+            c->delta_off_q16 += err * 1024;
+            tbt_fec_adapt_sclc_delta_clamp(c);
         }
     }
 
@@ -1045,6 +1027,7 @@ static void tbt_fec_adapt_sclc_fill_out(
     out->eps_q16 = c->eps_q16;
     out->sigma_q16 = c->sigma_q16;
     out->backup = c->backup_off;
+    out->delta_off_q16 = c->delta_off_q16;
     out->reason = reason;
     out->frozen = c->frozen;
 }
@@ -1056,8 +1039,6 @@ void tbt_fec_adapt_sclc_tick(struct tbt_fec_adapt_sclc_ctl *c, u64 now_ns,
 {
     u32 total;
     u32 m_req;
-    u32 m_out;
-    u32 n_out;
     u16 k;
     u16 j;
 
@@ -1106,7 +1087,7 @@ void tbt_fec_adapt_sclc_tick(struct tbt_fec_adapt_sclc_ctl *c, u64 now_ns,
     {
         c->eps_q16 =
             tbt_fec_adapt_sclc_eps(c->sigma_q16, c->shares, c->w_ppm);
-        tbt_fec_adapt_sclc_delta_apply(c, c->delta_q16);
+        tbt_fec_adapt_sclc_delta_clamp(c);
         for (j = 0; j < k && j < 64u; j++)
         {
             int dq = (int)c->q_q16 - (int)c->q_act_q16;
@@ -1143,30 +1124,104 @@ void tbt_fec_adapt_sclc_tick(struct tbt_fec_adapt_sclc_ctl *c, u64 now_ns,
         }
     }
 
-    m_req = (u32)(((u64)c->q_act_q16 + c->delta_q16 + c->burst_q16 +
-                   32768u) >>
-                  16);
-    c->sat_max = (u32)(m_req + c->backup_off) > c->m_max ? 1 : 0;
-    c->sat_min = (u32)(m_req + c->backup_off) < c->m_min ? 1 : 0;
-    m_out = m_req + c->backup_off;
-    m_out = tbt_fec_adapt_sclc_clamp_u32(m_out, c->m_min, c->m_max);
-    if (c->variant == TBT_FEC_SCLC_DOWN)
     {
-        n_out = c->shares - m_out;
-        if (n_out < 1)
-            n_out = 1;
-        if (n_out > 192)
-            n_out = 192;
-    }
-    else
-    {
-        u32 max_n = c->shares > m_out ? c->shares - m_out : 1u;
+        /* Least fixed point: the smallest buildable m whose own n gives
+         * m >= q_act + base(n) + off + burst + backup. The base grows as n
+         * falls, so evaluating it at the candidate, not at the previous n,
+         * is what adds the analytic margin when n moves. */
+        u64 qb = (u64)c->q_act_q16 + c->burst_q16 +
+                 ((u64)c->backup_off << 16);
+        u32 best_m = 0, best_n = 0, best_base = 0, best_delta = 0;
+        u32 best_rhs = 0;
+        int best_off = 0;
 
-        n_out = tbt_fec_adapt_sclc_up_pick((u16)max_n);
+        if (c->variant == TBT_FEC_SCLC_DOWN)
+        {
+            u32 m;
+
+            for (m = c->m_min; m <= c->m_max; m++)
+            {
+                u32 n = (u32)c->shares - m;
+                u32 base = tbt_fec_adapt_sclc_delta_base(
+                    c, (u16)n, c->eps_q16);
+                int lo = tbt_fec_adapt_sclc_delta_lo(c->variant, base);
+                int off = c->delta_off_q16;
+                u32 delta;
+                u32 rhs;
+
+                if (off < lo)
+                    off = lo;
+                delta = (u32)((int)base + off);
+                rhs = (u32)(qb + delta);
+                if ((u64)m << 16 >= rhs)
+                {
+                    best_m = m;
+                    best_n = n;
+                    best_base = base;
+                    best_off = off;
+                    best_delta = delta;
+                    best_rhs = rhs;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            u32 i;
+
+            for (i = TBT_FEC_SCLC_UP_N; i-- > 0;)
+            {
+                u32 n = tbt_fec_sclc_up_n[i];
+                u32 m = (u32)c->shares - n;
+                u32 base = tbt_fec_adapt_sclc_delta_base(
+                    c, (u16)n, c->eps_q16);
+                int lo = tbt_fec_adapt_sclc_delta_lo(c->variant, base);
+                int off = c->delta_off_q16;
+                u32 delta;
+                u32 rhs;
+
+                if (off < lo)
+                    off = lo;
+                delta = (u32)((int)base + off);
+                rhs = (u32)(qb + delta);
+                if ((u64)m << 16 >= rhs)
+                {
+                    best_m = m;
+                    best_n = n;
+                    best_base = base;
+                    best_off = off;
+                    best_delta = delta;
+                    best_rhs = rhs;
+                    break;
+                }
+            }
+        }
+        if (!best_m)
+        {
+            int lo;
+            int off;
+
+            best_m = c->m_max;
+            best_n = (u32)c->shares - best_m;
+            best_base = tbt_fec_adapt_sclc_delta_base(
+                c, (u16)best_n, c->eps_q16);
+            lo = tbt_fec_adapt_sclc_delta_lo(c->variant, best_base);
+            off = c->delta_off_q16;
+            if (off < lo)
+                off = lo;
+            best_off = off;
+            best_delta = (u32)((int)best_base + off);
+            best_rhs = (u32)(qb + best_delta);
+        }
+        c->delta0_q16 = best_base;
+        c->delta_off_q16 = best_off;
+        c->delta_q16 = best_delta;
+        c->n_cur = (u16)best_n;
+        c->m_cur = (u16)best_m;
+        m_req = (best_rhs + 32768u) >> 16;
+        c->sat_max = best_m >= c->m_max ? 1 : 0;
+        c->sat_min = best_m <= c->m_min ? 1 : 0;
     }
-    m_out = c->shares - n_out;
-    c->n_cur = (u16)n_out;
-    c->m_cur = (u16)m_out;
     tbt_fec_adapt_sclc_fill_out(
         c, out,
         c->backup_hold
