@@ -180,6 +180,15 @@ static void release_blocks(void)
 
 static void clear_engine(void)
 {
+    while (e.car_list)
+    {
+        struct carrier *c = e.car_list;
+
+        e.car_list = c->next;
+        if (c->fd >= 0)
+            close(c->fd);
+        free(c);
+    }
     free(f.out);
     release_blocks();
     release_codecs();
@@ -1290,6 +1299,15 @@ static void test_adaptive_off(void)
     CHECK(e.npending == 0, "adaptive off: the live law queues nothing");
     CHECK(f.rx_n == 128 && f.rx_m == 128 && f.rx_shape_bad == 0,
           "adaptive off: the live law commits nothing");
+
+    /* A periodic report may carry P_VALID. It is not a directed flag, so it
+     * must not reopen the control law under adaptive=off. */
+    clear_pending();
+    CHECK(flow_send_fbk(&f, TBT_FEC_FBK_F_P_VALID, 1) == 0,
+          "adaptive off: a P_VALID report stays silent");
+    CHECK(e.npending == 0, "adaptive off: P_VALID queues nothing");
+    CHECK(f.rx_n == 128 && f.rx_m == 128 && f.rx_shape_bad == 0,
+          "adaptive off: P_VALID commits nothing");
 }
 
 /* nonce= on the client is the HELLO session nonce; an unset near generates
@@ -1423,6 +1441,81 @@ static void test_session_nonce_hello(void)
           "nonce hello: the accepted HELLO leaves the nonce intact");
 }
 
+/* Every accept allocates one carrier. A handshake that never completes must
+ * not accumulate them: close detaches, and the tick after the epoll batch
+ * reaps. */
+static void test_carrier_lifecycle(void)
+{
+    struct carrier *c;
+    int i;
+
+    clear_engine();
+    e.near = false;
+    for (i = 0; i < 64; i++)
+    {
+        c = carrier_new(&e, -1, -1, false);
+        CHECK(c != NULL, "carrier: accepted allocation");
+        if (!c)
+            return;
+        CHECK(e.car_live == 1, "carrier: one live before the close");
+        carrier_close(&e, c);
+        carrier_event(&e, c, EPOLLIN); /* a batch event may still name it */
+        CHECK(e.car_live == 1, "carrier: close defers the free past the batch");
+        engine_tick(&e);
+        CHECK(e.car_live == 0 && e.car_list == NULL,
+              "carrier: a failed handshake is reaped");
+    }
+}
+
+/* A HELLO that names an occupied index replaces the old carrier. The old
+ * buffer must be released while the new connection keeps the slot. */
+static void test_carrier_replace(void)
+{
+    struct carrier *old, *newc;
+    struct tbt_rec rec;
+    u8 body[TBT_HELLO_BODY_LEN_V6];
+    u8 nonce[16];
+    u16 i;
+
+    for (i = 0; i < 16; i++)
+        nonce[i] = (u8)(0x30 + i);
+    clear_engine();
+    e.near = false;
+    e.n_car = 1;
+    e.session_nonce_set = true;
+    memcpy(e.session_nonce, nonce, sizeof(nonce));
+    old = carrier_new(&e, -1, 0, false);
+    newc = carrier_new(&e, -1, -1, false);
+    CHECK(old != NULL && newc != NULL, "carrier: replacement allocations");
+    if (!old || !newc)
+        return;
+    e.car[0] = old;
+    old->hello_sent = true;
+    newc->hello_sent = true;
+    memset(&rec, 0, sizeof(rec));
+    rec.hdr.type = TBT_F_HELLO;
+    rec.hdr.path_id = 0;
+    rec.body_len = TBT_HELLO_BODY_LEN_V6;
+    rec.body = body;
+    make_hello(body, TBT_ROLE_NEAR, nonce, false, NULL, NULL);
+
+    CHECK(handle_hello(&e, newc, &rec) == 0,
+          "carrier: the replacement HELLO joins");
+    CHECK(e.car[0] == newc && newc->index == 0,
+          "carrier: the new connection owns the slot");
+    CHECK(old->dead && e.car_live == 2,
+          "carrier: the replaced connection is detached, not freed yet");
+    engine_tick(&e);
+    CHECK(e.car_live == 1,
+          "carrier: replacing an index frees the old carrier");
+    carrier_close(&e, newc);
+    CHECK(e.car[0] == NULL && e.car_live == 1,
+          "carrier: close detaches the slot before the free");
+    engine_tick(&e);
+    CHECK(e.car_live == 0 && e.car[0] == NULL,
+          "carrier: closing the replacement drains the far side");
+}
+
 /* The parser owns the length and format: 32 hex digits are the full value,
  * 16 pin the low 64 bits (the documented rule), and every other length is
  * refused rather than truncated. */
@@ -1543,6 +1636,8 @@ int main(void)
     test_session_nonce_config();
     test_session_nonce_hello();
     test_session_nonce_parse();
+    test_carrier_lifecycle();
+    test_carrier_replace();
     test_stall_dump();
     test_tx_idle_empty();
     test_tx_peer_credit();

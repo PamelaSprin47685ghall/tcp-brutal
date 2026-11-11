@@ -56,6 +56,9 @@
 #define TBT_RX_CODECS 4
 #define TBT_CAR_RBUF 65536
 #define TBT_CAR_WBUF 131072
+#define TBT_FEC_FBK_F_DIRECTED \
+    (TBT_FEC_FBK_F_CFG_ACK | TBT_FEC_FBK_F_CFG_NACK | \
+     TBT_FEC_FBK_F_SWITCH_DONE | TBT_FEC_FBK_F_ROLLBACK)
 #define TBT_APP_RBUF 65536
 #define TBT_OUT_CAP (64u * 1024 * 1024)
 #define TBT_CTL_PENDING 64
@@ -105,6 +108,9 @@ struct carrier
     bool hello_recv;
     bool up;
     bool dead;
+    bool retained;      /* engine_start_carriers keeps it across reconnects */
+    struct carrier *prev; /* engine->car_list, every allocation */
+    struct carrier *next;
     u64 connect_at_ns;
     u64 retry_at_ns;
     u64 last_rx_ns;
@@ -274,6 +280,8 @@ struct engine
     struct carrier *car[TBT_CAR_MAX];
     u16 up_count;
     struct flow *flow[TBT_FLOW_MAX];
+    struct carrier *car_list; /* every carrier, joined or not */
+    u32 car_live;
     u64 next_sid;
     u64 start_ns;
     u64 stop_at_ns;
@@ -839,6 +847,65 @@ static void carrier_close(struct engine *e, struct carrier *c)
     c->hello_sent = false;
     c->hello_recv = false;
     c->retry_at_ns = now_ns() + TBT_CONNECT_RETRY_NS;
+    if (!c->retained)
+    {
+        /* A far-side carrier owns one connection. Detach its slot now; the
+         * reaper frees it after the current epoll batch, so no event that
+         * was already copied out of the kernel can reach freed memory. */
+        if (c->index >= 0 && c->index < (int)e->n_car &&
+            e->car[c->index] == c)
+            e->car[c->index] = NULL;
+    }
+}
+
+static void carrier_unlink(struct engine *e, struct carrier *c)
+{
+    if (c->prev)
+        c->prev->next = c->next;
+    else if (e->car_list == c)
+        e->car_list = c->next;
+    if (c->next)
+        c->next->prev = c->prev;
+    c->prev = c->next = NULL;
+    if (e->car_live)
+        e->car_live--;
+}
+
+static struct carrier *carrier_new(struct engine *e, int fd, int index,
+                                   bool retained)
+{
+    struct carrier *c = calloc(1, sizeof(*c));
+
+    if (!c)
+        return NULL;
+    c->e = e;
+    c->fd = fd;
+    c->index = index;
+    c->retained = retained;
+    c->ep.kind = EP_CARRIER;
+    c->ep.p = c;
+    tbt_http_rx_new_message(&c->rx);
+    c->prev = NULL;
+    c->next = e->car_list;
+    if (e->car_list)
+        e->car_list->prev = c;
+    e->car_list = c;
+    e->car_live++;
+    return c;
+}
+
+static void carrier_free(struct engine *e, struct carrier *c)
+{
+    if (c->index >= 0 && c->index < (int)e->n_car && e->car[c->index] == c)
+        e->car[c->index] = NULL;
+    if (c->fd >= 0)
+    {
+        ep_del(e, c->fd);
+        close(c->fd);
+        c->fd = -1;
+    }
+    carrier_unlink(e, c);
+    free(c);
 }
 
 static void carrier_event(struct engine *e, struct carrier *c,
@@ -1420,9 +1487,9 @@ static int flow_send_fbk(struct flow *f, u8 flags, u32 epoch)
     memset(&fb, 0, sizeof(fb));
     tbt_fec_fbk_set_epoch(&fb, epoch);
     fb.flags = flags;
-    if (!flags && !e->cfg.cfg.adaptive)
+    if (!(flags & TBT_FEC_FBK_F_DIRECTED) && !e->cfg.cfg.adaptive)
         return 0;
-    if (f->ctl_ready && !flags)
+    if (f->ctl_ready && !(flags & TBT_FEC_FBK_F_DIRECTED))
     {
         u16 n_new;
 
@@ -3026,25 +3093,16 @@ static void engine_accept_carrier(struct engine *e)
             return;
         }
         set_carrier_sockopts(fd);
-        c = calloc(1, sizeof(*c));
+        c = carrier_new(e, fd, -1, false);
         if (!c)
         {
             close(fd);
             continue;
         }
-        c->e = e;
-        c->fd = fd;
-        c->index = -1;
         c->connected = true;
         c->connect_at_ns = now_ns();
-        c->ep.kind = EP_CARRIER;
-        c->ep.p = c;
-        tbt_http_rx_new_message(&c->rx);
         if (ep_add(e, fd, EPOLLIN | EPOLLRDHUP, &c->ep))
-        {
-            close(fd);
-            free(c);
-        }
+            carrier_free(e, c);
     }
 }
 
@@ -3067,6 +3125,21 @@ static void engine_tick(struct engine *e)
                 continue;
             if (carrier_connect(e, c))
                 carrier_close(e, c);
+        }
+    }
+    {
+        /* Free far-side carriers that ended since the last batch. A retained
+         * near carrier stays for its retry. Running this here, after the
+         * epoll batch, is what makes the free safe. */
+        struct carrier *c = e->car_list;
+
+        while (c)
+        {
+            struct carrier *next = c->next;
+
+            if (c->dead && !c->retained)
+                carrier_free(e, c);
+            c = next;
         }
     }
     if (e->stop_at_ns && now >= e->stop_at_ns)
@@ -3129,16 +3202,10 @@ static int engine_start_carriers(struct engine *e)
 
     for (i = 0; i < e->n_car; i++)
     {
-        struct carrier *c = calloc(1, sizeof(*c));
+        struct carrier *c = carrier_new(e, -1, i, true);
 
         if (!c)
             return -ENOMEM;
-        c->e = e;
-        c->fd = -1;
-        c->index = i;
-        c->ep.kind = EP_CARRIER;
-        c->ep.p = c;
-        tbt_http_rx_new_message(&c->rx);
         e->car[i] = c;
         if (carrier_connect(e, c))
             carrier_close(e, c);
@@ -3153,19 +3220,11 @@ static void engine_cleanup(struct engine *e)
     for (i = 0; i < TBT_FLOW_MAX; i++)
         if (e->flow[i])
             flow_free(e, e->flow[i]);
-    for (i = 0; i < TBT_CAR_MAX; i++)
+    while (e->car_list)
     {
-        struct carrier *c = e->car[i];
+        struct carrier *c = e->car_list;
 
-        if (!c)
-            continue;
-        if (c->fd >= 0)
-        {
-            ep_del(e, c->fd);
-            close(c->fd);
-        }
-        free(c);
-        e->car[i] = NULL;
+        carrier_free(e, c);
     }
     if (e->listen_fd >= 0)
     {

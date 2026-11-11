@@ -104,6 +104,16 @@ and moves independently of the module version.
   wrong-nonce poison case, a directed CFG_ACK under `adaptive=off` with a live
   control law, eight old-split blocks held in the reorder window across a
   split change, and the nonce length, adoption and HELLO-offset rules.
+- Far-side carrier buffers no longer leak. Every accepted connection is
+  tracked in the engine's carrier list; `carrier_close()` detaches the slot,
+  and the tick after the epoll batch frees every non-retained dead carrier.
+  A handshake that never completes and a HELLO that replaces an occupied index
+  both release the ~192 KiB object (`rbuf` + `wbuf`), while a near carrier
+  stays retained for its reconnect. `host/test_client_rx` runs 64 failed
+  handshakes and a slot replacement, and the sanitizer build reports no leak.
+- `adaptive=off` decides "directed" from the CFG ACK/NACK/SWITCH_DONE/
+  ROLLBACK mask instead of "any nonzero flag", so a periodic FBK that carries
+  `P_VALID` cannot reopen the control law. `host/test_client_rx` pins it.
 - The ACK credit is now counted in shares (`groups*(n+m)` per block), not
   DATA packets; it supersedes the 0.8.0 packet-credit model. The cap is
   16384 shares (64 blocks x 256); the host formula is
