@@ -35,6 +35,8 @@ probes, all through the operator surface only (`echo` into `/proc/net/tbtun/*`):
 | O | the T5.2 smoke's shape (`profile=http-kal`, `n=1 m=1`, `carriers=2`, `fec=on`, `mode=grouped`) with `crypto=off`, with `crypto=on`, with carrier 0 taken down mid-transfer, and with a 700 ms loopback delay that makes a dial outlive one `kernel_connect` wait window |
 | Q | the HND0 hang shape: 256 carriers plus `host/tbt_flood` connections that never complete HELLO, with carrier-down waves. The far's provisional peak must stay at its cap (`n + n/4`), the list must drain, userspace must keep running, and a legitimate replacement must still join |
 | R | link-flap-then-replace: every carrier's near->far egress is blackholed with netem, so the near declares the carriers lost and dials newer generations while the far (long `carrier_stall_ms`, no RETIRE received) still holds the old sockets ESTABLISHED. The replacement's HELLO must supersede the live slot (`join_dup` stays 0, the far's own `lost` stays 0) and the burst comes back byte-exact |
+| T | the deployed pair in one guest: userspace `tbt_client` near in front of the kernel far. A second OPEN while the far's one flow is live is refused with RST on the ingress path and resets the application in under 3 s; after the held stream closes the far releases the flow and accepts the next connection |
+| U | near-client restart inside the far's 2 s tombstone window: no startup delay, the new incarnation's first 64 KiB echo is byte-exact, the far retires the previous tombstone, and no `dropped OPEN for tombstoned sid` warning fires |
 
 G retries its whole window up to three times when the injector happened to drop
 nothing, and skips with `no loss observed in 3 windows` rather than failing for

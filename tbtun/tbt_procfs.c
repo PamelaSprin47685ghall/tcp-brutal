@@ -913,6 +913,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "join_dup=%llu join_bad=%llu join_nonce_reject=%llu "
                               "join_src_reject=%llu "
                               "hello_tag_reject=%llu crypto_reincarnations=%llu "
+                              "tombstones_reincarnated=%llu "
                               "fbk_tx=%llu fbk_rx=%llu "
                               "retx_frames=%llu retx_bytes=%llu retain_drop=%llu "
                               "retx_hole=%llu retx_slow=%llu retx_pathloss=%llu "
@@ -966,6 +967,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->join_src_reject),
                            tbt_stat_read(&s->hello_tag_reject),
                            tbt_stat_read(&s->crypto_reincarnations),
+                           tbt_stat_read(&s->tombstones_reincarnated),
                            READ_ONCE(s->fbk_tx),
                            tbt_stat_read(&s->fbk_rx), READ_ONCE(s->retx_frames),
                            READ_ONCE(s->retx_bytes), READ_ONCE(s->retain_drop),

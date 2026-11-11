@@ -51,6 +51,11 @@
 #      answered with RST on the ingress path and reset the application in
 #      under 3 s; after the held stream closes the far must release the flow
 #      and accept the next connection.
+#   U. the restart defect: after a first stream closes and leaves a far-side
+#      tombstone, the userspace near is killed and restarted with no sleep.
+#      The new incarnation's first 64 KiB echo must be byte-exact, the far
+#      must accept the new HELLO generation, retire the old tombstone, and
+#      emit no "dropped OPEN for tombstoned sid" warning.
 # J and K are byte-exactness probes under carrier-TCP loss; they need no
 # placeholder frame, because the sender repairs holes from the replay ring.
 #
@@ -2281,6 +2286,122 @@ probe_t() {
     echo "== probe T: pass"
 }
 
+# --- probe U: near restart inside the far's tombstone window ----------------
+# Before this fix the client started its sid allocator at the fixed value 1.
+# Restarting it inside TBT_TOMBSTONE_MS made the far treat the new stream's
+# OPEN as a duplicate of the dead one and drop it; mihomo's first request then
+# waited for its own timeout. The fix is two-sided: the client derives its
+# first sid from its incarnation, and the far retires previous-incarnation
+# tombstones when the authenticated new HELLO arrives. This probe runs the
+# deployed pair and restarts the near with no startup delay.
+probe_u() {
+    echo "== probe U: userspace near restart inside the tombstone window"
+    if [ ! -x /bin/tbt_client ]; then
+        fail "probe U: no /bin/tbt_client (tests/qemu/run.sh --bin host/tbt_client)"
+    fi
+    flush_and_wait
+    restart_echo
+    echo 'ports 41024-41535' > "$PORTS" || fail "probe U: ports directive rejected"
+    _ukey=000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=128 m=128 w=256 L=8 fec=on mode=sc-ldpc carriers=256 crypto=on crypto_key=$_ukey adaptive=off keepalive=5000" \
+        > "$CFG" || fail "probe U: far tunnel rejected"
+
+    _u_start() {
+        /bin/tbt_client role=near listen=127.0.0.1:"$PUB_PORT" \
+            peer=127.0.0.1:"$CAR_PORT" target=127.0.0.1:"$TARGET_PORT2" \
+            n=8 m=24 w=64 L=8 fec=on mode=sc-ldpc carriers=256 crypto=on \
+            crypto_key="$_ukey" adaptive=off verbose=0 \
+            >> /tmp/tbt_client_u.log 2>&1 &
+        _tpid=$!
+    }
+    # $1 is the minimum crypto_reincarnations value that proves this HELLO
+    # generation was accepted. `up` alone is stale for a moment after the
+    # old client is killed: the far has not yet reaped its carriers.
+    _u_wait_up() {
+        _want_reinc=${1:-0}
+        _i=0
+        while [ "$_i" -lt 120 ]; do
+            [ "$(tunnel_stat 1 crypto_reincarnations)" -ge "$_want_reinc" ] &&
+                [ "$(tunnel_stat 1 up)" = 256 ] && return 0
+            kill -0 "$_tpid" 2> /dev/null || return 1
+            sleep 0.25
+            _i=$((_i + 1))
+        done
+        return 1
+    }
+
+    _u_start
+    _u_wait_up 0 ||
+        fail "probe U: the far did not bring up 256 carriers on the first incarnation (up=$(tunnel_stat 1 up))"
+    probe_ping_bounded "probe U first" 65536 15 ||
+        fail "probe U: the first incarnation's 64 KiB echo failed"
+
+    # tbt_stream_detach_from_session() stamps the tombstone when the stream
+    # leaves the session; wait for exactly that state before killing the
+    # client, so the restart lands inside the 2 s window.
+    _i=0
+    _left=-1
+    _nstream=-1
+    while [ "$_i" -lt 80 ]; do
+        _left=$(tunnel_stat 1 streams_active)
+        _nstream=$(tunnel_stat 1 n_streams)
+        case "$_left" in '' | *[!0-9]*) _left=-1 ;; esac
+        case "$_nstream" in '' | *[!0-9]*) _nstream=-1 ;; esac
+        [ "$_left" -eq 0 ] && [ "$_nstream" -ge 1 ] && break
+        sleep 0.1
+        _i=$((_i + 1))
+    done
+    [ "$_left" -eq 0 ] && [ "$_nstream" -ge 1 ] ||
+        fail "probe U: no stream tombstone before the restart (active=$_left n_streams=$_nstream)"
+
+    _reinc0=$(tunnel_stat 1 crypto_reincarnations)
+    _tomb0=$(tunnel_stat 1 tombstones_reincarnated)
+    dmesg -c > /dev/null 2>&1 || true
+    _drops0=$(dmesg 2> /dev/null | grep -c 'dropped OPEN for tombstoned sid' || true)
+    _t0=$(cut -d' ' -f1 /proc/uptime)
+    kill "$_tpid" 2> /dev/null
+    wait "$_tpid" 2> /dev/null
+    _u_start
+    _i=0
+    while [ "$_i" -lt 80 ]; do
+        [ "$(tunnel_stat 1 crypto_reincarnations)" -gt "${_reinc0:-0}" ] && break
+        kill -0 "$_tpid" 2> /dev/null || break
+        sleep 0.1
+        _i=$((_i + 1))
+    done
+    _treinc=$(cut -d' ' -f1 /proc/uptime)
+    _reincms=$(awk -v a="$_t0" -v b="$_treinc" 'BEGIN { printf "%.0f", (b - a) * 1000 }')
+    [ "${_reincms:-9999}" -lt 2000 ] ||
+        fail "probe U: the new incarnation was accepted after ${_reincms}ms, expected under TBT_TOMBSTONE_MS"
+    _u_wait_up $((_reinc0 + 1)) ||
+        fail "probe U: the restarted client did not bring up 256 carriers (up=$(tunnel_stat 1 up))"
+    _tup=$(cut -d' ' -f1 /proc/uptime)
+    probe_ping_bounded "probe U restarted" 65536 15 ||
+        fail "probe U: the restarted incarnation's first 64 KiB echo failed"
+    _t1=$(cut -d' ' -f1 /proc/uptime)
+    _ums=$(awk -v a="$_t0" -v b="$_t1" 'BEGIN { printf "%.0f", (b - a) * 1000 }')
+    _upms=$(awk -v a="$_t0" -v b="$_tup" 'BEGIN { printf "%.0f", (b - a) * 1000 }')
+
+    _reinc1=$(tunnel_stat 1 crypto_reincarnations)
+    _tomb1=$(tunnel_stat 1 tombstones_reincarnated)
+    _drops1=$(dmesg 2> /dev/null | grep -c 'dropped OPEN for tombstoned sid' || true)
+    echo "   restart-to-reincarnation=${_reincms}ms restart-to-carriers-up=${_upms}ms restart-to-first-echo=${_ums}ms reincarnations=$_reinc0->$_reinc1 tombstones_retired=$_tomb0->$_tomb1 tombstone_warnings=$_drops0->$_drops1"
+    [ "${_reinc1:-0}" -gt "${_reinc0:-0}" ] ||
+        fail "probe U: the far did not accept a new HELLO generation (reincarnations=$_reinc1)"
+    [ "${_tomb1:-0}" -gt "${_tomb0:-0}" ] ||
+        fail "probe U: the far did not retire the previous incarnation's tombstone (tombstones_reincarnated=$_tomb1)"
+    [ "${_drops1:-0}" -eq "${_drops0:-0}" ] ||
+        fail "probe U: a dropped-OPEN-for-tombstoned-sid warning fired on restart"
+    kill "$_tpid" 2> /dev/null
+    wait "$_tpid" 2> /dev/null
+    echo "   client tail:"; tail -n 5 /tmp/tbt_client_u.log 2> /dev/null
+    # The killed client's 256 carriers log their loss on the way out. Let the
+    # far reap them behind a flush so the probe-result marker is not split by
+    # interleaved kernel lines.
+    flush_and_wait
+    echo "== probe U: pass"
+}
+
 # --- run the selected probes ------------------------------------------------
 want A && run_probe A
 if want A; then
@@ -2310,6 +2431,7 @@ want Q && run_probe Q
 want R && run_probe R
 want S && run_probe S
 want T && run_probe T
+want U && run_probe U
 
 echo 'flush' > "$CFG" 2> /dev/null || true
 for _p in "$echo_pid" "${echo2_pid:-}" "${echo3_pid:-}"; do

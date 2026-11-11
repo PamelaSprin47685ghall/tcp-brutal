@@ -7,6 +7,20 @@ and moves independently of the module version.
 
 ### Fixed
 
+- Restarting `host/tbt_client` inside the far's 2 s tombstone window no
+  longer blackholes the first stream. The client used to start its sid
+  allocator at the fixed value 1, so the restarted process named the sid the
+  far had just tombstoned; the far dropped that OPEN and mihomo's smux
+  session waited for its own timeout. The client now seeds a 16-bit prefix
+  and a 24-bit counter from its HELLO epoch mixed with the startup CSPRNG
+  draw, so two rapid incarnations practically never collide and sid 0 (plus
+  the retired fixed value 1) is skipped. The far side also retires every
+  tombstone left by the previous incarnation when an authenticated HELLO
+  proves a later generation (`tombstones_reincarnated`); tombstones created
+  inside the new incarnation still drop and warn on a duplicate OPEN. This
+  is an internal allocation/lifetime change: `TBT_CONV` stays `0x000d`,
+  `TBT_FEC_CONV` stays `0x100c`, HELLO stays 90 bytes v9, and
+  `TBT_VERSION` stays `0.10.0`, so no wire revision is needed.
 - `host/tbt_client` accepts userspace keys after `--config FILE`. The tunnel
   line, including its PSKs, stays in the file; `drop_ppm=`, `run_ms=`,
   `local_queue_bytes=` and `verbose=` follow on the command line and are

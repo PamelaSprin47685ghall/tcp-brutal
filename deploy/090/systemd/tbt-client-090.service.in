@@ -2,6 +2,12 @@
 # Rendered by deploy/090/Makefile for tbtun @TBTUN_COMMIT@.
 # Near side only. The client must listen before mihomo dials 127.0.0.1:19000,
 # which is why mihomo-090-near.service lists this unit in After= and Requires=.
+#
+# Stream SIDs are per incarnation: the client derives its first SID from the
+# HELLO epoch and a CSPRNG seed, so a restart does not reuse the retired first
+# SID. The far side clears tombstones from the previous incarnation once it
+# accepts the new authenticated HELLO generation. No startup delay is needed;
+# do not add ExecStartPre=/bin/sleep here.
 [Unit]
 Description=tbtun 0.9.0 userspace client (near side)
 Wants=network-online.target

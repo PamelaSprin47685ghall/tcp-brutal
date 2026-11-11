@@ -2089,6 +2089,8 @@ struct tbt_session
     atomic64_t join_src_reject; /* far: HELLO from a source other than the anchor */
     atomic64_t hello_tag_reject;      /* far: no PSK tag, so no re-incarnation */
     atomic64_t crypto_reincarnations; /* far: accepted restarts of the near */
+    atomic64_t tombstones_reincarnated; /* far: tombstones retired when a new
+                                         * near incarnation was accepted */
     u64 fbk_tx;             /* w_fbk work only */
     atomic64_t fbk_rx;
     u64 retx_frames, retx_bytes; /* pump only */
@@ -2531,6 +2533,10 @@ bool tbt_stream_cancel(struct tbt_stream *st, struct work_struct *w,
 struct tbt_stream *tbt_stream_get(struct tbt_session *sess, u64 sid, bool alloc, bool near);
 int tbt_session_stream_snapshot(struct tbt_session *sess,
                                 struct tbt_stream **out, int max);
+/* Drop tombstones left by the previous near incarnation. Called on the far
+ * side after an authenticated HELLO proved a later generation; tombstones
+ * created inside the new incarnation keep their TBT_TOMBSTONE_MS guard. */
+void tbt_session_reincarnate(struct tbt_session *sess);
 /* Same snapshot, skipping DEAD and already-DYING streams: a bounded batch
  * loop can kill every remaining stream without re-selecting one another
  * killer owns. */

@@ -3233,6 +3233,40 @@ static void test_hello_reincarnation_off(void)
           "v9: a pinned nonce= is never renamed");
 }
 
+/* A restarted client must not open with the retired fixed sid 1: the far
+ * still holds the previous incarnation's sid in a tombstone for
+ * TBT_TOMBSTONE_MS and would drop that OPEN. Two processes with different
+ * CSPRNG seeds must also start at different 40-bit sids. */
+static void test_sid_incarnation_seed(void)
+{
+    struct engine a;
+    struct engine b;
+    u64 sa, sb, next;
+
+    memset(&a, 0, sizeof(a));
+    memset(&b, 0, sizeof(b));
+    a.epoch = 1000000;
+    a.rng = 0x0123456789abcdefull;
+    b.epoch = 1000001;
+    b.rng = 0xfedcba9876543210ull;
+    engine_sid_init(&a);
+    engine_sid_init(&b);
+    sa = engine_sid_next(&a);
+    sb = engine_sid_next(&b);
+
+    CHECK(sa != 0 && sa != 1,
+          "sid: first allocation is neither the sentinel nor 1");
+    CHECK(sb != 0 && sb != 1,
+          "sid: a second incarnation also avoids 0 and 1");
+    CHECK(sa != sb, "sid: two seeds start at different sids");
+    CHECK((sa >> 40) == 0 && (sb >> 40) == 0,
+          "sid: both fit the 40-bit wire field");
+
+    next = engine_sid_next(&a);
+    CHECK(next != sa && (next >> 40) == 0,
+          "sid: the counter advances inside 40 bits");
+}
+
 int main(void)
 {
     signal(SIGPIPE, SIG_IGN);
@@ -3284,6 +3318,7 @@ int main(void)
     test_flow_table_refusal();
     test_hello_reincarnation();
     test_hello_reincarnation_off();
+    test_sid_incarnation_seed();
 
     printf("test_client_rx: %d checks, %d failures\n", checks, failures);
     free(f.out);

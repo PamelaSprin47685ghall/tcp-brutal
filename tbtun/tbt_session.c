@@ -1600,7 +1600,7 @@ void tbt_stream_kill_by_sid(struct tbt_session *sess, u64 sid, u8 reason)
 
 #define TBT_REAP_BATCH 16
 
-static void tbt_reap_body(struct tbt_session *sess)
+static int tbt_reap_body(struct tbt_session *sess)
 {
     struct tbt_stream *dead[TBT_REAP_BATCH];
     struct tbt_stream *st;
@@ -1656,6 +1656,7 @@ out:
     if (again && !READ_ONCE(sess->closing))
         tbt_session_arm(sess, TBT_SW_REAP,
                         msecs_to_jiffies(TBT_REAP_INTERVAL_MS));
+    return n;
 }
 
 static void tbt_reap_work(struct work_struct *w)
@@ -1667,6 +1668,44 @@ static void tbt_reap_work(struct work_struct *w)
     tbt_reap_body(sess);
     if (owned)
         tbt_session_put(sess);
+}
+
+/* A new near incarnation is authenticated by the HELLO generation. Its sid
+ * allocator starts from a different per-process value, but the far must not
+ * depend on that: sids tombstoned by the process this HELLO replaces belong
+ * to an earlier incarnation and must not refuse its first OPEN. Expire every
+ * existing tombstone and reap it now, rather than after
+ * TBT_REAP_INTERVAL_MS. Tombstones created after this point belong to the
+ * new incarnation and keep their TBT_TOMBSTONE_MS guard, so a duplicate
+ * OPEN inside one incarnation is still dropped and warned about. */
+void tbt_session_reincarnate(struct tbt_session *sess)
+{
+    struct tbt_stream *st;
+    int i, cleared = 0;
+
+    spin_lock(&sess->lock);
+    for (i = 0; i < TBT_STREAM_HT; i++)
+        hlist_for_each_entry(st, &sess->streams[i], node)
+        {
+            if (!st->tombstone_until_ns)
+                continue;
+            st->tombstone_until_ns = 1;
+        }
+    spin_unlock(&sess->lock);
+
+    /* tbt_reap_body unlinks at most TBT_REAP_BATCH expired tombstones per
+     * call. Drain all of them before the new incarnation's first OPEN can
+     * race the 200 ms reaper. */
+    for (;;)
+    {
+        int n = tbt_reap_body(sess);
+
+        if (!n)
+            break;
+        cleared += n;
+    }
+    if (cleared)
+        atomic64_add(cleared, &sess->tombstones_reincarnated);
 }
 
 /* One session-wide ARQ/control pump wake.  tbt_tx_wake() used to schedule

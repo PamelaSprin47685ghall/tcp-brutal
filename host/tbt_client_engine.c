@@ -314,6 +314,9 @@ struct engine
     struct flow *flow[TBT_FLOW_MAX];
     struct carrier *car_list; /* every carrier, joined or not */
     u32 car_live;
+    /* Wire sid is 40 bits: 16-bit per-incarnation prefix and a 24-bit
+     * counter (tbt_proto.h tbt_hdr_sid, DESIGN.md §3.6). */
+    u32 sid_prefix;
     u64 next_sid;
     u64 flow_accepted;
     u64 flow_refused;
@@ -449,6 +452,52 @@ static void fill_random(struct engine *e, u8 *p, size_t n)
         memcpy(p + off, &v, take);
         off += take;
     }
+}
+
+/* A 40-bit sid fits tbt_hdr_sid(): sid_hi is the top 8 bits and sid_lo the
+ * low 32. The high 16 bits are a per-process prefix; the low 24 are a
+ * monotonic counter, exactly the shape the kernel near allocator uses.
+ * Wrapping the counter after 16.7M streams is harmless: the prefix makes the
+ * wrapped value a different sid, and the far's 2 s tombstones cannot span a
+ * wrap at any stream rate this client can reach. */
+#define TBT_SID_PREFIX_MASK 0xffffu
+#define TBT_SID_COUNTER_MASK 0xffffffu
+
+static u64 engine_sid_next(struct engine *e)
+{
+    u64 sid;
+
+    do
+    {
+        sid = ((u64)(e->sid_prefix & TBT_SID_PREFIX_MASK) << 24) |
+              (e->next_sid & TBT_SID_COUNTER_MASK);
+        e->next_sid = (e->next_sid + 1) & TBT_SID_COUNTER_MASK;
+        /* 0 is the "no stream" sentinel on the far side. 1 was the fixed
+         * first sid of releases before this one; keeping it reserved makes
+         * "a restart never opens on 1" true even if the low 24 bits wrap. */
+    } while (sid == 0 || sid == 1);
+    return sid;
+}
+
+/* Seed the allocator from this process's incarnation: the wall-clock epoch
+ * that the far already orders HELLOs by, mixed with the CSPRNG seed drawn at
+ * startup. Two restarts inside TBT_TOMBSTONE_MS therefore start at different
+ * 40-bit sids, so the old incarnation's tombstone cannot refuse the new
+ * OPEN. A fixed seed is the bug this replaced: every start began at sid 1. */
+static void engine_sid_init(struct engine *e)
+{
+    u64 mix = e->epoch ^ rng_next(e);
+
+    mix ^= mix >> 33;
+    mix *= 0xff51afd7ed558ccdull;
+    mix ^= mix >> 33;
+    e->sid_prefix = (u32)(mix >> 32) & TBT_SID_PREFIX_MASK;
+    e->next_sid = (mix >> 8) & TBT_SID_COUNTER_MASK;
+    if (!e->next_sid)
+        e->next_sid = 1;
+    /* The first allocation must not be the retired fixed value. */
+    if (!e->sid_prefix && e->next_sid == 1)
+        e->next_sid = 2;
 }
 
 static int addr_to_ss(const struct tbt_addr *a, u16 port_be,
@@ -3682,6 +3731,7 @@ static void engine_accept_app(struct engine *e)
         int fd = accept4(e->listen_fd, NULL, NULL,
                          SOCK_NONBLOCK | SOCK_CLOEXEC);
         struct flow *f;
+        u64 sid;
         int one = 1;
         int why = 0;
 
@@ -3693,11 +3743,12 @@ static void engine_accept_app(struct engine *e)
         }
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
         set_app_sockbuf(fd, e->cfg.local_queue_bytes);
-        f = flow_alloc(e, e->next_sid++, fd, true, &why);
+        sid = engine_sid_next(e);
+        f = flow_alloc(e, sid, fd, true, &why);
         if (!f)
         {
             logmsg(e, "tbt_client: accept refused sid=%llu: %s\n",
-                   (unsigned long long)(e->next_sid - 1),
+                   (unsigned long long)sid,
                    why == -ENOSPC ? "flow table full" : "out of memory");
             close(fd);
             continue;
@@ -3936,7 +3987,6 @@ int tbt_engine_run(const struct tbt_engine_cfg *cfg)
     e->listen_fd = -1;
     e->epfd = -1;
     e->timerfd = -1;
-    e->next_sid = 1;
     e->start_ns = now_ns();
     if (cfg->run_ms)
         e->stop_at_ns = e->start_ns + (u64)cfg->run_ms * 1000000ull;
@@ -4002,6 +4052,7 @@ int tbt_engine_run(const struct tbt_engine_cfg *cfg)
     e->epoch = epoch_now();
     if (!e->epoch)
         e->epoch = 1;
+    engine_sid_init(e);
     e->crypto_on = cfg->cfg.crypto != 0;
     if (e->crypto_on)
     {

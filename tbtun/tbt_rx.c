@@ -662,6 +662,7 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
     u8 peer_nonce[TBT_CRYPTO_NONCE_LEN];
     u8 hello_key[TBT_CRYPTO_KEY_LEN];
     u8 key[TBT_CRYPTO_KEY_LEN];
+    bool reincarnated = false;
     int err = 0;
 
     TBT_DIAG("hello crypto parse tunnel=%llu body_len=%zu",
@@ -802,6 +803,7 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
         sess->crypto_epoch = g->epoch;
         sess->crypto_epoch_set = true;
         atomic64_inc(&sess->crypto_reincarnations);
+        reincarnated = true;
         goto out;
     }
 
@@ -818,6 +820,11 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
 
 out:
     spin_unlock(&sess->lock);
+    /* The new incarnation's first OPEN may already be queued behind this
+     * HELLO on another carrier. Retire the old incarnation's tombstones
+     * before returning, so none of them can refuse it. */
+    if (reincarnated && sess->tunnel->cfg.role == TBT_ROLE_FAR)
+        tbt_session_reincarnate(sess);
     tbt_memzero_explicit(hello_key, sizeof(hello_key));
     tbt_memzero_explicit(key, sizeof(key));
     if (err)

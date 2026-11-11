@@ -913,9 +913,18 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
 - The **near** side allocates `sid` from a per-session `u64`: `sid_next++` with a
   16-bit random prefix generated at session creation, masked to 40 bits. Allocation happens
   in `tbt_session.c` under `session->lock`.
+- The **userspace near client** (the 090 pair) follows the same 16-bit prefix + 24-bit
+  counter shape. It seeds the counter from the HELLO epoch mixed with the CSPRNG value
+  drawn at startup, so its first sid belongs to that process incarnation and is never a
+  fixed value; sid 0 (the no-stream sentinel) and the retired fixed value 1 are skipped.
+  Two restarts inside `TBT_TOMBSTONE_MS` therefore open on different sids.
 - **v4 uses the full 40 bits**: `sid = (prefix16 << 24) | (counter & 0xffffff)`;
   `sid_hi` carries the top 8 bits and the far-side hash key is a `u64`. The 24-bit counter
   wraps after 16.7 M allocations; the allocator skips sid 0 and any live/tombstone sid.
+- On the **far** side, an authenticated HELLO that names a later generation retires every
+  tombstone left by the previous incarnation before its first OPEN is bound. Tombstones
+  created after that point still guard duplicate and late frames for `TBT_TOMBSTONE_MS`
+  within the same incarnation.
 - The far side keys `sid → stream` in a hash. **Adoption rule (implemented, C3+):** the
   first frame on every carrier MUST be HELLO, which carries the session nonce; the frame
   header's `path_id` is the carrier index. HELLO is what authorises the peer to name
