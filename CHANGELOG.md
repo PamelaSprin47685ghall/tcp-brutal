@@ -51,6 +51,16 @@ and moves independently of the module version.
   count, `tbt_fec_credit_packets()` converts the byte window once, and the
   TX gate compares absolute packet frontiers.
 
+### Fixed
+
+- The FEC TX pump wakes capture whenever the source ring is below half, not
+  only when `tx_paused` is set. A target that drained its window left
+  `ring=9`, `credit=1792` and `seq` frozen 2.4 s at a time while its next
+  zero-window probe waited for an RTO; the field dmesg showed
+  `run=1 sched=0 stall_us=2404156` and `fec_tx_run_leak=1`. The stale
+  run-word recovery now also refuses to clear a word whose body is still
+  running, so a long body is no longer raced by a second packetizer.
+
 ### Known limitations
 
 - At `S=1024, block=64, L=8` the uplink `22/10` split needs more parity symbols

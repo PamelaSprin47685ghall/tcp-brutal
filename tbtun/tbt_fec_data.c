@@ -2786,10 +2786,20 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
         tx->short_at_ns = 0;
         tx->block_at_ns = 0;
     }
-    if (paused)
     {
-        WRITE_ONCE(st->tx_paused, false);
-        tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
+        /* The ring may be below half with tx_paused already clear: the last
+         * capture took every byte the target offered, then the target hit a
+         * zero window and its next segment waits for an RTO. That case has
+         * no wake source, so the pump pokes capture on every pass while the
+         * ring is shallow, paused or not. */
+        u32 ring_now = (u32)(READ_ONCE(tx->head) - READ_ONCE(tx->tail)) +
+                       READ_ONCE(tx->fill);
+
+        if (tbt_fec_capture_poke_due(ring_now, tx->ring_size, paused))
+        {
+            WRITE_ONCE(st->tx_paused, false);
+            tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
+        }
     }
     tbt_stream_put(st);
 }

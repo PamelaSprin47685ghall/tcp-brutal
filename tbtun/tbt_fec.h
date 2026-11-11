@@ -1494,6 +1494,30 @@ static inline bool tbt_fec_pump_stuck(u32 run, u64 last_seq, u64 seq,
            now - last_ns > threshold_ns;
 }
 
+/* True when the pump must wake the capture work. A ring below half may be
+ * waiting on a target that stopped after draining its window: the last
+ * tcp_read_sock() consumed the bytes, the data_ready wake fired before the
+ * ring was emptied, and the next target segment is a zero-window probe one
+ * RTO away. `paused` only covers the ring-full case, so the empty case needs
+ * the same poke or the sender waits for the RTO. */
+static inline bool tbt_fec_capture_poke_due(u32 ring, u32 ring_size,
+                                            bool paused)
+{
+    return paused || (ring_size && ring < ring_size / 2);
+}
+
+/* The stale run-word recovery may clear the bit only when its body is not
+ * running: a body in flight still owns the packetizer, and clearing the bit
+ * underneath it let a second body enter and made the first one count
+ * `fec_tx_run_leak` on exit (field: one such leak). A genuinely lost run
+ * word has no running body and still takes the recovery. */
+static inline bool tbt_fec_run_word_stale(u32 run, bool ring, u64 now,
+                                          u64 last_ns, bool body_running)
+{
+    return (run & 1u) && ring && last_ns && now > last_ns &&
+           now - last_ns > 1000000000ULL && !body_running;
+}
+
 /* A stream owns a subset of the session's physical groups. `mask` is the
  * 256-bit set (bit p = physical group p); `map[local]` is the physical group
  * of local index 0..count-1. Bits at or above total_groups are invalid, and

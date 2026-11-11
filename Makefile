@@ -200,6 +200,8 @@ HOST_RX_BUDGET_HDRS := tbtun/tbt_rx_budget.h tbtun/tbt_uapi.h
 HOST_MUX        := host/test_mux
 HOST_MUX_SRCS   := host/test_mux.c tbtun/tbt_mux.c
 HOST_MUX_HDRS   := tbtun/tbt_mux.h
+HOST_CAPTURE_POKE := host/test_capture_poke
+HOST_CAPTURE_POKE_HDRS := tbtun/tbt_fec.h tbtun/tbt_uapi.h
 
 # The userspace client links the module's pure C units and adds only the
 # session/socket engine. The library is the reusable half: 0.8.x Android and
@@ -320,6 +322,7 @@ check: dkms-srcs-check
 # The carrier policy test is header-only; its dependency sits on its own line
 # so the long host-test list stays readable.
 host-test: $(HOST_CARRIER_POLICY)
+host-test: $(HOST_CAPTURE_POKE)
 $(GOLDEN_V080): $(GOLDEN_V080_SRCS) $(GOLDEN_V080_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(GOLDEN_V080_SRCS)
 
@@ -367,6 +370,7 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_INVARIANTS)
 	@./$(HOST_WIRE_COMPAT)
 	@./$(HOST_RX_BUDGET)
+	@./$(HOST_CAPTURE_POKE)
 	@./$(HOST_MUX)
 	@./$(HOST_CLIENT_LOOPBACK)
 	@./$(HOST_CLIENT_WIRE)
@@ -552,6 +556,9 @@ $(HOST_WIRE_COMPAT): $(HOST_WIRE_COMPAT_SRCS) $(HOST_WIRE_COMPAT_HDRS)
 $(HOST_RX_BUDGET): $(HOST_RX_BUDGET_SRCS) $(HOST_RX_BUDGET_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_RX_BUDGET_SRCS)
 
+$(HOST_CAPTURE_POKE): host/test_capture_poke.c $(HOST_CAPTURE_POKE_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ host/test_capture_poke.c
+
 host/test_fec_sclc_data_san: $(HOST_SCLC_DATA_SRCS) $(HOST_SCLC_DATA_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_SCLC_DATA_SRCS)
 
@@ -595,7 +602,7 @@ host-bench-sclc-build: $(HOST_BENCH_SCLC_BUILD)
 
 # The same tests with ASan and UBSan. A toolchain without the runtimes gets
 # a clear skip, not a build failure.
-host-test-san:
+host-test-san: host/test_capture_poke_san
 	@if printf 'int main(void){return 0;}\n' | $(HOSTCC) $(SAN_CFLAGS) -x c - -o /dev/null 2>/dev/null; then \
 		$(MAKE) --no-print-directory host-test-san-run; \
 	else \
@@ -632,6 +639,7 @@ host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san hos
 	@./host/test_invariants_san
 	@./host/test_wire_compat_san
 	@./host/test_rx_budget_san
+	@./host/test_capture_poke_san
 	@./host/test_mux_san
 	@./host/test_client_loopback_san
 	@./host/test_client_wire_san
@@ -724,6 +732,9 @@ host/test_wire_compat_san: $(HOST_WIRE_COMPAT_SRCS) $(HOST_WIRE_COMPAT_HDRS)
 host/test_rx_budget_san: $(HOST_RX_BUDGET_SRCS) $(HOST_RX_BUDGET_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_RX_BUDGET_SRCS)
 
+host/test_capture_poke_san: host/test_capture_poke.c $(HOST_CAPTURE_POKE_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ host/test_capture_poke.c
+
 # The concurrent host contracts under ThreadSanitizer. Opt-in, like
 # host-test-san: `check` stays free of a sanitizer runtime. A toolchain
 # without the TSan runtime gets a clear skip, not a build failure. The test
@@ -770,6 +781,7 @@ clean: clean-dkms.conf clean-dkms-tarball
 	$(RM) $(HOST_BATCH) $(HOST_WIRE_COMPAT) $(HOST_TSAN) host/test_batch_san host/test_wire_compat_san
 	$(RM) $(HTTP_RFC_GEN) $(HTTP_RFC_GEN_SAN)
 	$(RM) $(HOST_RX_BUDGET) host/test_rx_budget_san
+	$(RM) $(HOST_CAPTURE_POKE) host/test_capture_poke_san
 	$(RM) $(HOST_CLIENT) $(HOST_CLIENT_LIB) $(HOST_CLIENT_OBJS) host/client-main.o
 	$(RM) $(HOST_CLIENT_LOOPBACK) host/test_client_loopback_san
 	$(RM) $(HOST_CLIENT_WIRE) host/test_client_wire_san
