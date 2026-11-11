@@ -385,6 +385,7 @@ static void test_counter_carry_bulk(void)
         nonce[i] = (u8)(0x70 + i);
     memset(one, 0, sizeof(one));
     memset(at, 0, sizeof(at));
+    memset(next, 0, sizeof(next));
 
     if (tbt_chacha8_xor(key, sizeof(key), nonce, 0xFFFFFFF0ULL, 8, one,
                         sizeof(one)) != 0 ||
@@ -2037,6 +2038,133 @@ static void test_session_path(void)
     }
 }
 
+/* ------------------------------------------------------------------ *
+ * Vector keystream vs the scalar body.
+ *
+ * The dispatcher sends runs of four or more whole blocks to the SSE2
+ * (x86_64) or NEON (aarch64 userspace) body; a one-block call always
+ * takes the scalar body. Computing the same range one block at a time
+ * through the public API therefore yields the scalar keystream, and the
+ * whole-range call must equal it byte for byte at every length, including
+ * a tail that falls back to one scalar block.
+ *
+ * On an architecture with neither vector body both sides are scalar; the
+ * same checks then pin the dispatcher's counter and tail handling.
+ * ------------------------------------------------------------------ */
+
+static u64 chacha_test_rand(u64 *s)
+{
+    u64 x = *s;
+
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *s = x;
+    return x;
+}
+
+/* XOR the scalar keystream for `len` bytes at `counter` into `out`. One
+ * tbt_chacha8_xor call per block keeps every call on the scalar body. */
+static int chacha_scalar_stream(const u8 *key, size_t key_len,
+                                const u8 nonce[TBT_CRYPTO_NONCE_LEN],
+                                u64 counter, int rounds, u8 *out, size_t len)
+{
+    size_t off;
+
+    for (off = 0; off < len; off += TBT_CRYPTO_BLOCK_LEN)
+    {
+        u8 ks[TBT_CRYPTO_BLOCK_LEN] = {0};
+        size_t take = len - off;
+        size_t j;
+
+        if (take > TBT_CRYPTO_BLOCK_LEN)
+            take = TBT_CRYPTO_BLOCK_LEN;
+        if (tbt_chacha8_xor(key, key_len, nonce,
+                            counter + off / TBT_CRYPTO_BLOCK_LEN, rounds, ks,
+                            sizeof(ks)) != 0)
+            return -1;
+        for (j = 0; j < take; j++)
+            out[off + j] ^= ks[j];
+    }
+    return 0;
+}
+
+static void test_vector_vs_scalar(void)
+{
+    /* The small lengths pin the scalar tail; 256 and above put whole
+     * four-block groups through the vector body, and 257/1025/8193 add a
+     * scalar tail after a vector run. */
+    static const size_t lens[] = {0,   1,    63,   64,   65,   255,
+                                  256, 257,  320,  1023, 1024, 1025,
+                                  4096, 8191, 8192, 8193};
+    /* The second counter crosses the 32-bit low word inside one four-block
+     * group, so the vector lane arithmetic is checked at the carry. */
+    static const u64 counters[] = {0x0123456789abcdefULL, 0xfffffffeULL};
+    u8 key[32], nonce[TBT_CRYPTO_NONCE_LEN];
+    u8 plain[8193], got[8193], want[8193];
+    u64 seed = 0x243f6a8885a308d3ULL;
+    size_t i, c, t;
+    int failed = 0;
+
+    for (i = 0; i < sizeof(key); i++)
+        key[i] = (u8)chacha_test_rand(&seed);
+    for (i = 0; i < sizeof(nonce); i++)
+        nonce[i] = (u8)chacha_test_rand(&seed);
+
+    for (c = 0; c < sizeof(counters) / sizeof(counters[0]); c++)
+    {
+        for (t = 0; t < sizeof(lens) / sizeof(lens[0]); t++)
+        {
+            size_t len = lens[t];
+            size_t key_len = (t & 1) ? 16 : 32;
+            char what[80];
+
+            for (i = 0; i < len; i++)
+                plain[i] = (u8)chacha_test_rand(&seed);
+            memcpy(got, plain, len);
+            memcpy(want, plain, len);
+            if (tbt_chacha8_xor(key, key_len, nonce, counters[c], 8, got,
+                                len) != 0 ||
+                chacha_scalar_stream(key, key_len, nonce, counters[c], 8,
+                                     want, len) != 0)
+            {
+                printf("FAIL vector: length %zu counter %llx: xor error\n",
+                       len, (unsigned long long)counters[c]);
+                failures++;
+                failed = 1;
+                continue;
+            }
+            snprintf(what, sizeof(what),
+                     "vector == scalar, length %zu counter %llx", len,
+                     (unsigned long long)counters[c]);
+            if (memcmp(got, want, len) != 0)
+            {
+                printf("FAIL %s\n", what);
+                failures++;
+                failed = 1;
+            }
+            else
+            {
+                printf("PASS %s\n", what);
+            }
+        }
+    }
+
+    if (!failed)
+    {
+#if defined(__x86_64__)
+        const char *body = "SSE2";
+#elif defined(__aarch64__) && defined(__ARM_NEON)
+        const char *body = "NEON";
+#else
+        const char *body = "scalar-only target";
+#endif
+
+        printf("PASS vector: %s body equals the scalar body over %zu lengths\n",
+               body, sizeof(lens) / sizeof(lens[0]));
+    }
+}
+
 int main(void)
 {
     test_tc1();
@@ -2049,6 +2177,7 @@ int main(void)
     test_counter_carry_bulk();
     test_streaming();
     test_length_sweep();
+    test_vector_vs_scalar();
     test_xor_at();
     test_counter_wrap();
     test_invalid_args();

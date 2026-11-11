@@ -402,8 +402,14 @@ static void tbt_chacha8_blocks_xor_sse2(u32 st[16], u8 *data, size_t blocks,
  * NEON is baseline on every AArch64 target, so this path needs no run-time
  * dispatch and no target attribute. The kernel build must never see
  * <arm_neon.h>: the guard keeps this block out of it, and the kernel keeps
- * the scalar path. */
-#if !defined(__KERNEL__) && defined(__aarch64__) && \
+ * the scalar path.
+ *
+ * The vector loads and stores move whole words, so this body would emit a
+ * host-endian keystream on a big-endian ABI while the scalar body always
+ * stores little-endian words. Keep that ABI on the scalar path, the same
+ * rule the CRC32X block follows. */
+#if !defined(__KERNEL__) && defined(__aarch64__) && defined(__ARM_NEON) && \
+    defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ && \
     (defined(__GNUC__) || defined(__clang__))
 #define TBT_CHACHA_NEON 1
 
