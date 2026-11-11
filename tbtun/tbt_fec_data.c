@@ -43,10 +43,6 @@
 #include "tbt_sclc_uplink.h"
 #include "tbt_rec.h"
 
-/* Defined next to the codec constructors; the shape-switch paths that run
- * earlier in this file need the declaration. */
-static const struct tbt_fec_ops *tbt_fec_ops_of_shape(
-    const struct tbt_fec_shape *sh);
 static struct tbt_fec_grouped *tbt_fec_codec_new(
     const struct tbt_fec_sclc_shape *sclc, u16 groups, u16 n, u16 m, u16 k,
     u16 w, u8 d, u64 nonce);
@@ -359,52 +355,6 @@ static u64 tbt_fec_base_nonce(const struct tbt_session *sess)
 static u64 tbt_fec_group_nonce(u64 base, u16 group, u64 block_id)
 {
     return base ^ ((u64)group << 32) ^ (block_id * TBT_FEC_NONCE_GOLDEN);
-}
-
-static struct tbt_stream *tbt_fec_stream(struct tbt_session *sess)
-{
-    struct tbt_stream *st;
-    u64 sid;
-    int i;
-
-    sid = READ_ONCE(sess->far_sid);
-    if (sid)
-    {
-        st = tbt_stream_get(sess, sid, false, false);
-        if (st &&
-            !tbt_fec_tx_stream_usable(
-                READ_ONCE(st->state) == TBT_ST_DEAD,
-                test_bit(TBT_STREAM_F_ACTIVE, &st->attached),
-                READ_ONCE(st->tombstone_until_ns)))
-        {
-            tbt_stream_put(st);
-            return NULL;
-        }
-        return st;
-    }
-    spin_lock(&sess->lock);
-    for (i = 0; i < TBT_STREAM_HT; i++)
-    {
-        hlist_for_each_entry(st, &sess->streams[i], node)
-        {
-            /* A gracefully closed stream is detached and tombstoned while
-             * its state is still OPEN; returning it makes the TX work arm
-             * itself at 0 delay until the reaper runs.  Only a live,
-             * attached stream is a usable fallback. */
-            if (!tbt_fec_tx_stream_usable(
-                    READ_ONCE(st->state) == TBT_ST_DEAD,
-                    test_bit(TBT_STREAM_F_ACTIVE, &st->attached),
-                    READ_ONCE(st->tombstone_until_ns)))
-                continue;
-            if (refcount_inc_not_zero(&st->refs))
-            {
-                spin_unlock(&sess->lock);
-                return st;
-            }
-        }
-    }
-    spin_unlock(&sess->lock);
-    return NULL;
 }
 
 /* ------------------------------------------------------------------ *
@@ -2750,10 +2700,6 @@ static void tbt_fec_tx_init_tick(struct tbt_session *sess,
     tx->init_ns = now;
     tbt_session_arm(sess, TBT_SW_FEC_TICK, msecs_to_jiffies(500));
 }
-
-static void tbt_fec_tx_switch_abort(struct tbt_session *sess, struct tbt_fec_tx *tx, bool tell_peer);
-static void tbt_fec_tx_swap(struct tbt_session *sess, struct tbt_fec_tx *tx);
-static void tbt_fec_tx_switch_tick(struct tbt_session *sess, struct tbt_fec_tx *tx);
 
 static void tbt_fec_tx_clear_data_queues(struct tbt_session *sess)
 {
@@ -5114,14 +5060,6 @@ static void tbt_fec_rx_codec_publish_locked(struct tbt_fec_rx *rx,
     rx->shape.block = e->key.block;
     rx->shape.rate_ppm =
         (u32)((((u64)e->key.n * 1000000u) + shares - 1u) / shares);
-}
-
-static void tbt_fec_rx_blk_detach_locked(struct tbt_fec_blk *b)
-{
-    if (!b->codec_entry)
-        return;
-    tbt_fec_codec_cache_put(b->codec_entry);
-    b->codec_entry = NULL;
 }
 
 static void tbt_fec_rx_blk_attach_locked(struct tbt_fec_rx *rx,
@@ -7635,20 +7573,6 @@ struct tbt_fec_grouped *tbt_fec_sclc_new(const struct tbt_fec_sclc_shape *sh,
     }
     return tbt_fec_grouped_new_ops(ops, sh->groups, sh->n, sh->m, k, w, s, d,
                                    nonce);
-}
-
-/* v8 names the codec in the CFG extension. The legacy w/k/d mirror is not a
- * second classifier: a shape with variant 0/1 is RLNC whatever its window
- * looks like. */
-static const struct tbt_fec_ops *tbt_fec_ops_of_shape(
-    const struct tbt_fec_shape *sh)
-{
-    if (!sh)
-        return &tbt_fec_ops_rlnc;
-    if (sh->codec_variant == 2)
-        return sh->groups == 1 ? &tbt_fec_ops_sclc
-                               : &tbt_fec_ops_sclc_gf16;
-    return &tbt_fec_ops_rlnc;
 }
 
 static struct tbt_fec_grouped *tbt_fec_codec_new(
