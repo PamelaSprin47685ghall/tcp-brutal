@@ -31,7 +31,8 @@ and moves independently of the module version.
   1072. The downlink SC-LDPC share is 1024 bytes and has 16 batches; the
   uplink GF(16) codec defaults to `block=64, L=8` (`C = n*8`).
 - The FEC window and out-queue byte marks are scaled to the 1 KiB cell
-  (16 MiB / 4 MiB), and the AArch64 hardware CRC32C path is enabled for Clang.
+  (16 MiB / 16 MiB), and the AArch64 hardware CRC32C path is enabled for
+  Clang.
 
 ### Known limitations
 
@@ -41,6 +42,13 @@ and moves independently of the module version.
   `L=16` or a new uplink graph, not a validation-only change.
 
 ## [Unreleased]
+
+### Fixed
+
+- The ACK credit is now counted in shares (`groups*(n+m)` per block), not
+  DATA packets. The cap is 16384 shares (64 blocks x 256); the host formula
+  is `(TBT_RX_SLOTS-1)*groups*(n+m)`. `fec_credit_unit_bad` counts only a
+  grant below one whole block.
 
 ### Added
 

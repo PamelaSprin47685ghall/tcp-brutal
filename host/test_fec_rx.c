@@ -1664,14 +1664,14 @@ static void test_replay_window(void)
     slots = 66;
 
     /* The credit is K_eff-2 super-blocks, K_eff = min(ring K, arena slots),
-     * capped to TBT_FEC_CREDIT_MAX packets. For this shape the ring binds. */
+     * capped to TBT_FEC_CREDIT_MAX shares. For this shape the ring binds. */
     credit = tbt_fec_credit_packets(G, N, M, k, (u16)slots,
                                     TBT_FEC_CREDIT_MAX);
     blocks = credit / ((u32)G * (N + M));
     ok_int((int)blocks, (int)k - 2,
            "replay window: credit is K-2 super-blocks");
     ok(credit <= TBT_FEC_CREDIT_MAX,
-       "replay window: credit is capped at 8192 packets");
+       "replay window: credit is capped at 16384 shares");
 
     /* The receiver delivered up to block 3 and stalls on block 4. The sender
      * closes blocks 4..(3 + credit blocks): the cap, one short share each. */
@@ -1709,10 +1709,10 @@ static void test_replay_window(void)
     ok_int((int)tbt_fec_credit_packets(32, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX),
            16384, "256-carrier grouped credit");
     ok_int((int)tbt_fec_credit_packets(1, 192, 64, 66, 66, TBT_FEC_CREDIT_MAX),
-           16384, "256-carrier single credit (8192 / 192 blocks)");
+           16384, "256-carrier single credit (16384 shares)");
 
     /* The ring stays inside 20 MiB (descriptors + 8 hot block planes) and
-     * the credit inside 8192 packets (8 MiB of payload at S=1024). */
+     * the credit inside 16384 shares (16 MiB of payload at S=1024). */
     ok(tbt_fec_replay_bytes(4, 4, 4, TBT_FEC_S, 66) <= TBT_FEC_REPLAY_BUDGET,
        "32-carrier ring stays inside 20 MiB");
     ok(tbt_fec_replay_bytes(8, 4, 4, TBT_FEC_S, 66) <= TBT_FEC_REPLAY_BUDGET,
@@ -1738,7 +1738,7 @@ static void test_replay_window(void)
                TBT_FEC_CREDIT_MAX &&
            tbt_fec_credit_packets(1, 192, 192, 66, 66, TBT_FEC_CREDIT_MAX) <=
                TBT_FEC_CREDIT_MAX,
-       "credit stays inside the 8192-packet cap");
+       "credit stays inside the 16384-share cap");
 }
 
 /* ------------------------------------------------------------------ *

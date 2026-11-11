@@ -286,10 +286,10 @@ static struct tbt_fec_grouped *tbt_fec_codec_build(
  * default tcp_retries2 (15) is the point where TCP itself gives up. */
 #define TBT_FEC_TCP_RETX_MAX 15
 
-/* The credit cap in DATA packets for one direction. A SC-LDPC parent runs
- * the sixteen-round downlink window and the eight-round uplink window;
- * TBT_FEC_S is the wire slot, so the packet cap is the window divided by it.
- * The RLNC path keeps the flat TBT_FEC_CREDIT_MAX.
+/* The credit cap in shares for one direction. Both SC-LDPC parent
+ * windows are 64 blocks * 256 shares; TBT_FEC_S is the wire slot, so the
+ * share cap is the window divided by it. The RLNC path keeps the flat
+ * TBT_FEC_CREDIT_MAX.
  *
  * The direction must be the one the credit is for, not the local sender's:
  * on the near end the local TX is the 8x32 uplink while the ACK it grants
@@ -2070,10 +2070,10 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
         tbt_fec_tx_finish(sess, tx, st);
 }
 
-/* The peer's ACK grants `credit` packets beyond the frontier it has delivered.
- * The receiver buffers `slots * groups * n` packets ahead of delivery, and the
- * credit is the same number, so a sender that respects it can never outrun the
- * buffer. Before this was enforced the packetizer ran as far ahead as the
+/* The peer's ACK grants `credit` shares beyond the frontier it has
+ * delivered. The receiver buffers `slots * groups * (n+m)` shares ahead of
+ * delivery, and the credit is the same number, so a sender that respects
+ * it can never outrun the buffer. Before this was enforced the packetizer ran as far ahead as the
  * carriers would carry it, the receiver dropped 1527 shares as "too far ahead"
  * (fec_drop_window), and the blocks they belonged to could never complete: the
  * stream stalled with the application's bytes still in the ring.

@@ -2590,7 +2590,7 @@ static void test_credit_split(void)
     for (g = 1; g <= 32; g++)
     {
         credit = tbt_fec_credit_packets(g, N, M, K, SLOTS, 0);
-        ok_u32(credit % ((u32)g * N), 0, "credit is whole super-blocks");
+        ok_u32(credit % ((u32)g * (N + M)), 0, "credit is whole super-blocks");
         ok(credit <= (u32)(K - 2) * g * (N + M),
            "credit is at most K-2 super-blocks", NULL);
         ok(credit >= prev, "credit is monotonic in groups", NULL);
@@ -2608,7 +2608,7 @@ static void test_credit_split(void)
     {
         credit = tbt_fec_credit_packets(g, N, M, K, SLOTS, TBT_FEC_CREDIT_MAX);
         ok(credit <= TBT_FEC_CREDIT_MAX, "credit is bounded by the cap", NULL);
-        ok(credit >= 1, "credit grants at least one packet", NULL);
+        ok(credit >= 1, "credit grants at least one share", NULL);
     }
 
     /* A small arena slot count caps K before the ring K does. */
@@ -2625,11 +2625,11 @@ static void test_credit_split(void)
            "K=0 grants one super-block");
     /* A cap below one super-block returns the single-packet floor. */
     ok_u32(tbt_fec_credit_packets(32, N, M, K, SLOTS, 1), 1,
-           "cap below a super-block floors at one packet");
+           "cap below a super-block floors at one share");
     ok_u32(tbt_fec_credit_packets(0, N, M, K, SLOTS, 0), 1,
-           "zero groups floors at one packet");
+           "zero groups floors at one share");
     ok_u32(tbt_fec_credit_packets(32, 0, M, K, SLOTS, 0), 1,
-           "zero n floors at one packet");
+           "zero n floors at one share");
 }
 
 /* ------------------------------------------------------------------ *
