@@ -78,6 +78,22 @@ and moves independently of the module version.
   `host/test_client_rx.c` cover the echo path, the wire encoding and the RX
   credit accounting. `host-test` builds and runs them, and the sanitizer suite
   runs their `_san` variants.
+- `carrier_cc` module parameter (default `bbr`). `tbtcc` selects the module's
+  own carrier congestion control for an A/B run. It is registered with
+  `tcp_register_congestion_control()` and attached only by
+  `setsockopt(TCP_CONGESTION)` on a carrier socket; it is never written to
+  `net.ipv4.tcp_congestion_control` and never reaches a socket this module did
+  not create.
+- `tbtun/tbt_cc.c`: delivery bandwidth as a tumbling maximum over ten RTTs of
+  the `rate_sample`, pacing at `max_bw / (1 - p)` with `p` from the FEC
+  feedback path (module parameter `loss_ppm` pins it), and `ssthresh` /
+  `undo_cwnd` at `max(2 * BDP, min_cwnd)`. `clamp_enable=0` restores reno
+  ssthresh, undo and cwnd growth for the A/B. The ACK hook is chosen from the
+  installed header: the four-argument `.cong_control`, or
+  `.cong_avoid + .pkts_acked` when the header has no such declaration.
+- `/proc/net/tbtun/stats` gains one `cc` line per tunnel: summed `max_bw`,
+  current pacing, clamp activations, hold enter/exit edges and the measured
+  `p`.
 
 ### Changed
 
@@ -202,6 +218,18 @@ and moves independently of the module version.
   `run=1 sched=0 stall_us=2404156` and `fec_tx_run_leak=1`. The stale
   run-word recovery now also refuses to clear a word whose body is still
   running, so a long body is no longer raced by a second packetizer.
+- Carrier `TCP_CONGESTION` now calls `socket->ops->setsockopt()`. In 6.1 and
+  later `sock_setsockopt()` forwards every request to `sk_setsockopt()`, the
+  SOL_SOCKET handler, ignoring `level`. With `SOL_TCP` + `TCP_CONGESTION`
+  (13) the kernel decoded the request as `SO_LINGER` (also 13), whose payload
+  must be `sizeof(struct linger)`; the three- or four-byte name therefore
+  returned `-EINVAL` while the socket kept its old algorithm. That is the
+  field log `carrier TCP_CONGESTION=bbr refused: -22 but actual=bbr`.
+- The idle hold installs its `snd_cwnd` and `sk_pacing_rate` snapshot on the
+  first non-PAD send after it ends, under the socket lock and after
+  `c->tx_lock`, so an idle carrier does not start the next burst from the
+  cold window. Hold enters and exits are counted per carrier and summed in
+  the `cc` stats line.
 
 ## [0.7.3] - 2026-11-11
 

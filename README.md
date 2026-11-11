@@ -202,7 +202,8 @@ Module parameters, read-only after load:
 | `max_tunnels` | `64` | Maximum configured tunnels; a new id over the cap fails with `ENOSPC` |
 | `max_carriers` | `256` | Carrier sockets per session, `1..256`; `carriers` over the cap fails with `EINVAL` |
 | `debug_loss` | `0` | Allow `drop_ppm` writes, the deterministic loss injector |
-| `hold_enable` | `1` | BBR hold: after 200 ms of carrier idleness the 50 ms poll snapshots cwnd/pacing, bounded by `snd_wnd/mss`, `snd_cwnd_clamp`, `sk_sndbuf/mss` and `sk_max_pacing_rate`, and restores both while the session stays idle and TCP has nothing in flight. A non-PAD write cancels the hold. On by default; write `0` to opt out. It writes `tcp_sock` fields directly, which is not a stable kernel API |
+| `carrier_cc` | `bbr` | Congestion control every carrier asks for by name with `setsockopt(TCP_CONGESTION)`. `bbr` keeps the measured default; `tbtcc` selects this module's loss-tolerant controller for an A/B run. It is never written to `net.ipv4.tcp_congestion_control` |
+| `hold_enable` | `1` | BBR hold: after 200 ms of carrier idleness the 50 ms poll snapshots cwnd/pacing, bounded by `snd_wnd/mss`, `snd_cwnd_clamp`, `sk_sndbuf/mss` and `sk_max_pacing_rate`, and restores both while the session stays idle and TCP has nothing in flight. The first non-PAD write ends the hold and installs both values before it queues the record. On by default; write `0` to opt out. It writes `tcp_sock` fields directly, which is not a stable kernel API |
 
 The control surface is created in `init_net` only; there is no per-netns view.
 Unload with `sudo rmmod tbtun`. Unloading flushes every tunnel and closes every
@@ -481,7 +482,8 @@ owns it: the first lines are capture and RX work, then a `dbg` line and a `live`
 snapshot, `txwake`, `c3` (carriers, joins, retransmission, reorder, gates),
 `ctl` (pinned control frames), `streams` (the stream census), `c6` (holes),
 `c8` (HTTP), `c9` (the FEC receive verdict), `c10` (FEC loss reasons),
-`c11` (NACK/replay repair), `c5` (duplication), and
+`c11` (NACK/replay repair), `c5` (duplication), `cc` (the carrier congestion
+control), and
 `reconcile`.
 
 | Key | Meaning |
@@ -498,6 +500,7 @@ snapshot, `txwake`, `c3` (carriers, joins, retransmission, reorder, gates),
 | `tx_window`, `rtt_mean_us`, `rttvar_us`, `rtt_max_us`, `txq_max` | effective sender window and its inputs / frame-queue bound |
 | `holes_declared`, `holes_repaired`, `holes_unrecoverable`, `rx_max_stall_us` | hole accounting |
 | `dup_tx`, `dup_used`, `dup_suppressed`, `inflate_ppm` | duplication |
+| `cc` line (`cc_carriers`, `cc_max_bw_bps`, `cc_pacing_bps`, `cc_clamp_hits`, `cc_hold_enter`, `cc_hold_exit`, `p_ppm`) | Carriers currently running `tbtcc`; summed windowed-max delivery rate and current pacing; `ssthresh` clamp activations; idle-hold enter/exit edges; the loss the FEC feedback path reported for this sending direction |
 | `c9` line (`fec_proto_fail`, `fec_hdr_crc_fail`, `fec_payload_crc_fail`, `fec_short_tx`, `fec_short_unknown`, `fec_drop_window`, `fec_drop_crypto`) | FEC receive verdict: header/CRC failures close the carrier, a payload CRC drops only that share; `fec_drop_crypto` counts shares that arrived before the key |
 | `c10` line (`fec_decode_blocks`, `fec_decode_recovered`, `fec_decode_nomem`, `fec_deliver_nomem`, `fec_deliver_dup`, `fec_deliver_ooo`, `fec_deliver_bad`, `fec_dup_share`, `fec_late_share`, `fec_late_data`, `fec_pad_share`, `fec_epoch_conflict`, `fec_slot_past_cut`, `fec_fin_bad`, `fec_ack_bad`, `fec_tx_share_gap`, `fec_empty_block`) | every way a FEC share or block can be lost: decode/delivery failures, duplicate/late/padded shares, epoch conflicts, past-cut slots, bad FIN/ACK, sender share gaps, empty blocks. A stall with all of them zero means the loss is outside these paths |
 | `c11` line (`fec_nack_tx`, `fec_nack_rx`, `fec_nack_retx`, `fec_nack_drop`, `fec_nack_bad`, `fec_replay_hit`, `fec_replay_miss`, `fec_nack_retx_bytes`, `fec_replace_retx_bytes`, `fec_nack_lat_ns`, `fec_nack_lat_max_ns`, `fec_nack_repair_ns`, `fec_nack_repair_max_ns`, `fec_reset_tcp_failed`, `fec_reset_user`, `fec_wait_carrier`, `fec_backpressure`) | NACK/replay repair: NACKs sent/received, shares replayed, replay hits/misses, replay bytes, repair latency, and reset causes. `fec_reset_tcp_failed` is the only FEC-owned reset and requires every carrier TCP to be gone; `fec_wait_carrier`/`fec_backpressure` show a producer waiting for a usable carrier or the source ring |

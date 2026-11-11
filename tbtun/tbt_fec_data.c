@@ -7430,6 +7430,10 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
             fb.p_ewma_ppm)
         {
             tx->peer_p_ppm = fb.p_ewma_ppm;
+            /* The same measurement feeds the carrier pacer: this direction's
+             * loss is what the receiver reports, and the CC divides the
+             * delivery rate by (1 - p) to cover the shares it will lose. */
+            WRITE_ONCE(sess->cc_loss_ppm, fb.p_ewma_ppm);
             if (sess->fec_sclc)
                 tx->peer_p_fast_ppm = fb.p_fast_ppm;
             tx->peer_expected = fb.expected_shares;

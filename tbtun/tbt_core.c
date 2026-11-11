@@ -19,8 +19,11 @@
 #include <linux/mm.h>
 #include <linux/vmstat.h>
 #include <linux/vmalloc.h>
+#include <net/tcp.h>
 
 #include "tbtun.h"
+#include "tbt_cc.h"
+#include "tbt_carrier_policy.h"
 
 /* Approximate MemAvailable in KiB: free pages plus reclaimable page cache
  * and slab, minus a small watermark reserve. si_mem_available() is exported
@@ -75,14 +78,25 @@ MODULE_PARM_DESC(debug_loss, "Allow carrier drop_ppm (frame loss injection) writ
  * snd_cwnd and sk_pacing_rate, then restores both while the session stays
  * idle and TCP has nothing in flight, so BBR does not start the next burst
  * from an idle-collapsed window. The snapshot is bounded by snd_wnd/mss,
- * snd_cwnd_clamp, sk_sndbuf/mss and sk_max_pacing_rate. A non-PAD write
- * cancels the hold before it queues bytes, so BBR's first real ACK owns the
- * next decision. Default on; write 0 to
+ * snd_cwnd_clamp, sk_sndbuf/mss and sk_max_pacing_rate. The first non-PAD
+ * write ends the hold under c->tx_lock and installs both values before it
+ * queues the record; the first real ACK then owns the next decision. Default
+ * on; write 0 to
  * /sys/module/tbtun/parameters/hold_enable to opt out. It writes tcp_sock
  * fields directly, which is not a stable kernel API. */
 bool tbt_hold_enable = true;
 module_param_named(hold_enable, tbt_hold_enable, bool, 0644);
 MODULE_PARM_DESC(hold_enable, "Hold BBR cwnd/pacing across idle periods (default 1; 0=off)");
+
+/* The congestion control every carrier asks for by name. BBR stays the
+ * default: it is what the tunnel has run and measured. tbtcc selects this
+ * module's own controller, so one binary can A/B the two algorithms. The
+ * name is requested per socket with setsockopt(TCP_CONGESTION) in
+ * tbt_carrier.c; it is never written to the system default. */
+char *tbt_carrier_cc = TBT_CAR_CC_NAME;
+module_param_named(carrier_cc, tbt_carrier_cc, charp, 0444);
+MODULE_PARM_DESC(carrier_cc,
+                 "Carrier TCP_CONGESTION name: bbr (default) or tbtcc");
 
 /* Retained for configuration compatibility. 0.7.0 carries one FEC flow per
  * session and that flow owns every group, so this value is ignored. */
@@ -154,6 +168,12 @@ static int __init tbtun_init(void)
 {
     int ret, err;
 
+    if (!tbt_carrier_cc || !tbt_carrier_cc[0] ||
+        strlen(tbt_carrier_cc) >= TCP_CA_NAME_MAX)
+    {
+        pr_err("tbtun: carrier_cc must be 1..%d bytes\n", TCP_CA_NAME_MAX - 1);
+        return -EINVAL;
+    }
     if (!max_carriers || max_carriers > TBT_MAX_CARRIERS_LIMIT)
     {
         pr_err("tbtun: max_carriers must be 1..%d\n", TBT_MAX_CARRIERS_LIMIT);
@@ -199,6 +219,17 @@ static int __init tbtun_init(void)
         tbt_fec_data_module_exit();
         return err;
     }
+    /* After the procfs is up and before any tunnel can exist: a failed
+     * registration must leave nothing behind, and tbt_carrier.c's first dial
+     * is only reachable through a later /proc write. */
+    err = tbt_cc_module_init();
+    if (err)
+    {
+        pr_err("tbtun: cannot register carrier_cc=%s: %d\n", tbt_carrier_cc, err);
+        tbt_procfs_exit();
+        tbt_fec_data_module_exit();
+        return err;
+    }
     pr_info("tbtun %u.%u.%u loaded: %u tunnels max, %u carriers max\n",
             TBT_VERSION_MAJOR, TBT_VERSION_MINOR, TBT_VERSION_PATCH,
             max_tunnels, max_carriers);
@@ -214,6 +245,9 @@ static void __exit tbtun_exit(void)
      * sessions down outside it; a destroy that waits for work must not pin
      * the global lock. */
     tbt_tunnel_shutdown();
+    /* Every carrier socket has been released, so no socket can still run the
+     * CC that this module registered. */
+    tbt_cc_module_exit();
     /* No flow can be put after the session teardown. Drain and destroy the
      * module-owned flow free workqueue: session destroy queues the last puts
      * there, and synchronize_rcu()/rcu_barrier() do not wait for work items.

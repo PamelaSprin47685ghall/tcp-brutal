@@ -155,7 +155,8 @@ sudo insmod tbtun.ko debug_loss=0
 | `max_tunnels` | `64` | 最多可配置的隧道数；新 id 超过上限返回 `ENOSPC` |
 | `max_carriers` | `256` | 每个会话的载体槽，`1..256`；`n + m` 或 `carriers` 超过上限返回 `EINVAL` |
 | `debug_loss` | `0` | 是否允许写 `drop_ppm`（确定性丢包注入） |
-| `hold_enable` | `1` | BBR hold：载体空闲 200 ms 后，50 ms poll 保存 cwnd/pacing（受 `snd_wnd/mss`、`snd_cwnd_clamp`、`sk_sndbuf/mss`、`sk_max_pacing_rate` 约束），并在会话持续空闲且 TCP 无在途字节时恢复两者；非 PAD 写入会先取消 hold。默认开启；写 `0` 关闭。它直接写 `tcp_sock` 字段，不是稳定的内核 API |
+| `carrier_cc` | `bbr` | 每条载体通过 `setsockopt(TCP_CONGESTION)` 显式请求的拥塞控制名。`bbr` 保持已测得的默认算法；`tbtcc` 选择本模块的耐丢包控制器做 A/B。它从不写入 `net.ipv4.tcp_congestion_control` |
+| `hold_enable` | `1` | BBR hold：载体空闲 200 ms 后，50 ms poll 保存 cwnd/pacing（受 `snd_wnd/mss`、`snd_cwnd_clamp`、`sk_sndbuf/mss`、`sk_max_pacing_rate` 约束），并在会话持续空闲且 TCP 无在途字节时恢复两者；第一条非 PAD 写入会结束 hold，并在入队前装回两个值。默认开启；写 `0` 关闭。它直接写 `tcp_sock` 字段，不是稳定的内核 API |
 
 控制面只在 `init_net` 中创建；没有 per-netns 视图。
 卸载用 `sudo rmmod tbtun`。卸载会清空所有隧道，关闭所有监听端口和载体。
@@ -399,7 +400,7 @@ HELLO 的源地址会成为会话锚：之后来自其他地址的 HELLO 在检�
 最前面是捕获与 RX 工作，然后是 `dbg` 行和 `live` 快照、`txwake`、`c3`
 （载体、加入、重传、重排、门限）、`ctl`（被钉住的控制帧）、`streams`（流普查）、
 `c6`（空洞）、`c8`（HTTP）、`c9`（FEC 接收判定）、`c10`（FEC 丢失原因）、
-`c11`（NACK/重放修复）、`c5`（重复），最后是
+`c11`（NACK/重放修复）、`c5`（重复）、`cc`（载体拥塞控制），最后是
 `reconcile`。
 
 | 键 | 含义 |
@@ -416,6 +417,7 @@ HELLO 的源地址会成为会话锚：之后来自其他地址的 HELLO 在检�
 | `tx_window`、`rtt_mean_us`、`rttvar_us`、`rtt_max_us`、`txq_max` | 生效的发送窗口及其输入 / 帧队列上限 |
 | `holes_declared`、`holes_repaired`、`holes_unrecoverable`、`rx_max_stall_us` | 空洞统计 |
 | `dup_tx`、`dup_used`、`dup_suppressed`、`inflate_ppm` | 重复发送 |
+| `cc` 行（`cc_carriers`、`cc_max_bw_bps`、`cc_pacing_bps`、`cc_clamp_hits`、`cc_hold_enter`、`cc_hold_exit`、`p_ppm`） | 正在运行 `tbtcc` 的载体数；各载体十 RTT 窗口最大速率的和、当前 pacing 的和；`ssthresh` 钳制激活次数；空闲 hold 进入/退出边沿；FEC 反馈路径测得的本发送方向丢包率 |
 | `c9` 行（`fec_proto_fail`、`fec_hdr_crc_fail`、`fec_payload_crc_fail`、`fec_short_tx`、`fec_short_unknown`、`fec_drop_window`、`fec_drop_crypto`） | FEC 接收判定：头/CRC 失败关闭载体，payload CRC 失败只丢该 share；`fec_drop_crypto` 统计密钥就绪前到达的 share |
 | `c10` 行（`fec_decode_blocks`、`fec_decode_recovered`、`fec_decode_nomem`、`fec_deliver_nomem`、`fec_deliver_dup`、`fec_deliver_ooo`、`fec_deliver_bad`、`fec_dup_share`、`fec_late_share`、`fec_late_data`、`fec_pad_share`、`fec_epoch_conflict`、`fec_slot_past_cut`、`fec_fin_bad`、`fec_ack_bad`、`fec_tx_share_gap`、`fec_empty_block`） | FEC share/块丢失的每种原因：解码/投递失败、重复/迟到/填充 share、epoch 冲突、越过块切口的槽、坏 FIN/ACK、发送端 share 缺口、空块。若流停住而它们全为 0，说明丢失不在这几条路径上 |
 | `c11` 行（`fec_nack_tx`、`fec_nack_rx`、`fec_nack_retx`、`fec_nack_drop`、`fec_nack_bad`、`fec_replay_hit`、`fec_replay_miss`、`fec_nack_retx_bytes`、`fec_replace_retx_bytes`、`fec_nack_lat_ns`、`fec_nack_lat_max_ns`、`fec_nack_repair_ns`、`fec_nack_repair_max_ns`、`fec_reset_tcp_failed`、`fec_reset_user`、`fec_wait_carrier`、`fec_backpressure`） | NACK/重放修复：NACK 收发、重放 share 数、重放命中/未命中、重放字节、修复时延与 reset 原因。`fec_reset_tcp_failed` 是唯一由 FEC 触发的 reset，要求所有 carrier TCP 都已失败；`fec_wait_carrier`/`fec_backpressure` 表示生产者在等可用载体或源环已满 |

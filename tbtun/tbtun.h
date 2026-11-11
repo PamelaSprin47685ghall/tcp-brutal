@@ -288,6 +288,9 @@ extern unsigned int max_carriers;
 extern unsigned int close_hard_cap_ms;
 /* Peripheral BBR hold, opt-in (module param hold_enable). */
 extern bool tbt_hold_enable;
+/* Carrier TCP_CONGESTION name (module param carrier_cc); bbr by default,
+ * tbtcc for the A/B run. */
+extern char *tbt_carrier_cc;
 
 /* Carrier source ports (DESIGN.md §7.2). `used` is one absolute bitmap over
  * the whole 16-bit port space; `lo`/`hi` are the global fallback window for a
@@ -1716,6 +1719,10 @@ struct tbt_session
      * prove all n_car sockets are BBR from /proc instead of inferring it. */
     atomic64_t car_bbr_ok;
     atomic64_t car_bbr_fail;
+    /* Receiver-measured loss for this direction, parts per million, from the
+     * latest FEC_FBK that carried a p sample. The carrier CC reads it to pace
+     * at max_bw / (1 - p); the FBK apply path in tbt_fec_data.c writes it. */
+    u32 cc_loss_ppm;
     /* Economic stall decision (poll). The discrete RTO grid estimates the
      * recovery survival function online; risk[i] counts stalls that were
      * still running at grid[i], events[i] those that recovered in
@@ -2236,6 +2243,10 @@ struct tbt_carrier
     u64 hold_since_ns;
     u64 hold_last_loss_ns;
     bool hold_active;
+    /* Two writers (the 50 ms poll and a non-PAD send path), so these are
+     * atomic like the session counters. They count hold edges, not polls. */
+    atomic64_t hold_enter;
+    atomic64_t hold_exit;
     u64 retry_at_ns;              /* next connect attempt */
     u64 rx_frames;                /* DATA frames received here; this rx work */
     u64 rx_bytes;                 /* bytes received here; this rx work */

@@ -28,6 +28,7 @@
 #include <net/tcp.h>
 
 #include "tbtun.h"
+#include "tbt_cc.h"
 
 #define TBT_CFG_NAME TBT_PROC_CONFIG
 #define TBT_TUNNELS_NAME TBT_PROC_TUNNELS
@@ -1025,6 +1026,43 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->car_bbr_ok),
                            tbt_stat_read(&s->car_bbr_fail),
                            tbt_stat_read(&s->slow_evicted));
+                /* Carrier CC: per-tunnel sums over the live carrier sockets.
+                 * max_bw and pacing are sums because the tunnel's capacity is
+                 * the sum of its carriers; the hold edges count every carrier
+                 * whether or not it selects the module's CC. */
+                {
+                    u64 cc_bw = 0, cc_pace = 0, cc_clamp = 0;
+                    u64 cc_enter = 0, cc_exit = 0;
+                    u32 cc_socks = 0, ci;
+
+                    for (ci = 0; ci < s->n_car; ci++)
+                    {
+                        struct tbt_carrier *car = tbt_carrier_get(s, (u8)ci);
+                        struct sock *csk;
+                        struct tbt_cc_info info;
+
+                        if (!car)
+                            continue;
+                        cc_enter += tbt_stat_read(&car->hold_enter);
+                        cc_exit += tbt_stat_read(&car->hold_exit);
+                        csk = tbt_carrier_sk_get(car);
+                        if (csk && tbt_cc_snapshot(csk, &info))
+                        {
+                            cc_bw += info.max_bw_bps;
+                            cc_pace += info.pacing_bps;
+                            cc_clamp += info.clamp_hits;
+                            cc_socks++;
+                        }
+                        tbt_carrier_sk_put(csk);
+                        tbt_carrier_put(car);
+                    }
+                    seq_printf(m, "tunnel %llu cc cc_carriers=%u "
+                                  "cc_max_bw_bps=%llu cc_pacing_bps=%llu "
+                                  "cc_clamp_hits=%llu cc_hold_enter=%llu "
+                                  "cc_hold_exit=%llu p_ppm=%u\n",
+                               id, cc_socks, cc_bw, cc_pace, cc_clamp,
+                               cc_enter, cc_exit, READ_ONCE(s->cc_loss_ppm));
+                }
                 /* Review 22: pinned control-frame lifetime. ctl_queued is the
                  * live control-queue depth; the other four are the retry,
                  * re-pin, obsolete-generation and explicit-loss record. */
