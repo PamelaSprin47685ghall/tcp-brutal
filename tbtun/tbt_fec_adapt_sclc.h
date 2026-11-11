@@ -307,13 +307,14 @@ struct tbt_fec_adapt_sclc_out
     u32 delta_q16;   /* analytic margin plus online surplus correction */
     u32 burst_q16;   /* max(burst feedforward, carrier feedforward) */
     u32 eps_q16;     /* target first-failure probability */
-    u32 sigma_q16;   /* |E-q| scale */
+    u32 sigma_q16;   /* EWMA |E - mean| scale */
     u16 backup;      /* safety shares currently added */
     u8 reason;
     u8 frozen;
     u16 m_req;       /* round(q_act + delta + burst) + backup at the chosen
                       * n; m_target is never below min(m_req, m_max) */
     int delta_off_q16; /* the integrated surplus offset, delta - delta0 */
+    u32 q_anchor_q16; /* max(mean + z*sigma, max of the last 16 E) */
 };
 
 /* One controller per direction. Zeroing is not enough; call init. */
@@ -347,9 +348,13 @@ struct tbt_fec_adapt_sclc_ctl
     int delta_off_q16; /* the only integrated state; delta = base + off */
     u32 eps_q16;
     u32 sigma_q16;
+    u32 ewma_mean_q16; /* E mean, alpha 1/16, the anchor centre */
     u32 ewma_fast_q16; /* alpha 1/4, per block */
     u32 ewma_slow_q16; /* alpha 1/64, the burst baseline, per block */
     u32 burst_q16;
+    u16 max_ring[TBT_FEC_ADAPT_SCLC_COLD_BLOCKS];
+    u16 max16;        /* max of the last 16 accepted E samples */
+    u8 max_head;
     u32 w_ppm;      /* W/T_b from the last tick, 1.0 = 1000000 */
     u32 delivered;  /* DATA shares since the last tick */
     u16 blocks_tick; /* accepted samples since the last tick */

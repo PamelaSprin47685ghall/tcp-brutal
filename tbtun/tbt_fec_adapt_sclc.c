@@ -622,6 +622,32 @@ static u32 tbt_fec_adapt_sclc_len(u32 eps_q16)
     return tbt_fec_sclc_len_q16[TBT_FEC_SCLC_LEN_N - 1];
 }
 
+/* Q^{-1}(eps) in Q16. The generated finite-length table stores
+ * len = Qinv * 0.60 * 16 * 65536, so Qinv_q16 = len / 9.6. */
+static u32 tbt_fec_adapt_sclc_qinv(u32 eps_q16)
+{
+    u32 len = tbt_fec_adapt_sclc_len(eps_q16);
+
+    return (u32)(((u64)len * 10u) / 96u);
+}
+
+/* Analytic 1-eps anchor: max(mean + z*sigma, max of the last 16 E). The
+ * sample maximum alone only estimates Q_{15/16}; the Gaussian term supplies
+ * the extreme tail, so q is never pinned above the distribution. */
+static u32 tbt_fec_adapt_sclc_anchor(
+    const struct tbt_fec_adapt_sclc_ctl *c)
+{
+    u32 z = tbt_fec_adapt_sclc_qinv(c->eps_q16);
+    u64 center = (u64)c->ewma_mean_q16 +
+                 (((u64)z * c->sigma_q16) >> 16);
+    u32 max16 = (u32)c->max16 << 16;
+    u32 cap = (u32)c->shares << 16;
+
+    if (center > cap)
+        center = cap;
+    return center > max16 ? (u32)center : max16;
+}
+
 /* eps = sigma / ((n+m)(1+w)), clamped to [1/(n+m), 5%]. All Q16.16. */
 static u32 tbt_fec_adapt_sclc_eps(u32 sigma_q16, u16 shares, u32 w_ppm)
 {
@@ -767,18 +793,15 @@ static u32 tbt_fec_adapt_sclc_backup_win(u32 eps_q16)
     return win;
 }
 
-/* The 16 cold samples seed q with the empirical (1-eps) quantile when that
- * quantile is resolvable, and with m_init - delta0 otherwise. Sixteen
- * samples cannot resolve a quantile below 1/16, and using the sample maximum
- * there would pull q down and m to its floor. Sigma comes from the median
- * absolute deviation. This is the only bootstrap; every later q change is
- * the Robbins-Monro update. */
+/* The 16 cold samples seed q at the analytic anchor
+ * max(mean + z*sigma, max16). Sixteen samples can only see Q_{15/16}, but
+ * the Gaussian tail term supplies 1-eps directly, so q is not pinned above
+ * the distribution. Sigma starts at the median absolute deviation. */
 static void tbt_fec_adapt_sclc_cold_seed(struct tbt_fec_adapt_sclc_ctl *c)
 {
     u16 v[TBT_FEC_ADAPT_SCLC_COLD_BLOCKS];
     u32 mad_sum = 0;
-    u32 mad, sigma, eps, rank, q_emp, q_init, mean = 0;
-    bool enough;
+    u32 mad, sigma, eps, mean = 0, max16 = 0;
     u16 med;
     u32 i;
 
@@ -793,33 +816,29 @@ static void tbt_fec_adapt_sclc_cold_seed(struct tbt_fec_adapt_sclc_ctl *c)
         mad = 1;
     sigma = mad << 16;
     eps = tbt_fec_adapt_sclc_eps(sigma, c->shares, c->w_ppm);
-    rank = (u32)(((u64)(TBT_FEC_ADAPT_SCLC_ONE - eps) *
-                      TBT_FEC_ADAPT_SCLC_COLD_BLOCKS +
-                  TBT_FEC_ADAPT_SCLC_ONE - 1) >>
-                 16);
-    if (!rank)
-        rank = 1;
-    if (rank > TBT_FEC_ADAPT_SCLC_COLD_BLOCKS)
-        rank = TBT_FEC_ADAPT_SCLC_COLD_BLOCKS;
-    q_emp = (u32)v[rank - 1] << 16;
-    if (c->m_cur > (c->delta0_q16 >> 16))
-        q_init = (u32)(c->m_cur - (c->delta0_q16 >> 16)) << 16;
-    else
-        q_init = (u32)c->extra << 16;
-    enough = (u64)TBT_FEC_ADAPT_SCLC_COLD_BLOCKS * eps >=
-             TBT_FEC_ADAPT_SCLC_ONE;
-    c->q_q16 = (enough && q_emp > q_init) ? q_emp : q_init;
-    if (c->q_q16 > ((u32)c->shares << 16))
-        c->q_q16 = (u32)c->shares << 16;
-    c->q_act_q16 = c->q_q16;
-    c->sigma_q16 = sigma;
-    c->eps_q16 = eps;
     for (i = 0; i < TBT_FEC_ADAPT_SCLC_COLD_BLOCKS; i++)
         mean += v[i];
     mean = (mean + TBT_FEC_ADAPT_SCLC_COLD_BLOCKS / 2) /
            TBT_FEC_ADAPT_SCLC_COLD_BLOCKS;
+    for (i = 0; i < TBT_FEC_ADAPT_SCLC_COLD_BLOCKS; i++)
+    {
+        u16 e = c->cold_e[i];
+
+        c->max_ring[i] = e;
+        if (e > max16)
+            max16 = e;
+    }
+    c->max_head = 0;
+    c->max16 = (u16)max16;
+    c->ewma_mean_q16 = mean << 16;
     c->ewma_fast_q16 = mean << 16;
     c->ewma_slow_q16 = mean << 16;
+    c->sigma_q16 = sigma;
+    c->eps_q16 = eps;
+    c->q_q16 = tbt_fec_adapt_sclc_anchor(c);
+    if (c->q_q16 > ((u32)c->shares << 16))
+        c->q_q16 = (u32)c->shares << 16;
+    c->q_act_q16 = c->q_q16;
     c->blocks_tick = 0;
     c->cold_done = 1;
     c->fail_run = 0;
@@ -930,33 +949,68 @@ void tbt_fec_adapt_sclc_block_sample(struct tbt_fec_adapt_sclc_ctl *c,
     e = (u32)E << 16;
     gamma = tbt_fec_adapt_sclc_gamma_q(c->d);
     {
-        u32 ind = e > c->q_q16 ? TBT_FEC_ADAPT_SCLC_ONE : 0u;
-        long long step = ((long long)gamma *
-                          ((long long)ind - (long long)c->eps_q16)) >>
-                         16;
-        long long q;
+        /* Mean, scale and the 16-block maximum that bound the anchor. */
+        int dm = (int)e - (int)c->ewma_mean_q16;
+        u32 old_mean = c->ewma_mean_q16;
+        u32 diff;
+        int ds;
+        u16 old_max;
 
-        /* Do not wind q up while the actuator is pinned at m_max. */
-        if (!(c->sat_max && ind))
-        {
-            q = (long long)c->q_q16 + step;
-            if (q < 0)
-                q = 0;
-            if (q > ((long long)c->shares << 16))
-                q = (long long)c->shares << 16;
-            c->q_q16 = (u32)q;
-        }
-    }
-    {
-        /* Scale around the slow mean, not around q: a deliberately
-         * conservative q seed must not inflate sigma and eps. */
-        u32 diff = e > c->ewma_slow_q16 ? e - c->ewma_slow_q16
-                                        : c->ewma_slow_q16 - e;
-        int ds = (int)diff - (int)c->sigma_q16;
-
+        c->ewma_mean_q16 = (u32)((int)c->ewma_mean_q16 + dm / 16);
+        diff = e > old_mean ? e - old_mean : old_mean - e;
+        ds = (int)diff - (int)c->sigma_q16;
         c->sigma_q16 = (u32)((int)c->sigma_q16 + ds / 16);
         if (c->sigma_q16 < TBT_FEC_ADAPT_SCLC_SIGMA_MIN_Q16)
             c->sigma_q16 = TBT_FEC_ADAPT_SCLC_SIGMA_MIN_Q16;
+
+        old_max = c->max_ring[c->max_head];
+        c->max_ring[c->max_head] = E;
+        c->max_head =
+            (u8)((c->max_head + 1u) % TBT_FEC_ADAPT_SCLC_COLD_BLOCKS);
+        if (E > c->max16)
+            c->max16 = E;
+        else if (old_max == c->max16)
+        {
+            u32 i, m = 0;
+
+            for (i = 0; i < TBT_FEC_ADAPT_SCLC_COLD_BLOCKS; i++)
+                if (c->max_ring[i] > m)
+                    m = c->max_ring[i];
+            c->max16 = (u16)m;
+        }
+        c->eps_q16 =
+            tbt_fec_adapt_sclc_eps(c->sigma_q16, c->shares, c->w_ppm);
+    }
+    {
+        u32 anchor = tbt_fec_adapt_sclc_anchor(c);
+        u32 floor = c->ewma_mean_q16 + c->sigma_q16;
+        long long q;
+        long long old = (long long)c->q_q16;
+
+        if (c->q_q16 > anchor + c->sigma_q16)
+        {
+            /* Channel improved: chase the anchor with a 16-block time
+             * constant instead of the RM's epsilon-sized down step. */
+            q = old - (((long long)gamma * (old - (long long)anchor)) >>
+                       16);
+        }
+        else
+        {
+            u32 ind = e > c->q_q16 ? TBT_FEC_ADAPT_SCLC_ONE : 0u;
+
+            q = old + (((long long)gamma *
+                        ((long long)ind - (long long)c->eps_q16)) >>
+                       16);
+        }
+        if (c->sat_max && q > old)
+            q = old;
+        if (q < (long long)floor)
+            q = floor;
+        if (q < 0)
+            q = 0;
+        if (q > ((long long)c->shares << 16))
+            q = (long long)c->shares << 16;
+        c->q_q16 = (u32)q;
     }
     {
         int df = (int)e - (int)c->ewma_fast_q16;
@@ -1032,6 +1086,7 @@ static void tbt_fec_adapt_sclc_fill_out(
     out->sigma_q16 = c->sigma_q16;
     out->backup = c->backup_off;
     out->delta_off_q16 = c->delta_off_q16;
+    out->q_anchor_q16 = tbt_fec_adapt_sclc_anchor(c);
     out->reason = reason;
     out->frozen = c->frozen;
 }
