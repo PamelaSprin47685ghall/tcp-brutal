@@ -143,9 +143,9 @@ results and their cost.
 ## Packaging
 
 The module version has one authority: `TBT_VERSION_MAJOR/MINOR/PATCH` in
-`tbtun/tbt_uapi.h` (currently `0.7.0`). The wire
-version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x000a` for the 32-byte frames
-and `TBT_FEC_CONV=0x100a` for the 48-byte FEC header and the 64-byte
+`tbtun/tbt_uapi.h` (currently `0.8.0`). The wire
+version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x000b` for the 32-byte frames
+and `TBT_FEC_CONV=0x100b` for the 48-byte FEC header and the 64-byte
 `FEC_CFG`/`FEC_FBK` records; all three are independent of
 the module version. `TBT_CONV 0x0005` removed the unused PREDICT/CANCEL
 placeholder frames: a peer that still sends one fails the header check and its
@@ -155,10 +155,10 @@ conv does not match.
 The 36-byte OPEN stays as 0.6.0 defined it: the 32-byte FEC group bitmap, the
 little-endian route slot (the near side's listen mapping), and the
 little-endian target port for that slot. Zero keeps the far side's configured
-port; any other value must equal it. `TBT_WIRE_VERSION_V6` moves to 7, so a
-0.6.0 FEC peer is refused at the first HELLO rather than at the first OPEN.
+port; any other value must equal it. `TBT_WIRE_VERSION_V6` is 8, so a
+0.7.3 FEC peer is refused at the first HELLO rather than at the first OPEN.
 
-The current FEC wire is `0x100a`: `0x1002` added FIN's 16-byte body
+The current FEC wire is `0x100b`: `0x1002` added FIN's 16-byte body
 (`pkt_end`, `pkt_base`) and the PARITY block marker (`win_len=0`,
 `payload_len=0`, `epoch=0`); `0x1003` grew the ACK to 24 bytes and added
 `deliver_bytes`; `0x1004` made NACK a 64-byte bitmap repair request; `0x1005`

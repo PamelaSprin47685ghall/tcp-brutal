@@ -28,8 +28,8 @@ typedef uint64_t u64;
 #endif
 
 #define TBT_VERSION_MAJOR 0
-#define TBT_VERSION_MINOR 7
-#define TBT_VERSION_PATCH 3
+#define TBT_VERSION_MINOR 8
+#define TBT_VERSION_PATCH 0
 #define TBT_VERSION ((TBT_VERSION_MAJOR << 16) | (TBT_VERSION_MINOR << 8) | TBT_VERSION_PATCH)
 
 /* Roles, as carried in HELLO and in the `role=` key. */
@@ -69,7 +69,7 @@ static inline u16 tbt_port_host16(u16 net)
     return (u16)((u16)u.b[0] << 8 | (u16)u.b[1]);
 }
 
-/* Wire protocol revision: u16 at frame offset +30, 0x000a. Independent of the
+/* Wire protocol revision: u16 at frame offset +30, 0x000b. Independent of the
  * module version (DESIGN.md §11); bump it alone on any wire change.
  * 0x0002 moved body_len into the header (+6) and removed the 4-byte prefix.
  * 0x0003 carries RETIRE (24) and the HELLO profile|gen byte; a 0x0002 peer
@@ -117,8 +117,15 @@ static inline u16 tbt_port_host16(u16 net)
  * record. DATA and PARITY carry plain application bytes again, one stream
  * per FEC flow, and the FEC record range is 0x30..0x35. A 0.6.0 peer fails
  * the first HELLO (version 6), the first FEC record (0x1009) and the first
- * OPEN length check; there is no compatibility branch. */
-#define TBT_CONV 0x000au
+ * OPEN length check; there is no compatibility branch.
+ * 0x000b (0.8.0) is the constant-frame cut. S falls to 1024 bytes, a short
+ * DATA record is zero-padded to S and names its real length in win_len, and
+ * the downlink SC-LDPC share is 1024 bytes (16 batches). TBT_FEC_CONV stays
+ * 0x100b because the 48-byte header layout and every offset are unchanged;
+ * the new PADDED flag bit is what a 0.7.3 receiver refuses. The TBT_CONV
+ * bump is the session gate: a 0.7.3 peer fails the first HELLO header
+ * (0x000a != 0x000b), so the two revisions never mix. */
+#define TBT_CONV 0x000bu
 
 /* HELLO body[0]: wire-protocol version, independent of TBT_VERSION. The FEC
  * v6 session uses the extended body below; the old ARQ keeps version 1 and
@@ -137,7 +144,9 @@ static inline u16 tbt_port_host16(u16 net)
  * DATA/PARITY, and each block names its own n/m. The block sequence is
  *   DATA:   seq = block_seq0 + group * n + share_index
  *   PARITY: seq = block_seq0
- * so a block's first packet no longer follows from the shape alone. */
+ * so a block's first packet no longer follows from the shape alone.
+ * 0.8.0 keeps version 8 and TBT_FEC_CONV 0x100b; the constant-frame cut is
+ * gated by TBT_CONV 0x000b, not by this byte. */
 #define TBT_WIRE_VERSION 1
 #define TBT_WIRE_VERSION_V6 8
 
@@ -153,7 +162,10 @@ static inline u16 tbt_port_host16(u16 net)
  * Layout (little-endian, 48 bytes):
  *   +0  u8  type        0x30 DATA, 0x31 PARITY, 0x32 ACK, 0x33 NACK,
  *                       0x34 FEC_CFG, 0x35 FEC_FBK
- *   +1  u8  flags       bit0 LAST; every other bit must be zero
+ *   +1  u8  flags       bit0 LAST; bit1 PADDED; every other bit must be
+ *                       zero. PADDED is DATA-only: the record body is the
+ *                       full S bytes and win_len names the real payload
+ *                       length. A receiver strips the zero tail.
  *   +2  u16 share_index 0..n+m-1; u16 so n+m=256 is representable
  *   +4  u8  n           data shares in the block
  *   +5  u8  m           parity shares in the block
@@ -167,8 +179,10 @@ static inline u16 tbt_port_host16(u16 net)
  *   +8  u64 block_id    block/window identity chosen by the sender
  *   +16 u64 seq         DATA: block_seq0 + group*n + share_index;
  *                       PARITY: block_seq0 (the block's first packet)
- *   +24 u16 win_len     PARITY: covered packets; DATA: 0
- *   +26 u16 payload_len payload bytes following this header
+ *   +24 u16 win_len     PARITY: covered packets; DATA: 0, or with PADDED
+ *                       the real payload bytes 1..S (the rest is zero pad)
+ *   +26 u16 payload_len payload bytes following this header; with PADDED
+ *                       DATA this is exactly S
  *   +28 u16 conv        0x100b
  *   +30 u16 group       DATA/PARITY: group index 0..groups-1.
  *                       Control records (ACK/NACK/CFG/FBK): must be 0.
@@ -238,7 +252,9 @@ static inline u16 tbt_port_host16(u16 net)
  * extra record types.
  * M11 (0x100b, 0.8.0) makes the header word at +30 the group for DATA and
  * PARITY, and gives every block its own n/m; every length and offset above
- * is the 0.8.0 contract. */
+ * is the 0.8.0 contract. The 0.8.0 constant-frame cut keeps this revision:
+ * S becomes 1024 and DATA may set PADDED (0x02) with the real length in
+ * win_len. TBT_CONV 0x000b is the gate that keeps a 0.7.3 peer out. */
 
 /* FEC record types. */
 #define TBT_FEC_DATA 0x30
@@ -256,9 +272,13 @@ static inline bool tbt_fec_record_type(u8 type)
     return type >= TBT_FEC_DATA && type <= TBT_FEC_FBK;
 }
 
-/* FEC header flags: bit0 LAST, all others reserved and refused. */
+/* FEC header flags: bit0 LAST, bit1 PADDED. All others reserved and refused.
+ * PADDED (DATA only): payload_len == S and win_len is the real byte count
+ * 1..S; the sender zero-fills [win_len, S) before sealing the payload CRC.
+ * A full S-byte DATA record needs no flag. */
 #define TBT_FEC_FF_LAST 0x01
-#define TBT_FEC_FF_MASK 0x01
+#define TBT_FEC_FF_PADDED 0x02
+#define TBT_FEC_FF_MASK 0x03
 
 /* FEC header field offsets and size. */
 #define TBT_FEC_HDR_LEN 48
@@ -279,9 +299,11 @@ static inline bool tbt_fec_record_type(u8 type)
 #define TBT_FEC_H_HDRCRC 44
 
 /* FEC payload and record bounds. S is the configured packet size, at most
- * TBT_FEC_PAYLOAD_MAX. A full record is header plus payload. */
-#define TBT_FEC_PAYLOAD_MAX 8192
-#define TBT_FEC_REC_MAX (TBT_FEC_HDR_LEN + TBT_FEC_PAYLOAD_MAX) /* 8240 */
+ * TBT_FEC_PAYLOAD_MAX. A full record is header plus payload. 0.8.0 fixes the
+ * default S at 1024: an http-kal chunk is 5 + 48 + 1024 + 2 = 1079 bytes and
+ * a raw record is 1072 bytes. */
+#define TBT_FEC_PAYLOAD_MAX 1024
+#define TBT_FEC_REC_MAX (TBT_FEC_HDR_LEN + TBT_FEC_PAYLOAD_MAX) /* 1072 */
 #define TBT_FEC_CHUNK_MAX (TBT_FEC_REC_MAX + 4) /* hex size line + CRLF slack */
 
 /* Share and carrier limits. shares = n + m <= 256; 1 share per carrier in
@@ -328,8 +350,8 @@ static inline bool tbt_fec_record_type(u8 type)
  *   +44 u32 reserved    must be 0
  *   +48 u8  codec_variant 0=RLNC single, 1=RLNC grouped, 2=SC-LDPC
  *   +49 u8  L           variant 0/1: 0; variant 2: 8 or 16
- *   +50 u16 block       variant 0/1: 0; variant 2: 256 or 512, and the
- *                       uplink GF(16) variant is 128
+ *   +50 u16 block       variant 0/1: 0; variant 2: 256 or 512 for the
+ *                       binary downlink, 64 for the uplink GF(16) codec
  *   +52 u32 rate_ppm    variant 0/1: 0; variant 2: 250000..700000
  *   +56 u32 crc32c_ext  CRC32C over bytes +48..+55
  *   +60 u32 reserved2   must be 0
@@ -385,7 +407,7 @@ static inline bool tbt_fec_record_type(u8 type)
  *   +52 u8  codec_variant       receiver's installed variant
  *   +53 u8  L                   0/8/16, matching the variant
  *   +54 u16 block               0/256/512, matching the variant; the
- *                               uplink GF(16) codec uses 128
+ *                               uplink GF(16) codec uses 64
  *   +56 u32 rate_ppm_current    receiver's current codec rate
  *   +60 u32 rate_ppm_target     the sender's announced CFG target rate
  */
@@ -472,7 +494,7 @@ enum tbt_frame_type
  * sizes its dup array by it. */
 #define TBT_DUP_MAX 3
 
-/* OPEN body (0.7.0, TBT_CONV 0x000a): exactly TBT_OPEN_BODY_LEN bytes.
+/* OPEN body (0.8.0, TBT_CONV 0x000b): exactly TBT_OPEN_BODY_LEN bytes.
  *   +0  u8  group_mask[32]  bit p = physical FEC group p; bits at or above
  *                           carriers/(n+m) must be zero
  *   +32 u16 route_slot      near-side listen endpoint index (mapping slot)

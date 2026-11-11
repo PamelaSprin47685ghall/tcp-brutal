@@ -1948,8 +1948,10 @@ static void test_chunk_encode(void)
     }
     ok(good, "every legal chunk size has one canonical spelling", NULL);
 
-    ok(tbt_http_chunk_hdr(buf, sizeof(buf), TBT_FEC_REC_MAX + 1) == 0,
-       "chunk size above the v6 FEC record ceiling is refused", NULL);
+    ok(tbt_http_chunk_hdr(buf, sizeof(buf), TBT_FEC_REC_MAX + 1) > 0,
+       "a legacy record above the FEC ceiling still has a size line", NULL);
+    ok(tbt_http_chunk_hdr(buf, sizeof(buf), TBT_HTTP_CHUNK_DATA_MAX + 1) == 0,
+       "chunk size above the container ceiling is refused", NULL);
     ok(tbt_http_chunk_hdr(buf, sizeof(buf), TBT_FEC_REC_MAX) > 0,
        "v6 FEC record ceiling is accepted", NULL);
     ok(tbt_http_chunk_hdr(buf, sizeof(buf), (size_t)-1) == 0,
@@ -3726,10 +3728,10 @@ static void test_fec_http(void)
         {
             memset(recs8[b], 0, sizeof(recs8[b]));
             recs8[b][0] = TBT_FEC_DATA;
-            recs8[b][26] = 0x00;
-            recs8[b][27] = 0x20; /* 8192 payload bytes */
-            recs8[b][28] = 0x01;
-            recs8[b][29] = 0x10;
+            recs8[b][26] = (u8)(TBT_FEC_PAYLOAD_MAX & 0xff);
+            recs8[b][27] = (u8)(TBT_FEC_PAYLOAD_MAX >> 8);
+            recs8[b][28] = (u8)(TBT_FEC_CONV & 0xff);
+            recs8[b][29] = (u8)(TBT_FEC_CONV >> 8);
         }
         for (b = 0; b < 8; b++)
         {

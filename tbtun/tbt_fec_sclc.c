@@ -1,7 +1,7 @@
 /* tbt_fec_sclc.c - downlink SC-IRA codec, 256-share rate ladder.
  *
  * Construction and message semantics follow review/fec-prototype/sc_ldpc
- * (SC_TERM_ACC). The FEC block always has 256 shares and 8192 codewords;
+ * (SC_TERM_ACC). The FEC block always has 256 shares and 1024 codewords;
  * n data shares and m = 256 - n parity shares select the transmitted code
  * rate. Each coupling block holds n payload variables, m parity variables
  * and m checks, so every parity variable is transmitted: nothing is
@@ -11,8 +11,8 @@
  * the bit-sliced peeling decoder, one 64-codeword batch at a time. See
  * tbt_fec_sclc.h for the exact byte mapping and the graph shape.
  *
- * The batch loop is a property of the share format (8192 bytes / 64 bytes =
- * 128 batches), never of n. Keeping it fixed is what lets every ladder point
+ * The batch loop is a property of the share format (1024 bytes / 64 bytes =
+ * 16 batches), never of n. Keeping it fixed is what lets every ladder point
  * share the same wire block and the same decoder scratch.
  *
  * No allocation happens on the per-share path: the code object owns the
@@ -234,14 +234,14 @@ struct tbt_sclc
     u16 m_shares; /* parity shares and checks per FEC block */
     u16 k;        /* rate in parts per thousand */
     u16 w;        /* codeword block, 256 */
-    size_t s;     /* share bytes, 8192 */
+    size_t s;     /* share bytes, 1024 */
     u64 nonce;
 
     int n;       /* variables per codeword, 8*(n_shares+m_shares) */
     int n_data;  /* 8 * n_shares */
     int n_par;   /* 8 * m_shares */
     int n_chk;   /* one check per parity variable */
-    int batches; /* 8192 codewords / 64, always 128 */
+    int batches; /* 1024 codewords / 64, always 16 */
     int edges;
     int dcs; /* encoder plan stride, max check degree */
 
@@ -403,7 +403,7 @@ static int sclc_build_graph(struct tbt_sclc *c)
     c->n = c->n_data + c->n_par;
     c->batches = TBT_SCLC_BATCHES;
     c->edges = L * dv * n + L * pc + (L - 1) * pc;
-    if (c->batches != 128)
+    if (c->batches != TBT_SCLC_BATCHES)
         return -EINVAL;
 
     vdeg = sclc_alloc((size_t)c->n * sizeof(int));

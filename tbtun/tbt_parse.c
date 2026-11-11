@@ -927,12 +927,12 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     /* w=0 and carriers=0 mean "auto". Resolve them before validating, so the
      * struct holds the effective value and the canonical render is stable:
      * a written 0 reads back as the value it stands for. */
-    /* mode=3 reuses w as the codeword block: 256 is the binary downlink, 128
+    /* mode=3 reuses w as the codeword block: 256 is the binary downlink, 64
      * the GF(16) uplink; 512 is reserved for the L16/block512 profile. It is
      * not an RLNC window, so w >= n does not apply to it. */
-    if (cfg->mode == 3 && cfg->w && cfg->w != 128 && cfg->w != 256 &&
+    if (cfg->mode == 3 && cfg->w && cfg->w != 64 && cfg->w != 256 &&
         cfg->w != 512)
-        return tbt_fail(e, "w", "sc-ldpc w must be 128, 256 or 512");
+        return tbt_fail(e, "w", "sc-ldpc w must be 64, 256 or 512");
     if (!cfg->w)
         cfg->w = cfg->mode == 3 ? 256 : (u16)(2 * cfg->n);
     if (cfg->mode != 3 && cfg->w < cfg->n)
@@ -996,7 +996,7 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
             if (cfg->w != TBT_FEC_SCLC_BLOCK_UP ||
                 (cfg->L && cfg->L != TBT_FEC_SCLC_L_UP))
                 return tbt_fail(e, "adaptive",
-                                "uplink adaptive needs block=128 L=16");
+                                "uplink adaptive needs block=64 L=8");
             fc.w = cfg->L ? cfg->L : TBT_FEC_SCLC_L_UP;
             fc.k = cfg->w;
             fc.d = (u8)((u32)cfg->n * 256u / shares);

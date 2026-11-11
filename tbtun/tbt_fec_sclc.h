@@ -7,7 +7,7 @@
  * transmitted parity bits. The shipped ladder is 64/192, 76/180, 102/154,
  * 128/128, 151/105 and 178/78 (25/30/40/50/60/70 percent).
  *
- * One 8 KiB share carries one 8-bit segment of all 8192 codewords:
+ * One 1 KiB share carries one 8-bit segment of all 1024 codewords:
  *
  *     share byte 64*b + c, bit j  =  codeword b*64+c, bit 8*s+j,
  *
@@ -15,7 +15,7 @@
  * bits 8*s..8*s+7 of every codeword; parity share s holds transmitted
  * parity bits 8*s..8*s+7 of every codeword. Batch b is the 64 codewords
  * b*64..b*64+63, and its segment is share bytes 64*b .. 64*b+63. There are
- * always 128 batches, independent of n and m: a share is 8192 bytes and a
+ * always 16 batches, independent of n and m: a share is 1024 bytes and a
  * segment is 64 bytes. A lost share therefore erases the same eight-bit
  * position in all 64 codewords of every batch, which is exactly the --corr
  * mask shape of the bit-sliced benchmark: 64 codewords share one erasure
@@ -52,8 +52,8 @@
 #define TBT_SCLC_SHARES TBT_FEC_MAX_SHARES /* data + parity shares */
 #define TBT_SCLC_BATCH 64  /* codewords per batch */
 #define TBT_SCLC_SEG_BYTES 64 /* one batch's 64 codewords in a share */
-#define TBT_SCLC_SHARE TBT_FEC_PAYLOAD_MAX /* 8192 bytes */
-#define TBT_SCLC_BATCHES (TBT_SCLC_SHARE / TBT_SCLC_SEG_BYTES) /* 128 */
+#define TBT_SCLC_SHARE TBT_FEC_PAYLOAD_MAX /* 1024 bytes */
+#define TBT_SCLC_BATCHES (TBT_SCLC_SHARE / TBT_SCLC_SEG_BYTES) /* 16 */
 /* Payload degree below/at 50%, and above 50%. */
 #define TBT_SCLC_DV 5
 #define TBT_SCLC_DV_HIGH 4

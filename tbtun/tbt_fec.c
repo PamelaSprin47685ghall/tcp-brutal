@@ -173,11 +173,13 @@ static int tbt_crc32c_hw_detect(void)
     return __builtin_cpu_supports("sse4.2") ? 1 : 0;
 }
 
-/* GCC documents the extension-only target string from 9 on; old compilers,
- * Clang, a non-Linux libc without getauxval, and a big-endian ABI all keep
- * the table path (CRC32X consumes the register's native byte order). */
+/* GCC documents the extension-only target string from 9 on; Clang accepts
+ * the same +crc target attribute and defines __GNUC__ as 4, so the version
+ * test is skipped for it. A non-Linux libc without getauxval and a
+ * big-endian ABI keep the table path (CRC32X consumes the register's native
+ * byte order). */
 #elif defined(__aarch64__) && defined(__linux__) && defined(__GNUC__) && \
-    !defined(__clang__) && __GNUC__ >= 9 && defined(__BYTE_ORDER__) &&    \
+    (defined(__clang__) || __GNUC__ >= 9) && defined(__BYTE_ORDER__) &&    \
     __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 
 #include <arm_acle.h>
@@ -403,15 +405,27 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
         {
             /* A short DATA packet is legal anywhere. The packetizer emits one
              * when the application goes quiet and the packet cannot fill, so
-             * an interactive request is not held behind 8192 bytes that never
+             * an interactive request is not held behind S bytes that never
              * come. The receiver places a share by the sum of the payload
              * lengths before it, not by the packet index times S, so a short
              * share mid-stream is unambiguous; LAST alone marks the end of
-             * the stream. */
-            if (!h->payload_len || h->payload_len > max_payload)
-                return -EPROTO;
-            if (h->win_len != 0)
-                return -EPROTO;
+             * the stream. With PADDED the wire body is a full S-byte slot
+             * (zero tail) and win_len is the real length; without it the body
+             * is exactly payload_len bytes and win_len must stay zero. */
+            if (h->flags & TBT_FEC_FF_PADDED)
+            {
+                if (h->payload_len != max_payload)
+                    return -EPROTO;
+                if (!h->win_len || h->win_len > max_payload)
+                    return -EPROTO;
+            }
+            else
+            {
+                if (!h->payload_len || h->payload_len > max_payload)
+                    return -EPROTO;
+                if (h->win_len != 0)
+                    return -EPROTO;
+            }
             /* block_seq0 = seq - group*n - share_index must not underflow. */
             if (h->seq < (u64)h->reserved * h->n + h->share_index)
                 return -EPROTO;
@@ -424,6 +438,10 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
         }
         else
         {
+            /* PADDED describes a DATA body length; a PARITY slot is always
+             * full S bytes and carries no per-share length. */
+            if (h->flags & TBT_FEC_FF_PADDED)
+                return -EPROTO;
             if (h->win_len == 0)
             {
                 /* Empty-block marker: no payload, no epoch, parity 0, and no
@@ -1363,16 +1381,23 @@ int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], u16 carriers,
         if (L != 8 && L != 16)
             return -EPROTO;
         /* The v8 block ladder is 256/512; the uplink GF(16) codec's
-         * 128-share block is a legal variant-2 combination, not a
-         * transitional exception. It is valid only with L=16 and more than
+         * 64-share block is a legal variant-2 combination, not a
+         * transitional exception. It is valid only with L=8 and more than
          * one group. */
         if (block != 256 && block != 512 &&
-            !(block == TBT_FEC_SCLC_BLOCK_UP && groups > 1 && L == 16))
+            !(block == TBT_FEC_SCLC_BLOCK_UP && groups > 1 &&
+              L == TBT_FEC_SCLC_L_UP))
             return -EPROTO;
         if (rate_ppm < 250000u || rate_ppm > 700000u)
             return -EPROTO;
         want_n = (u32)(((u64)rate_ppm * shares) / 1000000u);
         if (want_n != n)
+            return -EPROTO;
+        /* The uplink GF(16) codec builds only its 0.8.0 shape's splits. A
+         * wire body that names 22/10 or 5/27 would install a codec the
+         * receiver can never build. */
+        if (block == TBT_FEC_SCLC_BLOCK_UP &&
+            !tbt_fec_sclc_up_buildable_64_8((u16)n, (u16)m))
             return -EPROTO;
         /* Keep one internal shape vocabulary for the mapping helpers and
          * the codec factory. The wire bytes above were already checked to
@@ -1454,11 +1479,11 @@ int tbt_fec_fbk_unpack(const u8 in[TBT_FEC_FBK_LEN], struct tbt_fec_fbk *f)
         return -EPROTO;
     if (variant == 2)
     {
-        /* Same block ladder as FEC_CFG: 256/512, plus 128 for the uplink
+        /* Same block ladder as FEC_CFG: 256/512, plus 64 for the uplink
          * GF(16) report. */
         if ((L != 8 && L != 16) ||
             (block != 256 && block != 512 &&
-             !(block == TBT_FEC_SCLC_BLOCK_UP && L == 16)))
+             !(block == TBT_FEC_SCLC_BLOCK_UP && L == TBT_FEC_SCLC_L_UP)))
             return -EPROTO;
     }
     else if (L || block)
@@ -2425,14 +2450,17 @@ int tbt_fec_sclc_shape_of_cfg(const struct tbt_fec_cfg *cfg, u16 carriers,
         return -EINVAL;
     if (cfg->L != 8 && cfg->L != 16)
         return -EINVAL;
-    /* 256/512 are the v8 ladder; 128 is the uplink GF(16) block. */
+    /* 256/512 are the v8 ladder; 64 is the uplink GF(16) block. */
     if (cfg->block != 256 && cfg->block != 512 &&
         !(cfg->block == TBT_FEC_SCLC_BLOCK_UP && cfg->groups > 1 &&
-          cfg->L == 16))
+          cfg->L == TBT_FEC_SCLC_L_UP))
         return -EINVAL;
     if (cfg->rate_ppm < 250000u || cfg->rate_ppm > 700000u)
         return -EINVAL;
     if ((u32)(((u64)cfg->rate_ppm * shares) / 1000000u) != cfg->n)
+        return -EINVAL;
+    if (cfg->block == TBT_FEC_SCLC_BLOCK_UP && shares == 32 &&
+        !tbt_fec_sclc_up_buildable_64_8(cfg->n, cfg->m))
         return -EINVAL;
     if (tbt_fec_sclc_shape_of(cfg->n, cfg->m, carriers, cfg->block,
                               cfg->L, out))
@@ -2478,6 +2506,8 @@ int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
         out->variant = TBT_FEC_SCLC_UP;
         out->block = block ? block : TBT_FEC_SCLC_BLOCK_UP;
         out->L = L ? L : TBT_FEC_SCLC_L_UP;
+        if (!tbt_fec_sclc_up_buildable_64_8(n, m))
+            return -EINVAL;
     }
     else
     {

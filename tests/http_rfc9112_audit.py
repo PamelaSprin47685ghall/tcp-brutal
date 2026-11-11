@@ -38,12 +38,12 @@ from dataclasses import dataclass
 from email.utils import formatdate
 from pathlib import Path
 
-TBT_CONV = 0x000A
+TBT_CONV = 0x000B
 TBT_FEC_CONV = 0x100B
 TBT_HDR_LEN = 32
 TBT_REC_MAX = 32 + 8192
 TBT_FEC_HDR_LEN = 48
-TBT_FEC_REC_MAX = 48 + 8192
+TBT_FEC_REC_MAX = 48 + 1024
 
 ARQ_TYPES = {
     0x10: "DATA",
@@ -244,7 +244,7 @@ def parse_arq_record(body, audit, ctx):
 
     audit.need(typ in ARQ_TYPES, f"{ctx}: ARQ type 0x{typ:02x} is defined")
     audit.need(TBT_HDR_LEN + body_len == len(body), f"{ctx}: ARQ body_len matches chunk")
-    audit.need(conv == TBT_CONV, f"{ctx}: ARQ conv is 0x000a")
+    audit.need(conv == TBT_CONV, f"{ctx}: ARQ conv is 0x000b")
     audit.need(flags & ~0x3F == 0, f"{ctx}: ARQ flags fit TBT_FF_MASK")
     audit.need(ack_count <= 16, f"{ctx}: path_ack_count <= 16")
     audit.need(ack_mask & ~0xFFFF == 0, f"{ctx}: path_ack_mask is 16 bits")
@@ -288,7 +288,7 @@ def parse_fec_record(body, audit, ctx):
     audit.need(typ in FEC_TYPES, f"{ctx}: FEC type 0x{typ:02x} is defined")
     audit.need(conv == TBT_FEC_CONV, f"{ctx}: FEC conv is 0x100b")
     audit.need(reserved == 0, f"{ctx}: FEC reserved is zero")
-    audit.need(flags & ~0x01 == 0, f"{ctx}: FEC flags fit TBT_FEC_FF_MASK")
+    audit.need(flags & ~0x03 == 0, f"{ctx}: FEC flags fit TBT_FEC_FF_MASK")
     audit.need(
         TBT_FEC_HDR_LEN + payload_len == len(body),
         f"{ctx}: FEC payload_len matches chunk",
@@ -301,7 +301,7 @@ def parse_fec_record(body, audit, ctx):
         payload_crc == crc32c(body[TBT_FEC_HDR_LEN:]),
         f"{ctx}: FEC payload_crc32c is correct",
     )
-    audit.need(payload_len <= 8192, f"{ctx}: FEC payload_len <= S")
+    audit.need(payload_len <= 1024, f"{ctx}: FEC payload_len <= S")
 
     if typ in (0x30, 0x31):
         audit.need(n >= 1 and m >= 1, f"{ctx}: FEC n and m are non-zero")
@@ -311,10 +311,17 @@ def parse_fec_record(body, audit, ctx):
         if typ == 0x30:
             audit.need(share < n, f"{ctx}: DATA names a data share")
             audit.need(payload_len >= 1, f"{ctx}: DATA carries a payload")
-            audit.need(win_len == 0, f"{ctx}: DATA win_len is zero")
+            if flags & 0x02:
+                audit.need(
+                    payload_len == 1024 and 1 <= win_len <= 1024,
+                    f"{ctx}: PADDED DATA is a full slot with a real win_len",
+                )
+            else:
+                audit.need(win_len == 0, f"{ctx}: DATA win_len is zero")
             audit.need(epoch == 0, f"{ctx}: DATA epoch is zero")
         else:
             audit.need(share >= n, f"{ctx}: PARITY names a parity share")
+            audit.need(flags & 0x02 == 0, f"{ctx}: PARITY is not PADDED")
             if win_len == 0:
                 audit.need(
                     share == n and flags == 0 and payload_len == 0 and epoch == 0,
@@ -322,8 +329,8 @@ def parse_fec_record(body, audit, ctx):
                 )
             else:
                 audit.need(win_len <= n, f"{ctx}: PARITY win_len <= n")
-                audit.need(payload_len == 8192, f"{ctx}: PARITY payload is S")
-                audit.need(epoch <= 8192, f"{ctx}: PARITY epoch <= S")
+                audit.need(payload_len == 1024, f"{ctx}: PARITY payload is S")
+                audit.need(epoch <= 1024, f"{ctx}: PARITY epoch <= S")
     else:
         audit.need(
             n == 0 and m == 0 and share == 0 and win_len == 0,
@@ -731,7 +738,7 @@ def audit_message(msg, direction, carrier, round_no, audit, ctx):
         f"{ctx}: FEC DATA payload length is 64",
     )
     audit.need(
-        fec[2]["win_len"] == 4 and fec[2]["payload_len"] == 8192,
+        fec[2]["win_len"] == 4 and fec[2]["payload_len"] == 1024,
         f"{ctx}: FEC PARITY is a full 4-share block",
     )
 

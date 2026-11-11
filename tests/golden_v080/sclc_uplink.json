@@ -1,0 +1,15 @@
+{
+  "codec": "sc-ldpc-gf16",
+  "n": 8,
+  "m": 24,
+  "block": 64,
+  "L": 8,
+  "S": 1024,
+  "seed": 1,
+  "data_file": "sclc_uplink_data.bin",
+  "parity_file": "sclc_uplink_parity.bin",
+  "data_present_hex": "00",
+  "parity_present_hex": "ffffff",
+  "decoded_data_shares": 8,
+  "recovered_file": "sclc_uplink_recovered.bin"
+}

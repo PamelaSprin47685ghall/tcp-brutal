@@ -878,7 +878,7 @@ size_t tbt_http_chunk_hdr(char *buf, size_t cap, size_t body_len)
     char tmp[TBT_HTTP_CHUNK_HDR_MAX];
     size_t n = 0, i;
 
-    if (!buf || body_len > TBT_FEC_REC_MAX)
+    if (!buf || body_len > TBT_HTTP_CHUNK_DATA_MAX)
         return 0;
 
     /* Lowercase hex, most significant digit first, no leading zeros. */
@@ -1030,7 +1030,7 @@ size_t tbt_http_chunk_feed(struct tbt_http_chunk_parser *p, const u8 *buf, size_
                 if (v < 0)
                     goto bad;
                 p->size = p->size * 16 + (u32)v;
-                if (p->size > TBT_FEC_REC_MAX)
+                if (p->size > TBT_HTTP_CHUNK_DATA_MAX)
                     goto bad;
                 p->digits++;
                 i++;

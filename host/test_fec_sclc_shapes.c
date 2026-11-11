@@ -278,9 +278,8 @@ static bool in_set(u16 n, const u16 *set, size_t len)
 
 static void test_buildable_sets(void)
 {
-    static const u16 up_yes[] = {1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
-                                 14, 15, 16, 17, 18, 21, 22, 23, 24, 25,
-                                 28, 30};
+    static const u16 up_yes[] = {1, 2, 4, 8, 9, 10, 11, 12, 13, 14,
+                                 15, 16, 17, 18, 21};
     static const u16 down_yes[] = {1, 64, 128, 192};
     static const u16 down_no[] = {0, 193, 255};
     size_t i;

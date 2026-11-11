@@ -52,13 +52,13 @@ typedef int tbt_fec_spinlock_t;
 #endif
 
 /* S: one packet slot on the wire, the only packet size this cut encodes.
+ * 0.8.0 fixes it at 1024 so every data record has the same length.
  * tbt_fec_data.c and tbt_fec_ack_bytes() must agree on it. */
 #define TBT_FEC_S TBT_FEC_PAYLOAD_MAX
 
-/* One FEC drain write carries at most this many complete HTTP frames. Three
- * frames are 24,780 B and stay in the kmalloc-32k cache (order-3); eight were
- * 66,080 B and needed an order-5 page block, whose allocation failed on the
- * 955 MB far host and stalled the drain under direct reclaim. */
+/* One FEC drain write carries at most this many complete HTTP frames. At
+ * S=1024 three frames are 3,237 B; the bound dates from the 8 KiB share and
+ * still keeps the drain buffer in one small slab object. */
 #define TBT_FEC_BATCH_MAX 3
 
 /* Per-carrier record assembler capacity: the larger of the ARQ and FEC record
@@ -100,7 +100,7 @@ static inline void *tbt_fec_vzalloc(size_t len)
 struct tbt_fec_hdr
 {
     u8 type;    /* TBT_FEC_DATA .. TBT_FEC_FBK */
-    u8 flags;   /* TBT_FEC_FF_LAST only */
+    u8 flags;   /* TBT_FEC_FF_LAST, TBT_FEC_FF_PADDED */
     u16 share_index;
     u8 n;
     u8 m;
@@ -134,7 +134,8 @@ int tbt_fec_hdr_unpack(const u8 in[TBT_FEC_HDR_LEN], struct tbt_fec_hdr *h);
  *       packet when the application goes quiet, and the receiver places
  *       shares by the sum of the payload lengths, so only LAST marks the
  *       end), win_len == 0, epoch == 0, seq >= group*n + share_index
- *       (block_seq0 must not underflow).
+ *       (block_seq0 must not underflow). With TBT_FEC_FF_PADDED the body is
+ *       exactly max_payload bytes and win_len is the real length 1..max_payload.
  * PARITY: share_index >= n, seq < 2^63.
  *       win_len == 0 is the empty-block marker: share_index == n (parity 0),
  *       flags == 0, payload_len == 0, epoch == 0.
@@ -600,12 +601,13 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
  * evicted. K is derived from the shape: the ring is allocated at the largest
  * K that fits TBT_FEC_REPLAY_BUDGET, up to TBT_FEC_REPLAY_K_MAX. 0.7.2 needs
  * a 64-block sliding window: at 400 ms RTT and 128 MB/s the source BDP is
- * 51.2 MB (about 50 source blocks), and the old 16-block/2048-packet cap
- * held the protocol to 35 MB/s. K=66 leaves the required two-block slack
- * above the 64-block credit. The record plane is block-granular, so K=66
- * costs 66 descriptors plus an 8-block hot pool (~17 MiB static); planes of
+ * 51.2 MB, and the old 16-block/2048-packet cap held the protocol to
+ * 35 MB/s. K=66 leaves the required two-block slack above the 64-block
+ * credit. At S=1024 one 256-share block is 256 KiB, so the 64-block window
+ * is 16 MiB; the record plane is block-granular, so K=66 costs 66
+ * descriptors plus an 8-block hot pool (~2 MiB static). Planes of
  * unacknowledged blocks are allocated on write and released on ACK, so the
- * steady resident set follows the ACK frontier rather than K times 2 MiB.
+ * steady resident set follows the ACK frontier rather than K times a block.
  *   static ring   <= TBT_FEC_REPLAY_BUDGET (20 MiB: descriptors + 8 blocks),
  *   arena         <= 66 slots, block planes lazy (8-block hot pool),
  *   credit        <= K_eff - 2 blocks, capped at TBT_FEC_CREDIT_MAX packets.
@@ -618,16 +620,18 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
  * so a NACKed block is never evicted while the receiver can still ask for
  * it. tbt_fec_credit_packets() converts the window to DATA packets; neither
  * window multiplies again by the carrier count. */
-#define TBT_FEC_WINDOW_DOWN (64u * 1024 * 1024)
-#define TBT_FEC_WINDOW_UP (64u * 1024 * 1024)
-/* The RLNC ACK grants at most this many DATA packets of FEC credit, and the
- * SC-LDPC downlink window (TBT_FEC_WINDOW_DOWN / TBT_FEC_S) resolves to the
- * same number. The credit bounds the sender's in-flight data; the ring
- * bounds the repair storage, and both are constant-size for a given shape. */
+#define TBT_FEC_WINDOW_DOWN (64u * TBT_FEC_MAX_SHARES * TBT_FEC_S)
+#define TBT_FEC_WINDOW_UP (64u * TBT_FEC_MAX_SHARES * TBT_FEC_S)
+/* The RLNC ACK grants at most this many DATA packets of FEC credit. The
+ * SC-LDPC window is a byte budget (64 blocks of 256 shares at S), so at
+ * S=1024 it resolves to 16384 packets and the effective cap is the ring's
+ * K-2 blocks. The credit bounds the sender's in-flight data; the ring bounds
+ * the repair storage, and both are constant-size for a given shape. */
 #define TBT_FEC_CREDIT_MAX 8192u
 
-/* Block planes resident in the replay hot pool. Eight 2 MiB blocks are
- * 16 MiB; below TBT_FEC_REPLAY_MEM_LOW_KB the pool shrinks to four. */
+/* Block planes resident in the replay hot pool. Eight 256 KiB blocks are
+ * 2 MiB at S=1024; below TBT_FEC_REPLAY_MEM_LOW_KB the pool shrinks to
+ * four. */
 #define TBT_FEC_REPLAY_HOT_MAX 8u
 #define TBT_FEC_REPLAY_HOT_LOW 4u
 #define TBT_FEC_REPLAY_MEM_LOW_KB (220L * 1024L)
@@ -1815,8 +1819,8 @@ extern const struct tbt_fec_ops tbt_fec_ops_sclc;
 
 #define TBT_FEC_SCLC_BLOCK_DOWN 256
 #define TBT_FEC_SCLC_L_DOWN 8
-#define TBT_FEC_SCLC_BLOCK_UP 128
-#define TBT_FEC_SCLC_L_UP 16
+#define TBT_FEC_SCLC_BLOCK_UP 64
+#define TBT_FEC_SCLC_L_UP 8
 
 /* The binary downlink builds exactly these n/m splits of the 256 shares;
  * the transmitted rate is n / 256. The order is the rate ladder used by
@@ -1842,16 +1846,54 @@ static inline bool tbt_fec_sclc_down_split(u16 n, u16 m)
     }
 }
 
-/* The uplink GF(16) codec builds exactly the 24 splits of 32 shares that
- * tbt_fec_sclc_up_n[] names. The data plane and the controller must accept
- * the same set: a shape the controller picks but this predicate refuses
- * would be dropped on arrival, and one this predicate accepts but the
- * codec cannot build would fail every decode. */
+/* Splits the 0.8.0 uplink wire accepts: the GF(16) codec builds them at
+ * its production shape (block=64, L=8, S=1024) and their rate stays at or
+ * below the 70% wire cap. The table below is measured from the real
+ * constructor: the graph parity count and the bitplane region plan both
+ * depend on the block size, and several splits that built at the old
+ * 128/L16 shape do not fit 1024-byte shares. In particular 22/10 needs more
+ * parity symbols than its ten shares carry at this block size; 21/11 is the
+ * highest feasible split (65.6 percent). host/test_sclc_uplink.c asserts
+ * this predicate against tbt_sclc_uplink_new() for every table entry, so a
+ * future codec change that moves the set fails the build. */
+static inline bool tbt_fec_sclc_up_buildable_64_8(u16 n, u16 m)
+{
+    if ((u16)(n + m) != 32)
+        return false;
+    switch (n)
+    {
+    case 1:
+    case 2:
+    case 4:
+    case 8:
+    case 9:
+    case 10:
+    case 11:
+    case 12:
+    case 13:
+    case 14:
+    case 15:
+    case 16:
+    case 17:
+    case 18:
+    case 19:
+    case 21:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/* The uplink GF(16) codec's wire set: a split must be both named by the
+ * constructible table and buildable at the 0.8.0 shape. The data plane and
+ * the controller must accept the same set: a shape the controller picks but
+ * this predicate refuses would be dropped on arrival, and one this predicate
+ * accepts but the codec cannot build would fail every decode. */
 static inline bool tbt_fec_sclc_up_split(u16 n, u16 m)
 {
     u32 i;
 
-    if ((u16)(n + m) != 32)
+    if (!tbt_fec_sclc_up_buildable_64_8(n, m))
         return false;
     for (i = 0; i < TBT_FEC_SCLC_UP_N; i++)
         if (tbt_fec_sclc_up_n[i] == n)
