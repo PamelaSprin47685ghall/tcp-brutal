@@ -2019,30 +2019,8 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
          * completes must still end the stream. */
         bool repair_active = sess->fec &&
                              tbt_fec_repair_active(sess, now, budget);
-        /* A shape switch stops new DATA at P0 while the receiver applies the
-         * shape and the sender waits for its ACK. That pause is flow control,
-         * not a lost ACK: do not let the stall timer kill the stream during
-         * the bounded switch (the switch's own 2 s timeout aborts it). */
-        bool switching = false;
-
-        if (sess->fec)
-        {
-            const struct tbt_fec_tx *ftx;
-
-            rcu_read_lock();
-            ftx = rcu_dereference(sess->fec_tx);
-            switching = ftx && READ_ONCE(ftx->switch_state) !=
-                                    TBT_FEC_SW_STEADY;
-            rcu_read_unlock();
-        }
-
-        if (would_kill && switching)
-        {
-            atomic64_inc(&sess->tx_stall_suppressed_fec);
-            start = now;
-            would_kill = false;
-        }
-
+        /* Route A changes n/m per block; there is no CFG switch pause. The
+         * repair-hold path below is the only stall suppression. */
         if (would_kill &&
             tbt_tx_fec_repair_holds(sess->fec, repair_active,
                                     now - start, TBT_FEC_REPAIR_MAX_NS))
