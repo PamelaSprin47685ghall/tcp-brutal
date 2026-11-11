@@ -51,8 +51,9 @@ carrier manager, no userspace accept/connect (§2.1, §8.5, §11).
   duplicates it is a self-DoS (§5.1).
 - No encryption or authentication at the tunnel layer. `crypto=on` (0.1.0) is
   ChaCha8 obfuscation of the FEC DATA/PARITY body, not encryption: the key
-  travels in clear in the HELLO v6 body unless `crypto_key=` is configured, and
-  nothing is authenticated. Its purpose is to keep application bytes out of
+  travels in clear in the HELLO body unless `crypto_key=` is configured. A
+  configured key authenticates the v9 HELLO and nothing else; without it the
+  HELLO stays unauthenticated. Its purpose is to keep application bytes out of
   naive DPI signatures. The `http-kal` QoS profile and real encryption are in
   tension: a parser-based classifier cannot see inside TLS, so a TLS-wrapped
   carrier loses the class it was chosen for (§3.2, §9.4). Two escapes, both
@@ -800,7 +801,22 @@ Payload layouts:
   revision can add it without renumbering, but this revision's receiver refuses it with
   `-EPROTO`; no sender emits one.
 - **HELLO**: `u8 ver; u8 role; u8 nonce[16]; u16 payload_max; u16 chunk_max; u8
-  profile|gen`. `ver` is `TBT_WIRE_VERSION` (1), independent of the module version. The last byte has exactly the §3.1.1 layout:
+  profile|gen`, then the crypto fields at `+23..+65`: `u8 crypto flags; u8
+  key_id; u8 reserved (0); u8 crypto_nonce[8]; u8 key[32]`. `ver` is
+  `TBT_WIRE_VERSION` (1) on the old ARQ path and `TBT_WIRE_VERSION_V6` (9) on
+  the FEC path, independent of the module version. The FEC body is 90 bytes;
+  the v8 body ended at +65. The v9 tail, in the §3.3 offset style:
+
+  ```
+  +66 u64 boot_epoch   little-endian realtime microseconds
+  +74 u8  tag[16]      SipHash-2-4 over body[0..73]
+  ```
+
+  `tag[0..7] = SipHash(PSK[0..15], body[0..73])` and
+  `tag[8..15] = SipHash(PSK[16..31], body[0..73])`, both serialised
+  little-endian. `PSK` is the configured 256-bit `crypto_key=`; with no key
+  the tag is all zero. The tag covers `boot_epoch` and every field before it,
+  not the data plane. Byte +22 has exactly the §3.1.1 layout:
 
   ```
   bit   7 6 | 5 4 3 2 | 1 0
@@ -2058,15 +2074,19 @@ random at tunnel creation).
   only; it requires `fec=on`, and omitting `crypto=` means "same as `fec`".
   `crypto_key=` takes 64 hex digits (256 bits) or `-` to clear. With no
   `crypto_key=`, the near side generates the key and announces it in the HELLO
-  v6 body (`key_id=1`); with `crypto_key=` on both ends, `key_id=0` and the
+  body (`key_id=1`); with `crypto_key=` on both ends, `key_id=0` and the
   HELLO key field is zero. A mismatch is a payload CRC failure on every share,
-  not a silent downgrade. The key and each direction's `crypto_nonce` stay
-  fixed for the life of a tunnel: a carrier reconnect repeats them, and
-  re-applying the same tunnel id (a session replacement) inherits them,
-  because the peer refuses a HELLO that changes either one and cannot tell
-  the replaced session's HELLOs from the replacement's. Only a new tunnel, or
-  a delete and re-add, generates fresh values. The FEC header, HTTP headers,
-  chunk framing and control records are never obfuscated.
+  not a silent downgrade. The key stays fixed for the life of a tunnel, and a
+  carrier reconnect repeats the current generation's nonces. The nonces rotate
+  only when an authenticated HELLO proves a restarted near side: a strictly
+  later `boot_epoch` lets the far install the near's new uplink nonce and
+  rotate its own downlink nonce, which it re-announces in the HELLO
+  `tbt_session_join()` sends. Both directions move together so each
+  `(key, nonce)` pair covers one generation only; new flows restart their
+  packet sequence at zero, and reusing a nonce would open a two-time pad.
+  Without `crypto_key=` the tag proves nothing and the old refusal stands.
+  The FEC header, HTTP headers, chunk framing and control records are never
+  obfuscated.
 - `chunk=`, `framing=`, `max_retry=`, and `uid=` were removed: they were
   parsed but never read by the data path. An unknown key is refused with `EINVAL`.
 - All files are `0600 root` under `init_net.proc_net`, except `http`, which is
@@ -2430,7 +2450,7 @@ cannot silently lose its atomicity again.
 | live | `live rxq rxp txq txp pub_state pub_wmem pub_una pub_nxt car_wmem car_nxt car_copied car_rcvbuf car_sndbuf car_state car_stop car_ud car_ready car_ws txw_pend txw_busy` |
 | tx wake | `txwake txwake_busy txwork` |
 | write space | `ws_calls nospace_armed` |
-| c3 | `c3 n up lost replaced spare_activated alloc_fail port_exhaust port_alloc_fail connect_fail connect_retry join_dup join_bad join_nonce_reject join_src_reject fbk_tx fbk_rx retx_frames retx_bytes retain_drop retx_hole retx_slow retx_pathloss retx_other data_tx retx_data_ppm dup_bytes_ppm reorder_overflow reorder_max_depth ooo_bytes ooo_frames retain_bytes tx_ack rx_ack peer_paused fb_delay_us rto_us una_stall_us stall_paused_skips stall_idle_skips stall_declared stall_recovered stall_drop stall_dead tx_window rtt_mean_us rttvar_us rtt_max_us txq_max win_block win_resume pump_hw_armed pump_hw_fired` |
+| c3 | `c3 n up lost replaced spare_activated alloc_fail port_exhaust port_alloc_fail connect_fail connect_retry join_dup join_bad join_nonce_reject join_src_reject hello_tag_reject crypto_reincarnations fbk_tx fbk_rx retx_frames retx_bytes retain_drop retx_hole retx_slow retx_pathloss retx_other data_tx retx_data_ppm dup_bytes_ppm reorder_overflow reorder_max_depth ooo_bytes ooo_frames retain_bytes tx_ack rx_ack peer_paused fb_delay_us rto_us una_stall_us stall_paused_skips stall_idle_skips stall_declared stall_recovered stall_drop stall_dead tx_window rtt_mean_us rttvar_us rtt_max_us txq_max win_block win_resume pump_hw_armed pump_hw_fired` |
 | ctl | `ctl ctl_lost ctl_retry ctl_requeue ctl_obsolete ctl_queued` |
 | streams | `streams streams_active n_streams n_pending` |
 | c6 | `c6 holes_declared holes_repaired holes_unrecoverable rx_max_stall_us hole_checks gate_fail depth_fail time_fail` |
@@ -2467,7 +2487,10 @@ per-carrier drop count appears as the `peers` column `dropped`, and
 
 `join_dup` counts a HELLO that named an index
 already occupied by a live carrier (the duplicate is closed, not the session);
-`join_src_reject` counts a far-side HELLO from an address other than the session anchor;
+`join_src_reject` counts only an unauthenticated far-side HELLO from an address other
+than the session anchor (a HELLO that proved the configured PSK may move the anchor);
+`hello_tag_reject` counts a HELLO that did not carry the configured PSK's tag;
+`crypto_reincarnations` counts a HELLO accepted as a restarted near side;
 `port_exhaust` counts a carrier that found every port in the global block in use, and
 `port_alloc_fail` counts a failed port-bitmap allocation; both leave the carrier alive
 and retrying, and the same reason is logged ratelimited. `alloc_fail` is the older
@@ -2773,15 +2796,29 @@ clear error pointing at `raw`-inside-WireGuard.
    `X-Request-Id` is per-segment only, so a carrier cannot be reassigned by guessing an
    id.
 4. Carrier index and session key: the first record on every accepted carrier MUST be
-   HELLO (`u8 ver; u8 role; u8 nonce[16]; u16 payload_max; u16 chunk_max; u8
-   profile|gen`), and the frame header's `path_id` is the index. The accepted socket is a *provisional*
+   HELLO (the v9 body is 90 bytes, `ver` is `TBT_WIRE_VERSION_V6` 9), and the frame
+   header's `path_id` is the index. The accepted socket is a *provisional*
    carrier until that HELLO parses; the far side then installs it at that index. A far
    tunnel with a configured `nonce=` (the tunnel key or the runtime
    `session <id> nonce=`) requires every HELLO to match it. Without a configured nonce,
    the first HELLO that passes the source check defines the nonce
-   (trust-on-first-use) and every later carrier must present the same value; a configured
-   near peer is checked by source address as well. A mismatch is rejected with
-   `join_nonce_reject++`/`session_join_bad++`. A HELLO naming an
+   (trust-on-first-use) and every later carrier must present the same value, unless a
+   tagged HELLO renames it. A configured near peer is checked by source address as
+   well. The source address of the first accepted HELLO owns the session anchor; a
+   later HELLO from another address is refused before its nonce is examined
+   (`join_src_reject`) unless it carries the configured PSK's tag, which transfers
+   ownership. A configured `peer=` owns the anchor from session creation and no HELLO
+   moves it.
+
+   A HELLO may install a new crypto nonce only when its `boot_epoch` is strictly later
+   than the last accepted one. The far then rotates both directions: it takes the
+   near's new uplink nonce and generates a fresh downlink nonce, which it re-announces
+   in the HELLO `tbt_session_join()` sends. The same or an older epoch is not a
+   re-incarnation: the current nonces stay, and a replayed HELLO cannot reset anything.
+   With `key_id=1` the announced key is public, the tag proves nothing, and no
+   rotation is authorised. A nonce mismatch is rejected with
+   `join_nonce_reject++`/`session_join_bad++`; a HELLO that lacks the configured PSK's
+   tag is counted `hello_tag_reject`. A HELLO naming an
    index whose current occupant is still live is a duplicate join: `join_dup` is
    counted and that carrier is closed, never the session. An occupant whose socket is
    already closed is replaced, which is how the near side's replacement rejoins.
@@ -2940,8 +2977,9 @@ Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; this tree reports
 `0.7.0`. The wire revision `TBT_CONV=0x000a`
 and the FEC record revision `TBT_FEC_CONV=0x100a` bump independently of it.
 HELLO `body[0]` carries `TBT_WIRE_VERSION=1` for the old ARQ and
-`TBT_WIRE_VERSION_V6=7` for a FEC v10 session, not the module version, so the
-module version and the wire version are decoupled. 0.2.0 flipped `TBT_CONV` to
+`TBT_WIRE_VERSION_V6=9` for a FEC session (7 in 0.7.0, 8 in 0.8.x),
+not the module version, so the module version and the wire version are
+decoupled. 0.2.0 flipped `TBT_CONV` to
 0x0006 (FIN carries a 16-byte body) and `TBT_FEC_CONV` through `0x1002`
 (PARITY block marker), `0x1003` (24-byte ACK with `deliver_bytes`) and
 `0x1004` (64-byte bitmap NACK) to `0x1005` (48-byte header with the u64 stream
@@ -3066,11 +3104,13 @@ controls do not apply; these replace them.
   `fec=on`) ChaCha8-obfuscates only the FEC DATA/PARITY payload. The 48-byte
   FEC header, the HTTP headers, the chunk framing and every control record stay
   plaintext. With `crypto_key=` unset, the near side generates the 32-byte
-  session key and sends it in the HELLO v6 body (`key_id=1`); with
+  session key and sends it in the HELLO body (`key_id=1`); with
   `crypto_key=` set on both ends, `key_id=0` and the HELLO key field is zero. A
   wrong key is a payload CRC failure on every share, so it cannot silently
   downgrade. Each direction uses its own 8-byte `crypto_nonce`; the key may be
-  shared, the nonces must not be. This is not a substitute for WireGuard.
+  shared, the nonces must not be, and an authenticated restart rotates both
+  behind the v9 tag. The data plane still carries only a CRC: this is not
+  encryption and not a substitute for WireGuard.
 - **Module unload** always works and resets every stream (§8.9).
 
 ## 14. Design invariants (for reviewers)

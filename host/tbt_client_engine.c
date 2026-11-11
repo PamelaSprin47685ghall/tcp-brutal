@@ -299,6 +299,7 @@ struct engine
     bool psk;
     u64 epoch;
     u64 peer_epoch;
+    bool peer_epoch_set;
     bool hello_owner;
     bool tx_rotate; /* this HELLO re-incarnated the peer: re-announce our nonce */
 
@@ -2057,11 +2058,11 @@ static int hello_crypto(struct engine *e, const u8 *body, size_t len)
     e->hello_owner = e->psk &&
                      ((e->rx_ready &&
                        !memcmp(e->rx_nonce, peer_nonce, sizeof(e->rx_nonce))) ||
-                      !e->peer_epoch || epoch > e->peer_epoch);
+                      !e->peer_epoch_set || epoch >= e->peer_epoch);
     if (enabled != e->crypto_on)
         return -EPROTO;
     if (!e->crypto_on)
-        return 0;
+        goto record;
     local_wins = e->key_owned && !e->key_peer;
     err = tbt_crypto_resolve_key(local_wins, e->key, enabled, kid, hello_key,
                                  key);
@@ -2085,7 +2086,6 @@ static int hello_crypto(struct engine *e, const u8 *body, size_t len)
         if (tbt_crypto_init(&e->crypto.rx, e->key, peer_nonce, 0))
             return -EPROTO;
         e->rx_ready = true;
-        e->peer_epoch = epoch;
     }
     else if (memcmp(e->rx_nonce, peer_nonce, sizeof(e->rx_nonce)))
     {
@@ -2103,7 +2103,6 @@ static int hello_crypto(struct engine *e, const u8 *body, size_t len)
             memcpy(e->rx_nonce, peer_nonce, sizeof(e->rx_nonce));
             if (tbt_crypto_init(&e->crypto.rx, e->key, peer_nonce, 0))
                 return -EPROTO;
-            e->peer_epoch = epoch;
             logmsg(e, "tbt_client: peer re-incarnated, rx nonce rotated\n");
             /* The far role answers on the downlink: rotate our own nonce in
              * the same step, so neither direction can reuse a keystream
@@ -2121,6 +2120,18 @@ static int hello_crypto(struct engine *e, const u8 *body, size_t len)
             }
         }
     }
+
+record:
+    /* The generation high-water is session identity, not cipher state: it
+     * must advance with crypto=off too, or peer_epoch_set stays false, the
+     * owner rule degenerates to "any valid tag", and a replayed HELLO could
+     * rename the session. It is written last so the rotation decision above
+     * still compares against the previous generation. */
+    if (e->psk && (!e->peer_epoch_set || epoch > e->peer_epoch))
+    {
+        e->peer_epoch = epoch;
+        e->peer_epoch_set = true;
+    }
     return 0;
 }
 
@@ -2137,7 +2148,9 @@ static int hello_session_nonce(struct engine *e, const u8 *body)
     }
     if (!memcmp(body + 2, e->session_nonce, sizeof(e->session_nonce)))
         return 0;
-    if (!e->hello_owner)
+    /* A configured nonce= is absolute, exactly as nonce_pinned is on the
+     * module side: an authenticated restart still has to present it. */
+    if (e->cfg.cfg.nonce_set || !e->hello_owner)
         return -EPROTO;
     memcpy(e->session_nonce, body + 2, sizeof(e->session_nonce));
     return 0;

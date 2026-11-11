@@ -1233,7 +1233,8 @@ static void mk_hello_v9(struct engine *e, u8 *body, u8 role,
     tbt_put_le16(body + 18, TBT_PAYLOAD_MAX);
     tbt_put_le16(body + 20, TBT_CHUNK_MAX);
     body[22] = (u8)(e->cfg.cfg.profile & 3);
-    tbt_crypto_hello_fill(body, true, TBT_CRYPTO_KEY_ID_NONE, tx_nonce, NULL);
+    tbt_crypto_hello_fill(body, e->crypto_on, TBT_CRYPTO_KEY_ID_NONE, tx_nonce,
+                          NULL);
     tbt_crypto_hello_auth_fill(body, epoch, psk);
 }
 
@@ -1397,6 +1398,75 @@ static void test_hello_reincarnation(void)
           "v9: a repeated carrier HELLO does not rotate");
 }
 
+/* crypto=off keeps the PSK tag but has no crypto nonce to compare, so the
+ * generation high-water is the only replay defence. It must be recorded even
+ * then, and a configured nonce= must stay absolute. */
+static void test_hello_reincarnation_off(void)
+{
+    u8 body[TBT_HELLO_BODY_LEN_V6];
+    u8 psk[TBT_CRYPTO_KEY_LEN];
+    u8 n1[TBT_CRYPTO_NONCE_LEN], n2[TBT_CRYPTO_NONCE_LEN];
+    u8 sess_a[16], sess_b[16];
+    size_t i;
+
+    for (i = 0; i < sizeof(psk); i++)
+        psk[i] = (u8)(i * 9 + 3);
+    memset(sess_a, 0x11, sizeof(sess_a));
+    memset(sess_b, 0x22, sizeof(sess_b));
+    memset(n1, 0x31, sizeof(n1));
+    memset(n2, 0x42, sizeof(n2));
+
+    clear_engine();
+    e.near = false;
+    e.crypto_on = false; /* cipher off, PSK still configured */
+    e.psk = true;
+    e.key_owned = true;
+    e.key_id = TBT_CRYPTO_KEY_ID_NONE;
+    memcpy(e.key, psk, sizeof(psk));
+
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_a, n1, 2000, psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == 0,
+          "v9-off: the first HELLO is accepted with the cipher off");
+    CHECK(e.peer_epoch_set && e.peer_epoch == 2000,
+          "v9-off: the generation is recorded with the cipher off");
+    CHECK(hello_session_nonce(&e, body) == 0,
+          "v9-off: the session is adopted");
+
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_b, n2, 3000, psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == 0,
+          "v9-off: a later generation is accepted");
+    CHECK(hello_session_nonce(&e, body) == 0 &&
+              memcmp(e.session_nonce, sess_b, sizeof(sess_b)) == 0,
+          "v9-off: a later generation renames the session");
+
+    /* A replayed generation 2 carries a valid tag but an older epoch. */
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_a, n1, 2000, psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == 0,
+          "v9-off: a replay is not a crypto error");
+    CHECK(hello_session_nonce(&e, body) != 0 &&
+              memcmp(e.session_nonce, sess_b, sizeof(sess_b)) == 0,
+          "v9-off: a replayed HELLO cannot rename the session");
+    CHECK(e.peer_epoch == 3000, "v9-off: a replay cannot lower the generation");
+
+    /* A configured nonce= is absolute even for an authenticated restart. */
+    clear_engine();
+    e.near = false;
+    e.crypto_on = true;
+    e.psk = true;
+    e.key_owned = true;
+    e.key_id = TBT_CRYPTO_KEY_ID_NONE;
+    memcpy(e.key, psk, sizeof(psk));
+    e.cfg.cfg.nonce_set = true;
+    memcpy(e.session_nonce, sess_a, sizeof(sess_a));
+    e.session_nonce_set = true;
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_b, n1, 2000, psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == 0,
+          "v9: an authenticated HELLO passes with a pinned nonce");
+    CHECK(hello_session_nonce(&e, body) != 0 &&
+              memcmp(e.session_nonce, sess_a, sizeof(sess_a)) == 0,
+          "v9: a pinned nonce= is never renamed");
+}
+
 int main(void)
 {
     test_marker_short_sequence();
@@ -1420,6 +1490,7 @@ int main(void)
     test_tx_idle_short_then_long();
     test_fbk_commit();
     test_hello_reincarnation();
+    test_hello_reincarnation_off();
 
     printf("test_client_rx: %d checks, %d failures\n", checks, failures);
     free(f.out);

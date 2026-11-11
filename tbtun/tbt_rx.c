@@ -701,7 +701,19 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
         goto out;
     }
     if (!enabled)
+    {
+        /* The generation high-water is session identity, not cipher state:
+         * it must advance with crypto=off too, or crypto_epoch_set stays
+         * false, the gate's `owner` degenerates to "any valid tag", and a
+         * replayed HELLO could rename the session or move the anchor. */
+        if (g->psk &&
+            (!sess->crypto_epoch_set || g->epoch > sess->crypto_epoch))
+        {
+            sess->crypto_epoch = g->epoch;
+            sess->crypto_epoch_set = true;
+        }
         goto out;
+    }
 
     /* A key this side owns (configured, or generated and announced in our own
      * HELLO) must be the one the peer uses: key_id 0. A key we adopted from
@@ -853,13 +865,17 @@ static int tbt_hello_far_gate(struct tbt_session *sess, struct tbt_carrier *c,
     bool rename_nonce = false;
     /* Owner: this HELLO carries the generation the session already serves
      * (the crypto nonce match covers the carriers that follow the winner of
-     * a rotation), or a strictly later one. A replay from an older
-     * generation is neither. */
+     * a rotation) or a same/newer one. `>=` admits a same-generation HELLO,
+     * which is the only way a source address can change without a restart
+     * (a PPPoE re-lease); a replay of an older generation fails. With the
+     * cipher on, a same-generation HELLO also matches the crypto nonce, so
+     * the equality case only widens the crypto=off path where that nonce
+     * does not exist. */
     bool owner = g->psk &&
                  ((sess->crypto_ready &&
                    !memcmp(sess->crypto_rx_nonce, g->nonce,
                            sizeof(sess->crypto_rx_nonce))) ||
-                  !sess->crypto_epoch_set || g->epoch > sess->crypto_epoch);
+                  !sess->crypto_epoch_set || g->epoch >= sess->crypto_epoch);
 
     /* An established anchor rejects every other source, free carrier index
      * included, before the nonce is even examined: a stranger cannot probe
