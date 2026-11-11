@@ -969,13 +969,17 @@ void tbt_fec_adapt_sclc_block_sample(struct tbt_fec_adapt_sclc_ctl *c,
     if (first_ok)
     {
         int err = (int)(c->extra + 1u) - (int)S;
-        bool grow = err > 0;
+        bool blocked;
 
         if (err > 4)
             err = 4;
         if (err < -4)
             err = -4;
-        if (!(grow && c->sat_max) && !(!grow && c->sat_min))
+        /* Freeze only the direction that deepens saturation: at m_max a
+         * surplus (err < 0) must still lower the offset, and at m_min a
+         * deficit (err > 0) must still raise it. */
+        blocked = (err > 0 && c->sat_max) || (err < 0 && c->sat_min);
+        if (!blocked)
         {
             c->delta_off_q16 += err * 1024;
             tbt_fec_adapt_sclc_delta_clamp(c);
