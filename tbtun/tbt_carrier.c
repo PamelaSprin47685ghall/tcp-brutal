@@ -36,6 +36,7 @@
 #include <net/tcp.h>
 
 #include "tbtun.h"
+#include "tbt_cc.h"
 #include "tbt_carrier_policy.h"
 #include "tbt_fec_batch.h"
 #include "tbt_tx_acct.h"
@@ -519,6 +520,54 @@ static bool tbt_car_hold_idle(struct tbt_session *sess)
            !READ_ONCE(sess->fec_replay_queued);
 }
 
+/* End the hold and count the edge. The poll uses this when its own gate ends
+ * the hold; a send path uses tbt_car_hold_resume(), which also installs the
+ * snapshot before it queues bytes. */
+static void tbt_car_hold_end(struct tbt_carrier *c, struct sock *sk)
+{
+    if (!READ_ONCE(c->hold_active))
+        return;
+    WRITE_ONCE(c->hold_active, false);
+    WRITE_ONCE(c->hold_since_ns, 0);
+    atomic64_inc(&c->hold_exit);
+    if (sk)
+        tbt_cc_set_hold(sk, false);
+}
+
+/* First non-PAD send after the hold: put the snapshot back before the record
+ * is queued, so the burst starts from the window and rate the idle poll kept.
+ * Both writes only raise a field: a live decision above the snapshot wins. */
+static void tbt_car_hold_resume(struct tbt_carrier *c, struct sock *sk)
+{
+    struct tcp_sock *tp;
+    u32 want;
+    unsigned long pacing;
+
+    if (!READ_ONCE(c->hold_active))
+        return;
+    WRITE_ONCE(c->hold_active, false);
+    WRITE_ONCE(c->hold_since_ns, 0);
+    atomic64_inc(&c->hold_exit);
+    tbt_cc_set_hold(sk, false);
+    tp = tcp_sk(sk);
+    want = tbt_hold_cwnd_restore(READ_ONCE(c->hold_cwnd),
+                                 READ_ONCE(tp->snd_cwnd_clamp));
+    pacing = READ_ONCE(c->hold_pacing);
+    if (!want && !pacing)
+        return;
+    /* The caller holds c->tx_lock, never the socket lock: send_segs() takes
+     * them in that order, so taking lock_sock first here would invert it. */
+    lock_sock(sk);
+    if (want && tcp_snd_cwnd(tp) < want)
+        tcp_snd_cwnd_set(tp, want);
+    if (pacing && READ_ONCE(sk->sk_pacing_rate) < pacing)
+        WRITE_ONCE(sk->sk_pacing_rate, pacing);
+    release_sock(sk);
+    /* One-shot: a later hold re-snapshots on entry. */
+    WRITE_ONCE(c->hold_cwnd, 0);
+    WRITE_ONCE(c->hold_pacing, 0);
+}
+
 static void tbt_car_hold_apply(struct tbt_carrier *c, struct tcp_sock *tp,
                                struct sock *sk)
 {
@@ -541,8 +590,7 @@ static void tbt_car_hold_apply(struct tbt_carrier *c, struct tcp_sock *tp,
     if (gate == TBT_HOLD_APPLY_EXIT)
     {
         release_sock(sk);
-        WRITE_ONCE(c->hold_active, false);
-        WRITE_ONCE(c->hold_since_ns, 0);
+        tbt_car_hold_end(c, sk);
         return;
     }
     if (gate == TBT_HOLD_APPLY_SKIP)
@@ -577,7 +625,7 @@ static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
                   now - c->hold_last_loss_ns < TBT_HOLD_LOSS_GUARD_NS;
     if (!enable)
     {
-        WRITE_ONCE(c->hold_active, false);
+        tbt_car_hold_end(c, sk);
         WRITE_ONCE(c->hold_since_ns, 0);
         return;
     }
@@ -593,8 +641,7 @@ static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
         if (!tbt_hold_keep(true, real_data, loss, wnd_pkts < c->hold_cwnd,
                            now, c->hold_until_ns))
         {
-            WRITE_ONCE(c->hold_active, false);
-            WRITE_ONCE(c->hold_since_ns, 0);
+            tbt_car_hold_end(c, sk);
             return;
         }
         tbt_car_hold_apply(c, tp, sk);
@@ -630,6 +677,8 @@ static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
         c->hold_pacing = pacing;
         WRITE_ONCE(c->hold_until_ns, now + TBT_HOLD_MAX_NS);
         WRITE_ONCE(c->hold_active, true);
+        atomic64_inc(&c->hold_enter);
+        tbt_cc_set_hold(sk, true);
         tbt_car_hold_apply(c, tp, sk);
     }
 }
@@ -784,6 +833,12 @@ static void tbt_car_poll_one(struct tbt_carrier *c, bool paused)
     }
     tp = tcp_sk(sk);
     tbt_car_hold_check(c, tp, sk, now);
+    /* One writer for the CC context: the poll pushes the operator's rate cap
+     * and the loss the FEC feedback path measured. The CC keeps only the
+     * socket's private block, so no carrier or session pointer can outlive
+     * the socket it was trusted to. */
+    tbt_cc_set_tunnel(sk, sess->tunnel->cfg.tunnel_rate,
+                      READ_ONCE(sess->cc_loss_ppm));
     {
         u32 una = READ_ONCE(tp->snd_una);
         u32 nxt = READ_ONCE(tp->snd_nxt);
@@ -1750,10 +1805,6 @@ int tbt_carrier_send_fec_batch(struct tbt_carrier *c,
         *sent = 0;
     if (!c || !recs || !lens || !count || count > TBT_FEC_BATCH_MAX)
         return -EINVAL;
-    /* Real FEC records are entering the byte stream: stop restoring the idle
-     * BBR window; the ACKs for these records own the next decision. */
-    WRITE_ONCE(c->hold_active, false);
-    WRITE_ONCE(c->hold_since_ns, 0);
     sess = c->sess;
     sk = tbt_carrier_sk_get(c);
     if (!sk)
@@ -1765,6 +1816,10 @@ int tbt_carrier_send_fec_batch(struct tbt_carrier *c,
         err = -ENOTCONN;
         goto out;
     }
+    /* Real FEC records are entering the byte stream: end the idle hold and
+     * install its snapshot before the first record is queued. The ACKs for
+     * these records own the next decision. */
+    tbt_car_hold_resume(c, sk);
 
     http = c->profile != 3;
     if (http)
@@ -2030,17 +2085,14 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c,
                      struct tbt_frame *fr)
 {
     struct sock *sk;
+    bool real;
     int err;
 
     if (!c)
         return -ENOTCONN;
     /* PAD is keepalive, not real data: it must not cancel a hold. Any other
      * record means the carrier is active again. */
-    if (fr && fr->hdr.type != TBT_F_PAD)
-    {
-        WRITE_ONCE(c->hold_active, false);
-        WRITE_ONCE(c->hold_since_ns, 0);
-    }
+    real = fr && fr->hdr.type != TBT_F_PAD;
     lockdep_assert_held(&sess->pump_lock);
     sk = rcu_dereference_protected(c->sk,
                                    lockdep_is_held(&sess->pump_lock));
@@ -2053,7 +2105,11 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c,
     if (atomic_read(&c->stopping) || !tbt_carrier_sk_present(c))
         err = -ENOTCONN;
     else
+    {
+        if (real)
+            tbt_car_hold_resume(c, sk);
         err = tbt_carrier_xmit_locked(sess, c, fr, sk);
+    }
     mutex_unlock(&c->tx_lock);
     return err;
 }
@@ -3461,14 +3517,15 @@ void tbt_car_setsockbuf(struct socket *s, u32 carriers)
     sk->sk_userlocks &= ~TBT_CAR_SOCKBUF_LOCK_MASK;
 }
 
-/* Ask for BBR on one carrier. sock_setsockopt(SOL_TCP, TCP_CONGESTION) is the
- * kernel entry point: tcp_setsockopt() reaches tcp_set_congestion_control()
- * with the flag that loads a congestion-control module on demand. Calling
+/* Ask for the carrier congestion control on one socket.
+ * sock_setsockopt(SOL_TCP, TCP_CONGESTION) is the kernel entry point:
+ * tcp_setsockopt() reaches tcp_set_congestion_control() with the flag that
+ * loads a congestion-control module on demand. Calling
  * tcp_set_congestion_control() directly is not an option for this module:
- * the 7.2.9 build tree does not export it (nor tcp_ca_find) in
- * Module.symvers. A kernel built without CONFIG_TCP_CONG_BBR, or one whose
- * namespace lacks CAP_NET_ADMIN, refuses the request; the carrier then keeps
- * the system default and still carries traffic. */
+ * the build tree does not export it (nor tcp_ca_find) in Module.symvers. The
+ * requested name is the carrier_cc module parameter: bbr by default, tbtcc
+ * for the A/B run. A kernel or namespace that refuses the name leaves the
+ * socket on its previous algorithm; the carrier still carries traffic. */
 /* The congestion control the socket is actually using. The request below can
  * fail while the namespace default already is BBR, so the only honest proof
  * is the algorithm the socket carries, not the setsockopt return. */
@@ -3481,35 +3538,44 @@ static const char *tbt_car_cc_actual(struct sock *sk)
     return icsk->icsk_ca_ops->name;
 }
 
-static bool tbt_car_set_bbr(struct socket *s)
+static bool tbt_car_set_cc(struct socket *s, struct tbt_session *sess)
 {
+    const char *name = tbt_carrier_cc;
     int err;
 
-    if (!s || !s->sk)
+    if (!s || !s->sk || !s->ops || !s->ops->setsockopt || !name || !name[0])
         return false;
-    /* Some kernels reject the trailing NUL in optlen; try the exact name
-     * length first, then the literal size for kernels that want it. */
-    err = sock_setsockopt(s, SOL_TCP, TCP_CONGESTION,
-                          KERNEL_SOCKPTR(TBT_CAR_CC_NAME),
-                          (unsigned int)strlen(TBT_CAR_CC_NAME));
+    /* Call the socket's own opt handler, exactly as the setsockopt() syscall
+     * does. sock_setsockopt() is the SOL_SOCKET handler: in 6.1 and later it
+     * forwards every request to sk_setsockopt(), which ignores `level`. With
+     * SOL_TCP + TCP_CONGESTION (13) that decodes as SO_LINGER (also 13),
+     * whose payload must be sizeof(struct linger); the 3- or 4-byte name then
+     * returns -EINVAL and the socket keeps its old algorithm. That was the
+     * field dmesg line "refused: -22 but actual=bbr". */
+    err = s->ops->setsockopt(s, SOL_TCP, TCP_CONGESTION,
+                             KERNEL_SOCKPTR((void *)name),
+                             (unsigned int)strlen(name));
     if (err)
-        err = sock_setsockopt(s, SOL_TCP, TCP_CONGESTION,
-                              KERNEL_SOCKPTR(TBT_CAR_CC_NAME),
-                              sizeof(TBT_CAR_CC_NAME));
+        err = s->ops->setsockopt(s, SOL_TCP, TCP_CONGESTION,
+                                 KERNEL_SOCKPTR((void *)name),
+                                 (unsigned int)strlen(name) + 1);
     /* The socket's actual algorithm decides: a kernel that refuses the
-     * option but already runs BBR is a correct carrier, and counting it as a
-     * failure hid that. A refusal on a non-BBR default still keeps the
-     * carrier alive, but must be named once. */
-    if (strcmp(tbt_car_cc_actual(s->sk), TBT_CAR_CC_NAME))
+     * option but already runs the requested algorithm is a correct carrier.
+     * A refusal on another algorithm still keeps the carrier alive, but must
+     * be named once. */
+    if (strcmp(tbt_car_cc_actual(s->sk), name))
     {
         pr_info_ratelimited("tbtun: carrier TCP_CONGESTION=%s failed: %d actual=%s; keeping it\n",
-                            TBT_CAR_CC_NAME, err,
-                            tbt_car_cc_actual(s->sk));
+                            name, err, tbt_car_cc_actual(s->sk));
         return false;
     }
     if (err)
-        pr_info_ratelimited("tbtun: carrier TCP_CONGESTION=%s refused: %d but actual=bbr\n",
-                            TBT_CAR_CC_NAME, err);
+        pr_info_ratelimited("tbtun: carrier TCP_CONGESTION=%s refused: %d but actual=%s\n",
+                            name, err, tbt_car_cc_actual(s->sk));
+    /* No-op unless this socket runs tbtcc. Harmless for BBR. */
+    tbt_cc_set_tunnel(s->sk,
+                      sess && sess->tunnel ? sess->tunnel->cfg.tunnel_rate : 0,
+                      sess ? READ_ONCE(sess->cc_loss_ppm) : 0);
     return true;
 }
 
@@ -3638,7 +3704,7 @@ static void tbt_car_connect_work(struct work_struct *w)
     /* Set before the SYN so the first cwnd starts under BBR. Some kernels
      * refuse TCP_CONGESTION until the socket leaves TCP_CLOSE; the retry
      * after a successful connect is the one that is counted. */
-    tbt_car_set_bbr(s);
+    tbt_car_set_cc(s, sess);
     tbt_carrier_keepalive(s);
     s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
     {
@@ -3663,7 +3729,7 @@ static void tbt_car_connect_work(struct work_struct *w)
         goto release;
 
     tcp_sk(s->sk)->nonagle = TCP_NAGLE_OFF;
-    if (tbt_car_set_bbr(s))
+    if (tbt_car_set_cc(s, sess))
         atomic64_inc(&sess->car_bbr_ok);
     else
         atomic64_inc(&sess->car_bbr_fail);
@@ -3988,7 +4054,7 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
     /* The listener already fixed the window scale; apply the per-direction
      * buffer size to the accepted socket as well. */
     tbt_car_setsockbuf(newsock, sess->n_car);
-    if (tbt_car_set_bbr(newsock))
+    if (tbt_car_set_cc(newsock, sess))
         atomic64_inc(&sess->car_bbr_ok);
     else
         atomic64_inc(&sess->car_bbr_fail);

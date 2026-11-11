@@ -16,7 +16,8 @@ SRCS            := Makefile \
                    tbtun/tbt_tx_acct.h \
                    tbtun/tbt_rx_budget.h \
                    tbtun/tbt_core.c tbtun/tbt_session.c tbtun/tbt_procfs.c tbtun/tbt_listen.c \
-                   tbtun/tbt_carrier.c tbtun/tbt_sock.c tbtun/tbt_tx.c tbtun/tbt_rx.c \
+                   tbtun/tbt_carrier.c tbtun/tbt_cc.c tbtun/tbt_cc.h tbtun/tbt_sock.c \
+                   tbtun/tbt_tx.c tbtun/tbt_rx.c \
                    tbtun/tbt_parse.c tbtun/tbt_proto.c tbtun/tbt_rec.c tbtun/tbt_http.c \
                    tbtun/tbt_fec_batch.c \
                    tbtun/tbt_crypto.c tbtun/tbt_fec.c \
@@ -275,7 +276,7 @@ TSAN_CFLAGS     := -g -fsanitize=thread -fno-omit-frame-pointer
 
 obj-m           += tbtun.o
 tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
-                   tbtun/tbt_listen.o tbtun/tbt_proto.o tbtun/tbt_carrier.o \
+                   tbtun/tbt_listen.o tbtun/tbt_proto.o tbtun/tbt_carrier.o tbtun/tbt_cc.o \
                    tbtun/tbt_sock.o tbtun/tbt_tx.o tbtun/tbt_rx.o tbtun/tbt_rec.o \
                    tbtun/tbt_parse.o tbtun/tbt_http.o tbtun/tbt_fec_batch.o tbtun/tbt_crypto.o \
                    tbtun/tbt_portmap.o tbtun/tbt_map.o tbtun/tbt_fec.o tbtun/tbt_fec_data.o \
@@ -292,6 +293,22 @@ tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
 # Keep every module frame small enough for the kernel stack: a 1 KiB bound
 # catches a TBT_STREAMS_MAX pointer array before it reaches a real call path.
 ccflags-y       := -std=gnu99 -I$(src)/tbtun -Wframe-larger-than=1024
+# tbt_cc.c's ACK hook is selected from the installed header, not from a
+# version number: this tree declares cong_control(sk, ack, flag, rs), earlier
+# ones declare cong_control(sk, rs) or only the cong_avoid/pkts_acked pair.
+# The two cong_control forms are both valid function-pointer types, so a C
+# feature test cannot tell them apart; read the declaration. $srctree is the
+# kernel tree inside kbuild; KERNEL_DIR covers a direct invocation of this
+# Makefile. A header that changes either signature fails the build instead of
+# attaching the wrong arguments.
+TBT_CC_TCP_H := $(firstword $(wildcard $(srctree)/include/net/tcp.h) \
+                            $(wildcard $(KERNEL_DIR)/include/net/tcp.h))
+TBT_CC_ACK_HOOK := $(shell [ -n "$(TBT_CC_TCP_H)" ] && \
+        grep -qs 'u32 ack, int flag, const struct rate_sample' $(TBT_CC_TCP_H) && echo 1)
+TBT_CC_INIT_HOOK := $(shell [ -n "$(TBT_CC_TCP_H)" ] && \
+        grep -qs 'void (\*init)(struct sock \*sk);' $(TBT_CC_TCP_H) && echo 1)
+ccflags-y += $(if $(TBT_CC_ACK_HOOK),-DTBT_CC_HAVE_CONG_CTRL_ACK=1) \
+             $(if $(TBT_CC_INIT_HOOK),-DTBT_CC_HAVE_INIT=1)
 # ChaCha8 is a hot per-byte loop; keep the kernel's -O2 for the rest of the
 # module and let this one file unroll its fixed 8-round permutation. The
 # variable must name the object path Kbuild sees for a composite module.
