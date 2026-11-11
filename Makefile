@@ -202,6 +202,13 @@ HOST_BENCH_SCLC_PIPE_SRCS := host/bench_sclc_pipe.c tbtun/tbt_fec.c \
                    tbtun/tbt_fec_sclc.c tbtun/tbt_sclc_uplink.c \
                    tbtun/tbt_sc_ldpc.c tbtun/tbt_sc_ldpc_gf16.c \
                    tbtun/tbt_crypto.c tbtun/tbt_proto.c
+HOST_BENCH_SCLC_BUILD := host/bench_sclc_build
+HOST_BENCH_SCLC_BUILD_SRCS := host/bench_sclc_build.c tbtun/tbt_fec.c \
+                   tbtun/tbt_fec_sclc.c tbtun/tbt_sclc_uplink.c \
+                   tbtun/tbt_sc_ldpc.c tbtun/tbt_sc_ldpc_gf16.c
+HOST_BENCH_SCLC_BUILD_HDRS := tbtun/tbt_fec.h tbtun/tbt_fec_sclc.h \
+                   tbtun/tbt_sclc_uplink.h tbtun/tbt_sc_ldpc.h \
+                   tbtun/tbt_sc_ldpc_gf16.h tbtun/tbt_uapi.h
 HOST_TSAN       := host/test_tsan_race
 HOST_TSAN_SRCS  := host/test_tsan_race.c tbtun/tbt_crypto.c
 HOST_TSAN_HDRS  := tbtun/tbt_fec.h tbtun/tbt_crypto.h tbtun/tbt_uapi.h
@@ -234,7 +241,7 @@ CFLAGS_tbtun/tbt_crypto.o := -O3
 # block encode on the host and leaves the object the same size class.
 CFLAGS_tbtun/tbt_fec_sclc.o := -O3
 
-.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-tsan host-test-live host-bench-micro host-bench-sclc host-bench-sclc-down host-bench-sclc-sim host-bench-sclc-pipe host-bench-rxpath bench bench-full
+.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-tsan host-test-live host-bench-micro host-bench-sclc host-bench-sclc-down host-bench-sclc-sim host-bench-sclc-pipe host-bench-sclc-build host-bench-rxpath bench bench-full
 
 all:
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) modules
@@ -504,6 +511,14 @@ $(HOST_BENCH_SCLC_PIPE): $(HOST_BENCH_SCLC_PIPE_SRCS)
 host-bench-sclc-pipe: $(HOST_BENCH_SCLC_PIPE)
 	@./$(HOST_BENCH_SCLC_PIPE)
 
+$(HOST_BENCH_SCLC_BUILD): $(HOST_BENCH_SCLC_BUILD_SRCS) $(HOST_BENCH_SCLC_BUILD_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_BENCH_SCLC_BUILD_SRCS)
+
+# Codec build cost against the route-A gate: p99 <= 2 ms for the downlink
+# binary codec and for the eight-group uplink GF(16) build.
+host-bench-sclc-build: $(HOST_BENCH_SCLC_BUILD)
+	@./$(HOST_BENCH_SCLC_BUILD)
+
 # The same tests with ASan and UBSan. A toolchain without the runtimes gets
 # a clear skip, not a build failure.
 host-test-san:
@@ -669,6 +684,7 @@ clean: clean-dkms.conf clean-dkms-tarball
 	$(RM) $(HTTP_RFC_GEN) $(HTTP_RFC_GEN_SAN)
 	$(RM) $(HOST_RX_BUDGET) host/test_rx_budget_san
 	$(RM) $(HOST_BENCH_RXPATH)
+	$(RM) $(HOST_BENCH_SCLC_BUILD)
 	$(RM) $(HOST_CARRIER_POLICY) host/test_carrier_policy_san
 	$(RM) $(wildcard tbtun/*.su) $(wildcard host/*.su)
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
