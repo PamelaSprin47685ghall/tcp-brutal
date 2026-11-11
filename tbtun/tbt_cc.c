@@ -421,6 +421,12 @@ bool tbt_cc_snapshot(struct sock *sk, struct tbt_cc_info *out)
     return true;
 }
 
+/* The name this module registers. It must be its own: carrier_cc defaults to
+ * bbr, and bbr is already registered in every kernel that ships tcp_bbr, so
+ * registering the parameter's name failed with -EBUSY and the whole module
+ * refused to load. carrier_cc still selects what a carrier socket asks for. */
+#define TBT_CC_NAME "tbtcc"
+
 static struct tcp_congestion_ops tbt_cc_ops = {
 #if TBT_CC_HAVE_CONG_CTRL_ACK
     .cong_control = tbt_cc_cong_control,
@@ -434,14 +440,14 @@ static struct tcp_congestion_ops tbt_cc_ops = {
 #ifdef TBT_CC_HAVE_INIT
     .init = tbt_cc_init_sock,
 #endif
-    .name = TBT_CAR_CC_NAME,
+    .name = TBT_CC_NAME,
     .owner = THIS_MODULE,
 };
 
 int tbt_cc_module_init(void)
 {
     BUILD_BUG_ON(sizeof(struct tbt_cc_state) > ICSK_CA_PRIV_SIZE);
-    BUILD_BUG_ON(sizeof(TBT_CAR_CC_NAME) > TCP_CA_NAME_MAX);
+    BUILD_BUG_ON(sizeof(TBT_CC_NAME) > TCP_CA_NAME_MAX);
     return tcp_register_congestion_control(&tbt_cc_ops);
 }
 

@@ -289,6 +289,11 @@ and moves independently of the module version.
   `c->tx_lock`, so an idle carrier does not start the next burst from the
   cold window. Hold enters and exits are counted per carrier and summed in
   the `cc` stats line.
+- The module registers its own congestion control as `tbtcc` instead of
+  reusing the `carrier_cc` name. Registering `bbr` always failed with
+  `-EBUSY` (`TCP: bbr already registered or non-unique key`), so the module
+  could not load at all with the default; `carrier_cc` still selects bbr by
+  default, and `carrier_cc=tbtcc` opts into the module's algorithm.
 
 ## [0.7.3] - 2026-11-11
 
