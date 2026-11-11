@@ -37,7 +37,7 @@ historical; both now carry a SUPERSEDED header. Do not use their verdicts.
 11 PASS / 0 FAIL / 0 SKIP in 165.7 s, run under
 `flock -x /tmp/tbtun-qemu.lock`. Per-probe lines and key evidence are in
 `qemu-AK-summary.txt`; the raw console is
-`review/final-qemu/qemu-AK-console-f1282df.log`.
+removed by the 2026-11-12 repository slimming.
 
 ## Adversarial suite
 

@@ -41,7 +41,8 @@ benches/run.sh throughput --n 16 --mib 40
 ```
 
 CSVs: `review/final-bench/csv/20261106T00{3712,4314,4635,4925}-throughput*.csv`
-(sha256 in `csv/sha256.txt`); consoles under `review/final-bench/console/`.
+(sha256 in `csv/sha256.txt`); the consoles were removed by the 2026-11-12
+repository slimming.
 The harness's `wire_per_app` column is a 2 s window ratio; `wire/app` below is
 the whole-run `wire_bytes / app_bytes` the acceptance asks for.
 

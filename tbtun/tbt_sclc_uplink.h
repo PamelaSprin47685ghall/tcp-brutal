@@ -8,7 +8,7 @@
  * See review/sc-ldpc-uplink-grouped.md for the recovery measurements.
  *
  * The codec is the SC-IRA construction of the host prototype
- * (review/fec-prototype/sc_ldpc on w-sclc-gf16), restricted to
+ * (w-sclc-gf16; dropped 2026-11-12), restricted to
  * SC_TERM_ACC, GF(16) symbols, systematic encoding and BEC peeling with a
  * bounded dense core solve.  No floating point, no libc, host/kernel dual
  * compile.

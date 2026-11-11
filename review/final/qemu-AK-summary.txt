@@ -8,7 +8,7 @@ host: quiet before the run (pgrep -af 'qemu-system|bench' empty), QEMU under
       flock -x /tmp/tbtun-qemu.lock
 elapsed: 165.7 s (run.sh wall 2m45.7s)
 result: 11 passed, 0 failed, 0 skipped
-console: review/final-qemu/qemu-AK-console-f1282df.log
+console: removed by the 2026-11-12 repository slimming
 
 ## probes
 TBT_PROBE_RESULT A PASS

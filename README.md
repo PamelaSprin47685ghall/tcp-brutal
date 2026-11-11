@@ -831,5 +831,3 @@ else, use WireGuard.
 
 ---
 
-`logo.png` is the legacy TCP Brutal mark, kept for the repository's history; the
-manual does not use it.

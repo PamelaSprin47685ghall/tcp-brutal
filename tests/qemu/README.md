@@ -230,7 +230,8 @@ tests/qemu/run.sh --probes I --timeout 300
 tests/qemu/run.sh --probes A,B,I --log /tmp/i.log
 ```
 
-`--probes` defaults to `A,B,C,D,E,F,G,H,I,J,K`. Probe I runs for about two
+`--probes` defaults to `A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R`, the value
+`run.sh` uses when `$TBT_PROBES` is unset. Probe I runs for about two
 minutes (control plus main), so give it a `--timeout` of at least 300. `--allow-skip` accepts a run in
 which some probes skipped. `--no-net` boots without the NIC, which turns I, J
 and K into skips and leaves A–H on loopback. `--ko`,

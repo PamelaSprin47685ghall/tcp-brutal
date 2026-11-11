@@ -1,8 +1,8 @@
 /*
  * tbt_sc_ldpc.h - SC-IRA graph construction for the uplink GF(16) codec.
  *
- * Kernel port of the host prototype in
- * review/fec-prototype/sc_ldpc/sc_ldpc.{c,h} (w-sclc-gf16).  Only the
+ * Kernel port of the 0.3 host prototype (w-sclc-gf16; the prototype tree was
+ * dropped on 2026-11-12).  Only the
  * SC_TERM_ACC construction is used in production; the other termination
  * modes stay for the host diagnostic tools and are not reachable from the
  * uplink codec.  No floating point, no libc: allocation is sclc_zalloc().

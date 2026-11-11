@@ -2,8 +2,8 @@
  * tbt_sc_ldpc_gf16.h - q-ary (GF(16)) SC-IRA codec for the uplink grouped
  * FEC block.
  *
- * Kernel port of review/fec-prototype/sc_ldpc/sc_ldpc_gf16.{c,h}
- * (w-sclc-gf16).  The graph is the SC_TERM_ACC graph; every variable and
+ * Kernel port of the 0.3 host prototype (w-sclc-gf16; dropped 2026-11-12).
+ * The graph is the SC_TERM_ACC graph; every variable and
  * check symbol is a GF(16) element and every check is a random nonzero
  * linear combination.  The owned parity symbol of a check has coefficient
  * 1, so encoding is one forward sweep.

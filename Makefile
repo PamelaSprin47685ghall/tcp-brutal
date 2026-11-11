@@ -261,12 +261,6 @@ HOST_CALIB_SCLC_DE := host/calib_sclc_de
 HOST_CALIB_SCLC_DE_SRCS := host/calib_sclc_de.c tbtun/tbt_fec_sclc.c
 HOST_CALIB_SCLC_DE_HDRS := tbtun/tbt_fec_sclc.h tbtun/tbt_fec.h \
                    tbtun/tbt_uapi.h
-HOST_BENCH_SCLC_SIM := host/sim_sclc_adaptive
-HOST_BENCH_SCLC_SIM_SRCS := host/sim_sclc_adaptive.c tbtun/tbt_fec_sclc.c \
-                   tbtun/tbt_fec_adapt_sclc.c
-HOST_BENCH_SCLC_SIM_HDRS := tbtun/tbt_fec_sclc.h \
-                   tbtun/tbt_fec_adapt_sclc.h tbtun/tbt_fec_adapt.h \
-                   tbtun/tbt_fec.h tbtun/tbt_uapi.h
 HOST_BENCH_SCLC_PIPE := host/bench_sclc_pipe
 HOST_BENCH_SCLC_PIPE_SRCS := host/bench_sclc_pipe.c tbtun/tbt_fec.c \
                    tbtun/tbt_fec_sclc.c tbtun/tbt_sclc_uplink.c \
@@ -335,7 +329,7 @@ CFLAGS_tbtun/tbt_crypto.o := -O3
 # block encode on the host and leaves the object the same size class.
 CFLAGS_tbtun/tbt_fec_sclc.o := -O3
 
-.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-tsan host-test-live host-bench-micro host-bench-sclc host-bench-sclc-down host-bench-sclc-sim host-bench-sclc-pipe host-bench-sclc-build host-bench-rxpath host-calib-sclc-up calib-sclc-up bench bench-full
+.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-tsan host-test-live host-bench-micro host-bench-sclc host-bench-sclc-down host-bench-sclc-pipe host-bench-sclc-build host-bench-rxpath host-calib-sclc-up calib-sclc-up bench bench-full
 
 all:
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) modules
@@ -638,15 +632,6 @@ $(HOST_CALIB_SCLC_DE): $(HOST_CALIB_SCLC_DE_SRCS) $(HOST_CALIB_SCLC_DE_HDRS)
 host-calib-sclc-de: $(HOST_CALIB_SCLC_DE)
 	@./$(HOST_CALIB_SCLC_DE) --range
 	@./$(HOST_CALIB_SCLC_DE)
-
-$(HOST_BENCH_SCLC_SIM): $(HOST_BENCH_SCLC_SIM_SRCS) $(HOST_BENCH_SCLC_SIM_HDRS)
-	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_BENCH_SCLC_SIM_SRCS)
-
-# Closed-loop 120 s BEC trace through the real estimator, controller and
-# downlink ladder. This is the cross-rate wire/app witness; it is not a gate
-# and stays out of `check` because it runs the codec for simulation time.
-host-bench-sclc-sim: $(HOST_BENCH_SCLC_SIM)
-	@./$(HOST_BENCH_SCLC_SIM)
 
 # Full-chain production shapes: FEC, header CRCs and ChaCha8 for both
 # directions, at the report loss points. Not part of `check`.

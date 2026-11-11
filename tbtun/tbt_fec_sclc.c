@@ -1,7 +1,8 @@
 /* tbt_fec_sclc.c - downlink SC-IRA codec, 256-share rate ladder.
  *
- * Construction and message semantics follow review/fec-prototype/sc_ldpc
- * (SC_TERM_ACC). The FEC block always has 256 shares and 1024 codewords;
+ * Construction and message semantics follow the 0.3 SC-LDPC host prototype
+ * (SC_TERM_ACC; the prototype tree was dropped on 2026-11-12). The FEC block
+ * always has 256 shares and 1024 codewords;
  * n data shares and m = 256 - n parity shares select the transmitted code
  * rate. Each coupling block holds n payload variables, m parity variables
  * and m checks, so every parity variable is transmitted: nothing is

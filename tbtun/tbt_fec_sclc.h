@@ -1,6 +1,6 @@
 /* tbt_fec_sclc.h - downlink SC-IRA codec, 256-share rate ladder.
  *
- * The code is the SC_TERM_ACC construction of review/fec-prototype/sc_ldpc:
+ * The code is the SC_TERM_ACC construction of the 0.3 host prototype:
  * a ring payload window over L = 8 coupling blocks and a non-wrapping parity
  * accumulator. The FEC block always has n data shares and m parity shares
  * with n + m = 256, so one codeword carries n*8 payload bits and m*8
