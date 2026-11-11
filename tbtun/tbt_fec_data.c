@@ -286,10 +286,10 @@ static struct tbt_fec_grouped *tbt_fec_codec_build(
  * default tcp_retries2 (15) is the point where TCP itself gives up. */
 #define TBT_FEC_TCP_RETX_MAX 15
 
-/* The credit cap in DATA packets for one direction. A SC-LDPC parent runs
- * the sixteen-round downlink window and the eight-round uplink window;
- * TBT_FEC_S is the wire slot, so the packet cap is the window divided by it.
- * The RLNC path keeps the flat TBT_FEC_CREDIT_MAX.
+/* The credit cap in shares for one direction. Both SC-LDPC parent
+ * windows are 64 blocks * 256 shares; TBT_FEC_S is the wire slot, so the
+ * share cap is the window divided by it. The RLNC path keeps the flat
+ * TBT_FEC_CREDIT_MAX.
  *
  * The direction must be the one the credit is for, not the local sender's:
  * on the near end the local TX is the 8x32 uplink while the ACK it grants
@@ -1934,14 +1934,22 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
         /* Mid-block sends are exempt: the receiver cannot ACK a partial
          * block, so finishing it is the contract, not a violation. Only a
          * new block that opens past the packet window is counted. */
-        if (!started && tx->seq > peer &&
-            tx->seq - peer >= (u64)credit + (u64)tx->groups * tx->n)
+        {
+            u32 per_shares = (u32)tx->groups *
+                             ((u32)tx->n + tx->m);
+            u32 per_data = (u32)tx->groups * tx->n;
+            u64 credit_data = per_shares ?
+                (u64)(credit / per_shares) * per_data : 0;
+
+            if (!started && tx->seq > peer &&
+                tx->seq - peer >= credit_data + per_data)
         {
             atomic64_inc(&sess->fec_credit_violation);
             if (debug)
                 pr_info_ratelimited("tbtun: fec credit violation seq=%llu peer=%llu credit=%u n=%u groups=%u\n",
                                     tx->seq, peer, credit, tx->n,
                                     tx->groups);
+            }
         }
     }
     len = tx->fill;
@@ -2090,10 +2098,10 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
         tbt_fec_tx_finish(sess, tx, st);
 }
 
-/* The peer's ACK grants `credit` packets beyond the frontier it has delivered.
- * The receiver buffers `slots * groups * n` packets ahead of delivery, and the
- * credit is the same number, so a sender that respects it can never outrun the
- * buffer. Before this was enforced the packetizer ran as far ahead as the
+/* The peer's ACK grants `credit` shares beyond the frontier it has
+ * delivered. The receiver buffers `slots * groups * (n+m)` shares ahead of
+ * delivery, and the credit is the same number, so a sender that respects
+ * it can never outrun the buffer. Before this was enforced the packetizer ran as far ahead as the
  * carriers would carry it, the receiver dropped 1527 shares as "too far ahead"
  * (fec_drop_window), and the blocks they belonged to could never complete: the
  * stream stalled with the application's bytes still in the ring.
@@ -2137,8 +2145,8 @@ static bool tbt_fec_tx_credit_ok(const struct tbt_fec_tx *tx)
     return !tbt_fec_credit_waiting(READ_ONCE(tx->peer_pkts),
                                    READ_ONCE(tx->seq),
                                    READ_ONCE(tx->credit),
-                                   (u32)READ_ONCE(tx->groups) *
-                                       READ_ONCE(tx->n));
+                                   READ_ONCE(tx->groups),
+                                   READ_ONCE(tx->n), READ_ONCE(tx->m));
 }
 
 /* The session FIFO at or above its high-water mark. The packetizer checks
@@ -2235,7 +2243,8 @@ static void tbt_fec_tx_stall_diag(struct tbt_session *sess,
     u16 n = READ_ONCE(tx->n);
     u16 groups = READ_ONCE(tx->groups);
     u32 credit = READ_ONCE(tx->credit);
-    u32 credit_blocks = tbt_fec_credit_blocks(credit, groups, n);
+    u16 m = READ_ONCE(tx->m);
+    u32 credit_blocks = tbt_fec_credit_blocks(credit, groups, n, m);
     u64 base_pkt = READ_ONCE(tx->base_pkt);
     u64 base_block = READ_ONCE(tx->base_block);
     u32 ring_bytes = (u32)(READ_ONCE(tx->head) - READ_ONCE(tx->tail)) +
@@ -2462,7 +2471,8 @@ static void tbt_fec_tx_codec_tick(struct tbt_session *sess,
     spin_unlock_bh(&tx->shape_lock);
     rk = tx->replay ? tbt_fec_replay_k(tx->replay) : sess->fec_replay_k;
     tx->credit_cap = tbt_fec_credit_packets(
-        tx->groups, n, rk, sess->fec_slots, tbt_fec_credit_max_packets(sess));
+        tx->groups, n, tx->m, rk, sess->fec_slots,
+        tbt_fec_credit_max_packets(sess));
     if (tx->credit > tx->credit_cap)
         tx->credit = tx->credit_cap;
     if (tx->codec_entry)
@@ -2609,8 +2619,9 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
                 !tbt_fec_credit_waiting(READ_ONCE(tx->peer_pkts),
                                         READ_ONCE(tx->seq),
                                         READ_ONCE(tx->credit),
-                                        (u32)READ_ONCE(tx->groups) *
-                                            READ_ONCE(tx->n)))
+                                        READ_ONCE(tx->groups),
+                                        READ_ONCE(tx->n),
+                                        READ_ONCE(tx->m)))
             {
                 atomic64_inc(&sess->fec_unacked_ring_drain);
             }
@@ -3633,16 +3644,16 @@ static int tbt_fec_blk_decode(struct tbt_session *sess,
  * packet frontier can name bytes that no delivered share carried. */
 /* The shape of the frontier block, or the session view when that slot is
  * not occupied. A late/out-of-order block must not define the ACK credit. */
-static u16 tbt_fec_frontier_n(struct tbt_fec_rx *rx, u64 s)
+static void tbt_fec_frontier_shape(struct tbt_fec_rx *rx, u64 s,
+                                   u16 *n, u16 *m)
 {
     struct tbt_fec_blk *b;
-    u16 n;
 
     spin_lock_bh(&rx->lock);
     b = tbt_fec_rx_blk(rx, 0, s);
-    n = tbt_fec_frontier_shape_n(b->used, b->block_id, s, b->n, rx->n);
+    *n = tbt_fec_frontier_shape_n(b->used, b->block_id, s, b->n, rx->n);
+    *m = tbt_fec_frontier_shape_m(b->used, b->block_id, s, b->m, rx->m);
     spin_unlock_bh(&rx->lock);
-    return n;
 }
 
 static void tbt_fec_ack(struct tbt_session *sess, struct tbt_fec_flow *f,
@@ -3669,9 +3680,11 @@ static void tbt_fec_ack(struct tbt_session *sess, struct tbt_fec_flow *f,
     {
         struct tbt_fec_rx *rx = f->rx;
 
+        u16 fn, fm;
+
+        tbt_fec_frontier_shape(rx, READ_ONCE(rx->next_super), &fn, &fm);
         a.credit_packets = tbt_fec_credit_packets(
-            rx->groups, tbt_fec_frontier_n(rx, READ_ONCE(rx->next_super)),
-            rx->replay_k, rx->slots,
+            rx->groups, fn, fm, rx->replay_k, rx->slots,
             tbt_fec_credit_max_packets_dir(sess, rx->groups > 1));
         /* The peer uses this as the replay round trip: a share asked again
          * before it can arrive would only duplicate the repair. The sample
@@ -6825,6 +6838,15 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
         {
             u64 sent = READ_ONCE(tx->seq);
             bool ack_advanced = false;
+            u32 per_block = (u32)tx->groups *
+                            ((u32)tx->n + tx->m);
+
+            /* The grant is in shares and may name a partial block during
+             * a shape switch; the sender floors it. Only a grant below one
+             * whole block is a unit error. */
+            if (a.credit_packets && per_block &&
+                a.credit_packets < per_block)
+                atomic64_inc(&sess->fec_credit_unit_bad);
 
             /* The plane frontier never moves past what this side sent. */
             if (a.next_deliver > sent)
@@ -8333,7 +8355,7 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     {
         tx->codec_variant = groups > 1 ? 1 : 0;
     }
-    tx->credit_cap = tbt_fec_credit_packets(groups, n, sess->fec_replay_k,
+    tx->credit_cap = tbt_fec_credit_packets(groups, n, m, sess->fec_replay_k,
                                             sess->fec_slots,
                                             tbt_fec_credit_max_packets(sess));
     {
@@ -8342,7 +8364,7 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
          * whose arena may be smaller; the receiver dropped the excess and
          * its ACK froze. Start with one super-block and let the first ACK
          * open the window it can actually buffer. */
-        u32 two = 2u * (u32)groups * n;
+        u32 two = 2u * (u32)groups * ((u32)n + m);
 
         tx->credit = two && two < tx->credit_cap ? two : tx->credit_cap;
     }

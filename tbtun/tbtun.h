@@ -1846,6 +1846,7 @@ struct tbt_session
     atomic64_t fec_tx_run_leak;
     atomic64_t fec_unacked_ring_drain;
     atomic64_t fec_replay_false_enospc;
+    atomic64_t fec_credit_unit_bad;
     atomic64_t fec_block_complete_without_replay;
     atomic64_t fec_fin_frozen_with_pending;
     atomic64_t fec_fin_with_undelivered; /* detach/kill while the FEC walk

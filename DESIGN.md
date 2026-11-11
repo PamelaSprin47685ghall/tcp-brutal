@@ -508,9 +508,11 @@ adaptive one: `FEC_CFG` grows to 48 bytes and names the shape switch,
   cap was the 35 MiB/s ceiling. The sender re-queues the requested records on
   any up, non-stalled carrier. The share index stays the same; the carrier
   does not. The ACK credit is `K_eff - 2` super-blocks, capped at
-  `TBT_FEC_CREDIT_MAX` (8192 packets, 64 MiB at S=8192) in both directions,
-  so the oldest block the receiver can still NACK is never evicted; the two
-  spare blocks absorb a block boundary and the in-flight parity.
+  `TBT_FEC_CREDIT_MAX` (16384 shares = 64 blocks x 256 shares; 8192 DATA
+  packets on the 128/128 downlink, 64 MiB of source at S=8192) in both
+  directions, so the oldest block the receiver can still NACK is never
+  evicted; the two spare blocks absorb a block boundary and the in-flight
+  parity. At S=1024 both parent windows are 16 MiB.
 - **The replay record plane is block-granular.** The ring keeps 66 logical
   block slots and per-record descriptors, but a block's
   `groups * (n+m) * (HDR+S)` record plane is allocated when its first record
@@ -1421,8 +1423,8 @@ allocates each `(n+m)*S` block buffer on its first share, and returns it at deli
 the hot pool holds at most two blocks (4 MiB at 2 MiB/block). The packetizer source
 ring is capped at 16 MiB (the 64-block flight window lives in the lazy replay
 planes, not in the unencoded FIFO); output queues keep 4096
-records under a 64 MiB byte mark; credit is 64 blocks (8192 packets), and both parent
-windows are 64 MiB. An eager 66-slot replay plane plus an eager 66-slot RX arena would
+records under a 64 MiB byte mark; credit is 64 blocks (16384 shares), and both
+parent windows are 16 MiB at S=1024 (64 MiB of source at S=8192). An eager 66-slot replay plane plus an eager 66-slot RX arena would
 be about 139 MiB + 132 MiB; the lazy form avoids that, and RX pages are committed only
 while blocks are live.
 Below `TBT_FEC_MEM_PAUSE_KB` (180 MiB) the packetizer shrinks the replay pool and
