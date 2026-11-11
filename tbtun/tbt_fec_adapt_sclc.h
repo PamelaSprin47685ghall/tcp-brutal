@@ -13,10 +13,11 @@
  *            still misses when it first crosses the decode wake line;
  *     delta  analytic margin from the BEC density evolution plus a slow
  *            online correction from the observed surplus S = T - real;
- *     burst  fast feedforward for a burst the slow quantile has not seen,
- *            or the physical ceil((1 - alive/carriers) * n) term when a
- *            carrier is dead. The burst term is capped at n/4; the carrier
- *            term is a physical estimate and is not capped.
+ *     burst  fast feedforward above a slow mean of E (not above q, which a
+ *            short burst never reaches), or the physical
+ *            ceil((1 - alive/carriers) * n) term when a carrier is dead.
+ *            The burst term is capped at n/4; the carrier term is a
+ *            physical estimate and is not capped.
  *
  * eps is not a constant: the marginal trade-off between one more parity
  * share and one more failed block sets eps ~ sigma / ((n+m)(1+w)), clamped
@@ -34,11 +35,12 @@
  * m_target, and the data plane puts n/m in the next block header.
  *
  * Safety: eight consecutive first failures, or a first-failure rate above
- * 2*eps in the last 32 blocks, add max(2, n/16) parity shares and freeze one
- * feedback period. A dead carrier population, more than 10% stalled
- * carriers, or more than 1% abandoned shares freeze q, delta, burst and m.
- * E enters the quantile update unchanged; no path subtracts a margin from
- * the loss estimate.
+ * 2*eps in the last max(32, ceil(1/(2*eps))) blocks, add max(2, n/16) parity
+ * shares and freeze one feedback period. A dead carrier population, more
+ * than 10% stalled carriers, or more than 1% abandoned shares freeze q,
+ * delta, burst and m; a frozen block sample updates none of them. E enters
+ * the quantile update unchanged; no path subtracts a margin from the loss
+ * estimate.
  */
 #ifndef _TBT_FEC_ADAPT_SCLC_H
 #define _TBT_FEC_ADAPT_SCLC_H
@@ -272,7 +274,8 @@ void tbt_fec_adapt_sclc_est_sample(const struct tbt_fec_adapt_sclc_est *e,
 #define TBT_FEC_ADAPT_SCLC_ONE 65536u
 #define TBT_FEC_ADAPT_SCLC_COLD_BLOCKS 16u
 #define TBT_FEC_ADAPT_SCLC_BACKUP_RUN 8u
-#define TBT_FEC_ADAPT_SCLC_BACKUP_WIN 32u
+#define TBT_FEC_ADAPT_SCLC_BACKUP_WIN 32u  /* minimum failure window */
+#define TBT_FEC_ADAPT_SCLC_BACKUP_MAX 128u /* history depth */
 /* gamma_q = min(1/16, pi/(8d)); gamma_delta = 1/64. */
 #define TBT_FEC_ADAPT_SCLC_GAMMA_Q_Q16 4096u
 #define TBT_FEC_ADAPT_SCLC_GAMMA_DELTA_Q16 1024u
@@ -305,6 +308,8 @@ struct tbt_fec_adapt_sclc_out
     u16 backup;      /* safety shares currently added */
     u8 reason;
     u8 frozen;
+    u16 m_req;       /* round(q_act + delta + burst) + backup, before the
+                      * clamp and the buildable mapping */
 };
 
 /* One controller per direction. Zeroing is not enough; call init. */
@@ -334,15 +339,19 @@ struct tbt_fec_adapt_sclc_ctl
     u32 q_q16;
     u32 q_act_q16;  /* low-passed q used by the output */
     u32 delta_q16;
-    u32 delta0_q16; /* fixed analytic initial margin, clamp reference */
+    u32 delta0_q16; /* analytic margin at the current n, clamp reference */
+    int delta_off_q16; /* delta_q16 - delta0_q16, diagnostic only */
     u32 eps_q16;
     u32 sigma_q16;
-    u32 ewma_fast_q16;
+    u32 ewma_fast_q16; /* alpha 1/4, per block */
+    u32 ewma_slow_q16; /* alpha 1/64, the burst baseline, per block */
     u32 burst_q16;
     u32 w_ppm;      /* W/T_b from the last tick, 1.0 = 1000000 */
     u32 delivered;  /* DATA shares since the last tick */
-    u32 fail_hist;  /* bit i: block -1-i failed, up to 32 blocks */
-    u8 fail_hist_n;
+    u16 blocks_tick; /* accepted samples since the last tick */
+    u32 fail_hist[TBT_FEC_ADAPT_SCLC_BACKUP_MAX / 32u];
+    /* bit 0 of [0] is the newest block */
+    u16 fail_hist_n;
     u64 last_tick_ns;
 };
 
@@ -350,12 +359,17 @@ struct tbt_fec_adapt_sclc_ctl
  * `groups` the group count, `extra` the decode wake margin, `n_init` the
  * payload shares in force at start, and `variant` TBT_FEC_SCLC_DOWN or
  * TBT_FEC_SCLC_UP. The controller holds m at n_init until 16 samples have
- * arrived. delta starts at the analytic value: the density-evolution margin
- * plus the finite-length term downlink, the conservative core bound uplink.
- * The downlink clamp is [delta0/2, delta0+8]; the uplink clamp is
- * [1, delta0+8] so the online surplus can walk the conservative core bound
- * down to the rank bound. Returns 0, or -1 when the geometry, margin or
- * split is invalid. */
+ * arrived. The cold seed keeps q at max(empirical quantile, m_init - delta0)
+ * when 16 samples can resolve 1-eps, and at m_init - delta0 otherwise; 16
+ * samples cannot estimate a quantile below 1/16. delta0 is recomputed from
+ * the current n on every tick: the density-evolution margin plus the
+ * finite-length term downlink, the conservative core bound uplink. The
+ * integrated total is preserved when delta0 moves: delta0 sets the clamp
+ * window, not a feedforward step, so the steep uplink core-bound slope
+ * cannot drive m to its ceiling by itself. The downlink clamp is
+ * [delta0/2, delta0+8], the uplink clamp is [1, delta0+8] so the surplus
+ * can walk the conservative core bound down to the rank bound. Returns 0,
+ * or -1 when the geometry, margin or split is invalid. */
 int tbt_fec_adapt_sclc_init(struct tbt_fec_adapt_sclc_ctl *c, u16 shares,
                             u16 groups, u16 extra, u16 n_init, u8 variant);
 
@@ -363,8 +377,10 @@ int tbt_fec_adapt_sclc_init(struct tbt_fec_adapt_sclc_ctl *c, u16 shares,
  * `E` is real - ndata (DATA shares missing), `S` is ndata + nparity - real
  * (surplus over the DATA count), `first_ok` is the first decode attempt's
  * result and `real` is the block's DATA share count. Blocks with
- * real < n/2 are ignored, as are blocks whose E is above real. E enters the
- * quantile unchanged. */
+ * real < n/2 are ignored, as are blocks whose E is above real. A block
+ * sampled while the last tick was frozen updates only the abandoned-share
+ * denominator; q, delta, the failure window and the backup do not move.
+ * E enters the quantile unchanged. */
 void tbt_fec_adapt_sclc_block_sample(struct tbt_fec_adapt_sclc_ctl *c,
                                      u16 E, u16 S, bool first_ok, u16 real);
 
@@ -373,7 +389,9 @@ void tbt_fec_adapt_sclc_block_sample(struct tbt_fec_adapt_sclc_ctl *c,
  * is the DATA shares abandoned since the previous tick. A dead population,
  * more than 10% stalled, or abandoned > 1% of delivered freezes q, delta,
  * burst and m. The output is the next m_target; call once per feedback
- * period. */
+ * period. q's low-pass and the burst decay advance by the number of block
+ * samples since the previous tick, so an eight-group uplink super-block
+ * moves them eight steps, not one. */
 void tbt_fec_adapt_sclc_tick(struct tbt_fec_adapt_sclc_ctl *c, u64 now_ns,
                              u16 d, u32 w_ppm, u16 alive, u16 stalled,
                              u32 abandoned,
