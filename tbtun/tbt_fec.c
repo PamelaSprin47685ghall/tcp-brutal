@@ -654,6 +654,13 @@ struct tbt_fec_replay
     u64 *block_id;
     u64 *block_gen;   /* block id of the resident block, or ~0 */
     u64 *block_start; /* [k] block id owning blk_rec[i], or ~0 */
+    /* Shape and origin of the block in each slot. A block may use any split
+     * of the direction's n+m, so the NACK reply must interpret its share
+     * indices with that block's n/m, not the sender's current shape. */
+    u64 *shape_id;   /* [k] block id the shape fields describe, or ~0 */
+    u16 *shape_n;    /* [k] DATA shares of that block */
+    u16 *shape_m;    /* [k] parity shares of that block */
+    u64 *shape_seq0; /* [k] its group-0/share-0 packet seq */
     /* When a share was last queued as a replay. The NACK handler stamps it
      * and skips a share whose reply is still in flight; storage and this
      * stamp are both protected by the caller's TX replay lock. */
@@ -688,7 +695,8 @@ size_t tbt_fec_replay_bytes(u16 groups, u16 n, u16 m, u16 s, u16 k)
     desc = sizeof(struct tbt_fec_replay) +
            (size_t)k * groups * shares * (sizeof(u64) + sizeof(u16)) +
            (size_t)k * groups * shares * sizeof(u64) +
-           (size_t)k * groups * sizeof(u64) + (size_t)k * sizeof(u64);
+           (size_t)k * groups * sizeof(u64) + (size_t)k * sizeof(u64) +
+           (size_t)k * (sizeof(u64) + 2u * sizeof(u16) + sizeof(u64));
     return desc +
            (size_t)(k < TBT_FEC_REPLAY_HOT_MAX ? k : TBT_FEC_REPLAY_HOT_MAX) *
                block_bytes;
@@ -750,8 +758,13 @@ struct tbt_fec_replay *tbt_fec_replay_new_k(u16 groups, u16 n, u16 m, u16 s,
     r->block_start = tbt_fec_alloc((size_t)k * sizeof(*r->block_start));
     r->sent_ns = tbt_fec_alloc(slots * sizeof(*r->sent_ns));
     r->len = tbt_fec_alloc(slots * sizeof(*r->len));
+    r->shape_id = tbt_fec_alloc((size_t)k * sizeof(*r->shape_id));
+    r->shape_n = tbt_fec_alloc((size_t)k * sizeof(*r->shape_n));
+    r->shape_m = tbt_fec_alloc((size_t)k * sizeof(*r->shape_m));
+    r->shape_seq0 = tbt_fec_alloc((size_t)k * sizeof(*r->shape_seq0));
     if (!r->block_id || !r->block_gen || !r->block_start || !r->sent_ns ||
-        !r->len)
+        !r->len || !r->shape_id || !r->shape_n || !r->shape_m ||
+        !r->shape_seq0)
     {
         tbt_fec_replay_free(r);
         return NULL;
@@ -761,7 +774,13 @@ struct tbt_fec_replay *tbt_fec_replay_new_k(u16 groups, u16 n, u16 m, u16 s,
     for (i = 0; i < r->bslots; i++)
         r->block_gen[i] = ~0ULL;
     for (i = 0; i < r->k; i++)
+    {
         r->block_start[i] = ~0ULL;
+        r->shape_id[i] = ~0ULL;
+        r->shape_n[i] = 0;
+        r->shape_m[i] = 0;
+        r->shape_seq0[i] = 0;
+    }
     r->ack_floor = 0;
     return r;
 }
@@ -783,6 +802,10 @@ void tbt_fec_replay_free(struct tbt_fec_replay *r)
     tbt_fec_free(r->block_start);
     tbt_fec_free(r->sent_ns);
     tbt_fec_free(r->len);
+    tbt_fec_free(r->shape_id);
+    tbt_fec_free(r->shape_n);
+    tbt_fec_free(r->shape_m);
+    tbt_fec_free(r->shape_seq0);
     for (i = 0; i < r->k; i++)
         tbt_fec_free(r->blk_rec[i]);
     for (i = 0; i < r->hot_n; i++)
@@ -805,21 +828,34 @@ static u32 tbt_fec_replay_bslot(const struct tbt_fec_replay *r, u64 block_id,
     return (u32)((block_id % r->k) * r->groups + group);
 }
 
-/* Ensure the ring has a record plane for block_id. Called in process context
- * before the caller takes replay_lock: the plane is allocated here, never
- * under the spinlock. A block's plane is reused from hot[] when possible. */
+static void tbt_fec_replay_shape_set(struct tbt_fec_replay *r, u32 b,
+                                     u64 block_id, u16 n, u16 m, u64 seq0)
+{
+    r->shape_id[b] = block_id;
+    r->shape_n[b] = n;
+    r->shape_m[b] = m;
+    r->shape_seq0[b] = seq0;
+}
+
+/* Ensure the ring has a record plane for block_id and remember the shape it
+ * was built with. Called in process context before the caller takes
+ * replay_lock: the plane is allocated here, never under the spinlock. A
+ * block's plane is reused from hot[] when possible. */
 int tbt_fec_replay_ensure_block(struct tbt_fec_replay *r, u64 block_id,
+                                u16 n, u16 m, u64 seq0,
                                 tbt_fec_spinlock_t *lock)
 {
     u32 b, i, row, per_block;
     u8 *buf;
 
-    if (!r || !r->k)
+    if (!r || !r->k || !n || !m ||
+        (u16)(n + m) != (u16)(r->n + r->m))
         return -EINVAL;
     b = (u32)(block_id % r->k);
     tbt_fec_lock(lock);
     if (r->block_start[b] == block_id && r->blk_rec[b])
     {
+        tbt_fec_replay_shape_set(r, b, block_id, n, m, seq0);
         tbt_fec_unlock(lock);
         return 0;
     }
@@ -858,7 +894,11 @@ int tbt_fec_replay_ensure_block(struct tbt_fec_replay *r, u64 block_id,
     tbt_fec_lock(lock);
     if (r->block_start[b] != ~0ULL || r->blk_rec[b])
     {
-        /* Racing ensure: keep this plane for the next block. */
+        /* Racing ensure: keep this plane for the next block. The winner
+         * stored its own block's shape; only stamp ours when it is the same
+         * block. */
+        if (r->block_start[b] == block_id && r->blk_rec[b])
+            tbt_fec_replay_shape_set(r, b, block_id, n, m, seq0);
         if (r->hot_n < TBT_FEC_REPLAY_HOT_MAX)
             r->hot[r->hot_n++] = buf;
         else
@@ -873,6 +913,7 @@ int tbt_fec_replay_ensure_block(struct tbt_fec_replay *r, u64 block_id,
     memset(buf, 0, r->block_bytes);
     r->blk_rec[b] = buf;
     r->block_start[b] = block_id;
+    tbt_fec_replay_shape_set(r, b, block_id, n, m, seq0);
     per_block = (u32)r->groups * (u32)(r->n + r->m);
     for (i = 0; i < per_block; i++)
     {
@@ -885,6 +926,23 @@ int tbt_fec_replay_ensure_block(struct tbt_fec_replay *r, u64 block_id,
         r->block_gen[b * r->groups + i] = ~0ULL;
     tbt_fec_unlock(lock);
     return 0;
+}
+
+bool tbt_fec_replay_shape(const struct tbt_fec_replay *r, u64 block_id,
+                          u16 *n, u16 *m, u64 *seq0)
+{
+    u32 b;
+
+    if (!r || !n || !m)
+        return false;
+    b = (u32)(block_id % r->k);
+    if (r->block_start[b] != block_id || r->shape_id[b] != block_id)
+        return false;
+    *n = r->shape_n[b];
+    *m = r->shape_m[b];
+    if (seq0)
+        *seq0 = r->shape_seq0[b];
+    return true;
 }
 
 int tbt_fec_replay_store(struct tbt_fec_replay *r, u64 block_id, u16 group,
@@ -903,7 +961,8 @@ int tbt_fec_replay_store(struct tbt_fec_replay *r, u64 block_id, u16 group,
         u32 hb = (u32)(block_id % r->k);
 
         if (!r->blk_rec[hb] || r->block_start[hb] != block_id)
-            tbt_fec_replay_ensure_block(r, block_id, &host_lock);
+            tbt_fec_replay_ensure_block(r, block_id, r->n, r->m, 0,
+                                        &host_lock);
     }
 #endif
     b = (u32)(block_id % r->k);

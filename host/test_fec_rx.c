@@ -2339,27 +2339,37 @@ static void test_block_seq_formula(void)
                "8 groups: inverse");
         }
 
-    /* Direction shapes: downlink n <= 192 of 256; uplink only the six
-     * GF(16) ladder splits of 32. */
-    ok(tbt_fec_block_shape_ok(64, 192, 256, 1, true),
+    /* Direction shapes: downlink n <= 192 of 256; uplink every one of the
+     * 24 constructible GF(16) splits of 32, not the six ladder points. */
+    ok(tbt_fec_block_shape_ok(64, 192, 0, 0, 256, 1, true),
        "downlink 64/192 is buildable");
-    ok(tbt_fec_block_shape_ok(192, 64, 256, 1, true),
+    ok(tbt_fec_block_shape_ok(192, 64, 0, 0, 256, 1, true),
        "downlink 192/64 is buildable");
-    ok(!tbt_fec_block_shape_ok(193, 63, 256, 1, true),
+    ok(!tbt_fec_block_shape_ok(193, 63, 0, 0, 256, 1, true),
        "downlink 193/63 is refused");
-    ok(!tbt_fec_block_shape_ok(64, 192, 256, 8, true),
+    ok(!tbt_fec_block_shape_ok(64, 192, 0, 0, 256, 8, true),
        "uplink 64/192 is not a 32-share split");
-    ok(tbt_fec_block_shape_ok(8, 24, 32, 8, true), "uplink 8/24");
-    ok(tbt_fec_block_shape_ok(9, 23, 32, 8, true), "uplink 9/23");
-    ok(tbt_fec_block_shape_ok(12, 20, 32, 8, true), "uplink 12/20");
-    ok(tbt_fec_block_shape_ok(16, 16, 32, 8, true), "uplink 16/16");
-    ok(tbt_fec_block_shape_ok(18, 14, 32, 8, true), "uplink 18/14");
-    ok(tbt_fec_block_shape_ok(22, 10, 32, 8, true), "uplink 22/10");
-    ok(!tbt_fec_block_shape_ok(10, 22, 32, 8, true),
-       "uplink 10/22 is refused");
-    ok(!tbt_fec_block_shape_ok(8, 24, 64, 8, true), "wrong n+m is refused");
-    ok(tbt_fec_block_shape_ok(4, 4, 8, 8, false),
-       "RLNC builds any split of the share count");
+    ok(tbt_fec_block_shape_ok(8, 24, 0, 0, 32, 8, true), "uplink 8/24");
+    ok(tbt_fec_block_shape_ok(9, 23, 0, 0, 32, 8, true), "uplink 9/23");
+    ok(tbt_fec_block_shape_ok(10, 22, 0, 0, 32, 8, true), "uplink 10/22");
+    ok(tbt_fec_block_shape_ok(12, 20, 0, 0, 32, 8, true), "uplink 12/20");
+    ok(tbt_fec_block_shape_ok(16, 16, 0, 0, 32, 8, true), "uplink 16/16");
+    ok(tbt_fec_block_shape_ok(17, 15, 0, 0, 32, 8, true), "uplink 17/15");
+    ok(tbt_fec_block_shape_ok(18, 14, 0, 0, 32, 8, true), "uplink 18/14");
+    ok(tbt_fec_block_shape_ok(22, 10, 0, 0, 32, 8, true), "uplink 22/10");
+    ok(tbt_fec_block_shape_ok(30, 2, 0, 0, 32, 8, true), "uplink 30/2");
+    ok(!tbt_fec_block_shape_ok(3, 29, 0, 0, 32, 8, true),
+       "uplink 3/29 is not constructible");
+    ok(!tbt_fec_block_shape_ok(20, 12, 0, 0, 32, 8, true),
+       "uplink 20/12 is not constructible");
+    ok(!tbt_fec_block_shape_ok(8, 24, 0, 0, 64, 8, true),
+       "wrong n+m is refused");
+    /* RLNC is built for one fixed split: a different split with the same
+     * share count would decode through the wrong rows. */
+    ok(tbt_fec_block_shape_ok(4, 4, 4, 4, 8, 8, false),
+       "RLNC accepts the session split");
+    ok(!tbt_fec_block_shape_ok(5, 3, 4, 4, 8, 8, false),
+       "RLNC refuses another split of the same share count");
 
     /* A FIN tail uses the block's own origin and n. */
     ok(tbt_fec_blk_real_len_seq0(0, 6, true, 12, 4, 0, false) == 6,
@@ -2372,6 +2382,126 @@ static void test_block_seq_formula(void)
        "tail: a present share keeps n when LAST is stale");
     ok(tbt_fec_blk_real_len_seq0(0, 3, true, 10, 10, 0, false) == 0,
        "tail: no share at the end is empty");
+}
+
+/* The decode runs outside rx->lock on a snapshot. A share placed while the
+ * codec runs changes the live block; the codec must still see the state its
+ * caller claimed, and the commit must reject the result because the
+ * generation moved. A slot reused for another block id must be rejected
+ * even if the generation happens to match. */
+struct rx_snap_model
+{
+    u64 block_id;
+    u32 gen;
+    u16 n, m, real;
+    u16 short_len;
+    bool short_unknown;
+    u16 dlen[8];
+    u8 dpresent[8];
+    u8 ppresent[8];
+};
+
+struct rx_blk_model
+{
+    bool used;
+    u64 block_id;
+    u32 gen;
+    u16 n, m, real;
+    u16 short_len;
+    bool short_unknown;
+    u16 dlen[8];
+    u8 dpresent[8];
+    u8 ppresent[8];
+};
+
+static void rx_snap_take(struct rx_snap_model *s, const struct rx_blk_model *b)
+{
+    memset(s, 0, sizeof(*s));
+    s->block_id = b->block_id;
+    s->gen = b->gen;
+    s->n = b->n;
+    s->m = b->m;
+    s->real = b->real;
+    s->short_len = b->short_len;
+    s->short_unknown = b->short_unknown;
+    memcpy(s->dlen, b->dlen, sizeof(s->dlen));
+    memcpy(s->dpresent, b->dpresent, sizeof(s->dpresent));
+    memcpy(s->ppresent, b->ppresent, sizeof(s->ppresent));
+}
+
+static u16 rx_snap_len(const struct rx_snap_model *s, u16 i)
+{
+    if (i >= s->n || i >= s->real || !s->dpresent[i])
+        return 0;
+    return s->dlen[i];
+}
+
+static void test_decode_snapshot(void)
+{
+    struct rx_blk_model b;
+    struct rx_snap_model s;
+    u16 i;
+
+    memset(&b, 0, sizeof(b));
+    b.used = true;
+    b.block_id = 42;
+    b.gen = 7;
+    b.n = 4;
+    b.m = 4;
+    b.real = 3;
+    b.short_len = 100;
+    b.dlen[0] = S;
+    b.dlen[1] = S;
+    b.dpresent[0] = 1;
+    b.dpresent[1] = 1;
+    b.ppresent[0] = 1; /* the codec has one row to work with */
+
+    rx_snap_take(&s, &b);
+    ok(s.block_id == 42 && s.gen == 7 && s.n == 4 && s.m == 4 &&
+           s.real == 3 && s.short_len == 100,
+       "snapshot: shape, real length and cut are copied");
+    ok(rx_snap_len(&s, 0) == S && rx_snap_len(&s, 1) == S &&
+           rx_snap_len(&s, 2) == 0,
+       "snapshot: payload lengths and absence are copied");
+
+    /* A tail DATA share for the missing slot arrives while the codec runs. */
+    b.dpresent[2] = 1;
+    b.dlen[2] = 100;
+    b.gen++;
+    ok(rx_snap_len(&s, 2) == 0,
+       "snapshot: a share placed during decode does not change the input");
+    ok(s.dpresent[2] == 0,
+       "snapshot: presence seen by the codec is the claimed state");
+    ok(!tbt_fec_rx_snap_current(b.used, s.block_id, s.gen, b.block_id,
+                                b.gen),
+       "snapshot: a placement during decode rejects the commit");
+
+    /* A PARITY record fixes the cut during the same decode. */
+    b.ppresent[1] = 1;
+    b.gen++;
+    ok(!tbt_fec_rx_snap_current(b.used, s.block_id, s.gen, b.block_id,
+                                b.gen),
+       "snapshot: a PARITY arrival also rejects the commit");
+
+    /* The slot is reused for another block: same generation is not enough. */
+    b.block_id = 43;
+    b.gen = s.gen;
+    ok(!tbt_fec_rx_snap_current(b.used, s.block_id, s.gen, b.block_id,
+                                b.gen),
+       "snapshot: a reused slot rejects the commit");
+    b.block_id = 42;
+    ok(tbt_fec_rx_snap_current(b.used, s.block_id, s.gen, b.block_id,
+                               b.gen),
+       "snapshot: the unchanged block still commits");
+
+    /* The next pass retakes the snapshot: the arrived share is now part of
+     * the codec's input, with its own length. */
+    rx_snap_take(&s, &b);
+    ok(rx_snap_len(&s, 2) == 100,
+       "snapshot: the retry sees the arrived share and its length");
+    for (i = 0; i < 4; i++)
+        ok(s.dpresent[i] == (i < 3 ? 1 : 0),
+           "snapshot: the retry sees the new presence map");
 }
 
 /* Mixed n/m blocks interleaved and out of order. Every block names its own
@@ -2481,6 +2611,22 @@ static void test_mixed_block_shapes(void)
 
 static void test_decode_wake(void)
 {
+    /* The wake margin is ceil(delta0(n)) for every n 1..192, including
+     * n < 64 where the old six-point table returned a flat 16. */
+    ok_int(tbt_fec_sclc_wake_extra_down(1), 48,
+           "wake margin: n=1 is ceil(delta0)");
+    ok_int(tbt_fec_sclc_wake_extra_down(16), 35,
+           "wake margin: n=16 is ceil(delta0)");
+    ok_int(tbt_fec_sclc_wake_extra_down(32), 22,
+           "wake margin: n=32 is ceil(delta0)");
+    ok_int(tbt_fec_sclc_wake_extra_down(63), 13,
+           "wake margin: n=63 is ceil(delta0)");
+    ok_int(tbt_fec_sclc_wake_extra_down(64), 13,
+           "wake margin: n=64 is ceil(delta0)");
+    ok_int(tbt_fec_sclc_wake_extra_down(128), 16,
+           "wake margin: n=128 is ceil(delta0)");
+    ok_int(tbt_fec_sclc_wake_extra_down(192), 11,
+           "wake margin: n=192 is ceil(delta0)");
     /* Downlink 1x256: n=128, m=128, one group. The sclc-down table gives
      * delta0(128) = 16, so present = real + 16 wakes. */
     ok(tbt_fec_sclc_decode_wake(128, 128, 128, 1, 128, 0),
@@ -2650,6 +2796,7 @@ int main(void)
     test_ack_split();
     test_rx_poll();
     test_block_seq_formula();
+    test_decode_snapshot();
     test_mixed_block_shapes();
     test_decode_wake();
     test_block_late();

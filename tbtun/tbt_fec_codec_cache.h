@@ -3,8 +3,9 @@
  * WHAT THIS IS
  *   Route A builds one codec per (n, m, block, L, seed) and reuses it while
  *   that shape stays in the cache. The downlink keeps four shapes; the
- *   uplink keeps two (current and target). A codec build costs tens of
- *   microseconds to milliseconds, so the cache never builds one:
+ *   uplink keeps three (initial, target, and one spare). A codec build
+ *   costs tens of microseconds to milliseconds, so the cache never builds
+ *   one:
  *
  *     get() reserves an entry and returns it with one reference;
  *     the caller drops its lock and builds the codec;
@@ -47,10 +48,13 @@
 
 #include "tbt_fec.h"
 
-/* Downlink: current shape plus three recently used shapes. Uplink: current
- * and target. init() accepts 1..TBT_FEC_CODEC_CACHE_MAX. */
+/* Downlink: current shape plus three recently used shapes. Uplink: the
+ * initial shape, the target, and one spare. The spare is what lets three
+ * consecutive target changes each reserve a codec while the previous target
+ * (or a block still holding it) has not been released yet. init() accepts
+ * 1..TBT_FEC_CODEC_CACHE_MAX. */
 #define TBT_FEC_CODEC_CACHE_DOWN 4u
-#define TBT_FEC_CODEC_CACHE_UP 2u
+#define TBT_FEC_CODEC_CACHE_UP 3u
 #define TBT_FEC_CODEC_CACHE_MAX TBT_FEC_CODEC_CACHE_DOWN
 
 /* The key is the complete codec identity. The seed is part of it because
@@ -113,6 +117,12 @@ struct tbt_fec_codec_cache
     void *ctx;
     u32 retiring; /* retired entries with refs > 0 */
     u8 destroyed;
+    /* destroy() may run while a block still holds an entry. The cache object
+     * itself then stays alive until the last put(); free_self asks that put
+     * to call release(c). A NULL release leaves the object to its owner
+     * (host tests use stack caches). */
+    void (*release)(struct tbt_fec_codec_cache *c);
+    u8 free_self;
 };
 
 /* Allocate the slot array and zero the cache. capacity is 1..MAX.
@@ -123,8 +133,10 @@ int tbt_fec_codec_cache_init(struct tbt_fec_codec_cache *c, u32 capacity,
                              tbt_fec_codec_cache_free_fn free, void *ctx);
 
 /* Retire every entry and release the codecs that no caller holds. A codec
- * with refs > 0 is released by the last put(); the slot array goes with it.
- * get() returns NULL after destroy(). destroy() is idempotent. */
+ * with refs > 0 is released by the last put(); the slot array goes with it,
+ * and release(c) runs when free_self is set. The caller must not free the
+ * cache object itself while entries are still referenced. get() returns NULL
+ * after destroy(). destroy() is idempotent. */
 void tbt_fec_codec_cache_destroy(struct tbt_fec_codec_cache *c);
 
 /* Return the entry for key with one new reference. On a hit with a

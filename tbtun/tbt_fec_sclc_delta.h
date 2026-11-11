@@ -19,7 +19,7 @@
 #ifndef _TBT_FEC_SCLC_DELTA_H
 #define _TBT_FEC_SCLC_DELTA_H
 
-#include "tbt_fec.h"
+#include "tbt_uapi.h"
 
 /* Downlink n in 1..192, n + m = 256. Index n - 1. */
 #define TBT_FEC_SCLC_DELTA_DOWN_N 192

@@ -741,6 +741,11 @@ struct tbt_fec_blk
     u64 seq0;
     u16 n; /* DATA shares in this block */
     u16 m; /* parity shares in this block */
+    /* Bumped under rx->lock whenever this slot's block state changes: slot
+     * reset, a share placed, or the cut/real length fixed. A decode outside
+     * the lock keeps the value it snapshotted and commits only when the
+     * block still names the same id and generation. */
+    u32 gen;
     /* Stream generation this block was placed for. A new stream bind clears
      * every block whose sid differs, so the previous stream's reorder bytes
      * cannot be delivered to the new one. */
@@ -833,6 +838,7 @@ struct tbt_fec_gtx
 };
 
 struct tbt_fec_replay;
+struct tbt_fec_decode_snap;
 struct tbt_fec_nack_state;
 struct tbt_fec_adapt;
 struct tbt_fec_est;
@@ -1042,8 +1048,11 @@ struct tbt_fec_rx
     u64 progress_ns;
     u8 *rec;                /* m * s: recovered-slot scratch */
     u8 *zero;               /* s zero bytes: padding and absent parity */
-    u8 dpresent_snap[TBT_FEC_MAX_SHARES];
-    u8 ppresent_snap[TBT_FEC_MAX_SHARES];
+    /* The decode snapshot: shape, presence, payload lengths and the block
+     * generation, copied under rx->lock before a codec runs. w_fec_rx is the
+     * only decoder, so one scratch snapshot per plane is enough and keeps a
+     * kilobyte off the workqueue stack. */
+    struct tbt_fec_decode_snap *decode_snap;
     u64 stream_pkt_base;    /* absolute seq of the bound stream's first packet */
     /* A FIN for the next stream can arrive before its OPEN binds it; keep one
      * slot and consume it on adoption instead of overwriting the current
@@ -1207,10 +1216,6 @@ struct tbt_fec_out
     bool queued;     /* still linked; unlink is once-only */
     u16 carrier;
     u16 len;
-    /* Shape generation of a DATA record. A shape switch bumps the session
-     * epoch instead of walking the single-consumer FIFO; the drain drops a
-     * record whose epoch is older than the one in force. */
-    u32 epoch;
     u8 control;
     u8 replay; /* queued from the replay ring: charged to the byte budget */
     /* Replay only: the super-block this record belongs to. The flush frees
@@ -1468,7 +1473,6 @@ struct tbt_session
     struct tbt_fec_out **fec_fifo; /* DATA records waiting for a carrier */
     u32 fec_fifo_head;             /* consumer position; drain work only */
     u32 fec_fifo_tail;             /* producer position; packetizer only */
-    u32 fec_out_epoch;             /* shape generation of FIFO records */
     atomic_t async_rot;            /* carrier cursor for the next DATA record */
     u16 fec_ndrain;
     struct delayed_work w_fec_tx; /* packetizer + control/replay writer */

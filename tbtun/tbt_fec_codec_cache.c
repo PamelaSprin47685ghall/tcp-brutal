@@ -222,7 +222,14 @@ void tbt_fec_codec_cache_put(struct tbt_fec_codec_entry *e)
     {
         c->retiring--;
         if (!c->retiring)
+        {
             slots_free(c);
+            if (c->free_self && c->release)
+            {
+                c->free_self = 0;
+                c->release(c);
+            }
+        }
     }
 }
 

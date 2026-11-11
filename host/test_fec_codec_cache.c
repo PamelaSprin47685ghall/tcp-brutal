@@ -4,7 +4,7 @@
  *   The exact code from tbtun/tbt_fec_codec_cache.c, compiled for the host.
  *   It checks:
  *
- *     - capacity: down 4, up 2, init rejects 0 and more than the maximum;
+ *     - capacity: down 4, up 3, init rejects 0 and more than the maximum;
  *     - hit and miss, and that the seed is part of the key;
  *     - LRU eviction, including a held reference that must not be evicted;
  *     - a failed build keeps the entry and the current codec stays usable;
@@ -166,7 +166,7 @@ static void test_init_capacity(void)
     struct mock m;
 
     eq_u32(TBT_FEC_CODEC_CACHE_DOWN, 4, "down capacity constant");
-    eq_u32(TBT_FEC_CODEC_CACHE_UP, 2, "up capacity constant");
+    eq_u32(TBT_FEC_CODEC_CACHE_UP, 3, "up capacity constant");
     eq_u32(TBT_FEC_CODEC_CACHE_MAX, 4, "maximum capacity constant");
 
     memset(&m, 0, sizeof(m));
@@ -187,8 +187,8 @@ static void test_init_capacity(void)
 
     memset(&m, 0, sizeof(m));
     memset(&c, 0, sizeof(c));
-    eq_i32(tbt_fec_codec_cache_init(&c, 2, mock_alloc, mock_free, &m), 0,
-           "init up 2");
+    eq_i32(tbt_fec_codec_cache_init(&c, 3, mock_alloc, mock_free, &m), 0,
+           "init up 3");
     tbt_fec_codec_cache_destroy(&c);
     ok(m.slot_frees == 1, "up cache frees its slots");
 
@@ -524,9 +524,9 @@ static void test_capacity_four_two(void)
     ok(m.codec_frees == 5, "five down codecs are freed once");
     ok(m.slot_frees == 1, "down slots are freed once");
 
-    /* Uplink: two entries. */
+    /* Uplink: three entries. */
     cache_init(&c, &m, TBT_FEC_CODEC_CACHE_UP);
-    for (i = 0; i < 2; i++)
+    for (i = 0; i < 3; i++)
     {
         k[i] = make_key(8, 24, 128, 16, (u64)(i + 1));
         e = tbt_fec_codec_cache_get(&c, &k[i], &ready);
@@ -534,19 +534,19 @@ static void test_capacity_four_two(void)
         tbt_fec_codec_cache_build_done(e, MOCK_CODEC(50 + i), true);
         tbt_fec_codec_cache_put(e);
     }
-    eq_u32(c.used, 2, "up cache holds two");
+    eq_u32(c.used, 3, "up cache holds three");
     eq_u64(stats_of(&c).evictions, 0, "no up eviction at capacity");
 
-    k[2] = make_key(8, 24, 128, 16, 3);
-    e = tbt_fec_codec_cache_get(&c, &k[2], &ready);
-    ok(e != NULL && !ready, "third up key reserves");
-    eq_u64(stats_of(&c).evictions, 1, "third up key evicts");
+    k[3] = make_key(8, 24, 128, 16, 4);
+    e = tbt_fec_codec_cache_get(&c, &k[3], &ready);
+    ok(e != NULL && !ready, "fourth up key reserves");
+    eq_u64(stats_of(&c).evictions, 1, "fourth up key evicts");
     ok(codec_freed(&m, MOCK_CODEC(50)), "oldest up codec is freed");
-    tbt_fec_codec_cache_build_done(e, MOCK_CODEC(52), true);
+    tbt_fec_codec_cache_build_done(e, MOCK_CODEC(53), true);
     tbt_fec_codec_cache_put(e);
 
     tbt_fec_codec_cache_destroy(&c);
-    ok(m.codec_frees == 3, "three up codecs are freed once");
+    ok(m.codec_frees == 4, "four up codecs are freed once");
     ok(m.slot_frees == 1, "up slots are freed once");
 }
 
@@ -669,6 +669,86 @@ static void test_rate_gate(void)
     ok(codec_freed(&m, MOCK_CODEC(101)), "rate gate: target is freed");
 }
 
+/* Three consecutive target changes on the uplink plane. The initial entry
+ * is pinned for the plane's lifetime and the target stays pinned until its
+ * shape is published, so the cache needs a third slot and the old target
+ * must be released after the switch. With capacity 2 the second get() finds
+ * every slot referenced and returns NULL; without the release the third
+ * does. */
+static void test_up_three_targets(void)
+{
+    struct tbt_fec_codec_cache c;
+    struct tbt_fec_codec_key k;
+    struct tbt_fec_codec_entry *initial, *target, *prev = NULL;
+    struct mock m;
+    bool ready = false;
+    int i;
+
+    cache_init(&c, &m, TBT_FEC_CODEC_CACHE_UP);
+    k = make_key(8, 24, 128, 16, 9);
+    initial = tbt_fec_codec_cache_get(&c, &k, &ready);
+    ok(initial != NULL && !ready, "up target: initial entry reserved");
+    tbt_fec_codec_cache_build_done(initial, MOCK_CODEC(60), true);
+    ok(initial->ready, "up target: initial codec is ready");
+
+    for (i = 0; i < 3; i++)
+    {
+        k = make_key((u16)(9 + i), (u16)(23 - i), 128, 16, 9);
+        target = tbt_fec_codec_cache_get(&c, &k, &ready);
+        ok(target != NULL && !ready,
+           "up target: each target change reserves a codec");
+        if (!target)
+            break;
+        tbt_fec_codec_cache_build_done(target, MOCK_CODEC(61 + i), true);
+        ok(target->ready, "up target: target codec is ready");
+        /* Publish the switch, then release the old target pin. */
+        if (prev)
+            tbt_fec_codec_cache_put(prev);
+        prev = target;
+    }
+    if (prev)
+        tbt_fec_codec_cache_put(prev);
+    tbt_fec_codec_cache_put(initial);
+    tbt_fec_codec_cache_destroy(&c);
+    ok(m.slot_frees == 1, "up target: slots are freed once");
+}
+
+static unsigned mock_releases;
+
+static void mock_release(struct tbt_fec_codec_cache *c)
+{
+    (void)c;
+    mock_releases++;
+}
+
+/* A destroyed cache object with a live entry must not be freed under that
+ * entry: the last put() calls the release hook. */
+static void test_destroy_release(void)
+{
+    struct tbt_fec_codec_cache c;
+    struct tbt_fec_codec_key k;
+    struct tbt_fec_codec_entry *e;
+    struct mock m;
+    bool ready = false;
+
+    cache_init(&c, &m, 2);
+    c.release = mock_release;
+    k = make_key(8, 24, 128, 16, 11);
+    e = tbt_fec_codec_cache_get(&c, &k, &ready);
+    ok(e != NULL, "destroy release: entry reserved");
+    tbt_fec_codec_cache_build_done(e, MOCK_CODEC(70), true);
+
+    mock_releases = 0;
+    c.free_self = 1;
+    tbt_fec_codec_cache_destroy(&c);
+    ok(mock_releases == 0,
+       "destroy release: object waits for the live entry");
+    ok(m.slot_frees == 0, "destroy release: slots wait too");
+    tbt_fec_codec_cache_put(e);
+    ok(mock_releases == 1, "destroy release: last put releases the object");
+    ok(m.slot_frees == 1, "destroy release: last put frees the slots");
+}
+
 int main(void)
 {
     test_init_capacity();
@@ -680,6 +760,8 @@ int main(void)
     test_destroy_defer();
     test_null_arguments();
     test_rate_gate();
+    test_up_three_targets();
+    test_destroy_release();
 
     printf("test_fec_codec_cache: %d checks, %d failures\n", checks,
            failures);

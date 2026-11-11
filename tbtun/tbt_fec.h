@@ -27,6 +27,7 @@
 #define _TBT_FEC_H
 
 #include "tbt_uapi.h"
+#include "tbt_fec_sclc_delta.h"
 
 #ifdef __KERNEL__
 #include <linux/errno.h>
@@ -735,11 +736,20 @@ static inline bool tbt_fec_credit_block_ok(u64 blk, u64 frontier,
     return blk - frontier < credit_blocks;
 }
 
-/* Ensure the block's record plane exists. Process context: this may
- * allocate one block plane (or reuse a hot one) and must run before the
- * caller takes the TX replay spinlock. */
+/* Ensure the block's record plane exists and record the shape it was built
+ * with. A block may use any split of the direction's fixed n+m, so the ring
+ * keeps each block's own n/m and seq0; a NACK for an old block is parsed
+ * with that block's shape, never the sender's current one. Process context:
+ * this may allocate one block plane (or reuse a hot one) and must run before
+ * the caller takes the TX replay spinlock. n + m must equal the ring's
+ * share count. */
 int tbt_fec_replay_ensure_block(struct tbt_fec_replay *r, u64 block_id,
+                                u16 n, u16 m, u64 seq0,
                                 tbt_fec_spinlock_t *lock);
+/* The shape and origin stored for block_id, false when this slot no longer
+ * names that block. The caller holds the TX replay lock. */
+bool tbt_fec_replay_shape(const struct tbt_fec_replay *r, u64 block_id,
+                          u16 *n, u16 *m, u64 *seq0);
 /* Store one complete encoded record (header included). A share outside
  * [0, n+m) or a record longer than header+S is refused; a block whose plane
  * was not ensured is refused with -ESTALE. */
@@ -1832,49 +1842,60 @@ static inline bool tbt_fec_sclc_down_split(u16 n, u16 m)
     }
 }
 
-/* The uplink GF(16) codec builds exactly these splits of 32 shares. The
- * 8/24 fallback is the same point as the 25% ladder step. */
+/* The uplink GF(16) codec builds exactly the 24 splits of 32 shares that
+ * tbt_fec_sclc_up_n[] names. The data plane and the controller must accept
+ * the same set: a shape the controller picks but this predicate refuses
+ * would be dropped on arrival, and one this predicate accepts but the
+ * codec cannot build would fail every decode. */
 static inline bool tbt_fec_sclc_up_split(u16 n, u16 m)
 {
-    switch (n)
-    {
-    case 8:
-        return m == 24;
-    case 9:
-        return m == 23;
-    case 12:
-        return m == 20;
-    case 16:
-        return m == 16;
-    case 18:
-        return m == 14;
-    case 22:
-        return m == 10;
-    default:
+    u32 i;
+
+    if ((u16)(n + m) != 32)
         return false;
-    }
+    for (i = 0; i < TBT_FEC_SCLC_UP_N; i++)
+        if (tbt_fec_sclc_up_n[i] == n)
+            return true;
+    return false;
 }
 
 /* A block shape the receiver may place. `shares` is the direction's fixed
  * n+m (256 downlink, 32 uplink); `groups` selects the direction. The
  * SC-LDPC downlink binary codec builds any split with n <= 192 (m >= 64);
- * the SC-LDPC uplink GF(16) codec builds only its six ladder splits. An
- * RLNC codec builds any non-empty split of the same share count. */
-static inline bool tbt_fec_block_shape_ok(u16 n, u16 m, u16 shares,
-                                          u16 groups, bool block_code)
+ * the SC-LDPC uplink GF(16) codec builds only its 24 constructible splits.
+ *
+ * A block code names its own split, so ref_n/ref_m are unused. An RLNC
+ * codec is built for one fixed split and cannot decode another: the block
+ * must name exactly the session's n/m, not merely the same share count.
+ * Reading a 6/2 block through a 4/4 codec would apply the wrong rows. */
+static inline bool tbt_fec_block_shape_ok(u16 n, u16 m, u16 ref_n, u16 ref_m,
+                                          u16 shares, u16 groups,
+                                          bool block_code)
 {
     if (!n || !m || (u16)(n + m) != shares)
         return false;
     if (!block_code)
-        return true;
+        return n == ref_n && m == ref_m;
     if (groups == 1)
         return n <= 192;
     return tbt_fec_sclc_up_split(n, m);
 }
 
+/* A decode runs outside rx->lock on a snapshot of the block's shape,
+ * presence and payload lengths. Placing a share (or resetting the slot)
+ * bumps the block's generation; the commit then rejects a result that
+ * describes an older state, and the next pass retakes the snapshot. */
+static inline bool tbt_fec_rx_snap_current(bool used, u64 snap_block_id,
+                                           u32 snap_gen, u64 block_id,
+                                           u32 gen)
+{
+    return used && snap_block_id == block_id && snap_gen == gen;
+}
+
 /* The extra present shares beyond the block's real DATA length that an
  * SC-LDPC attempt needs before it is worth waking. The downlink margin comes
- * from tbt_fec_sclc_wake_extra_down() below (delta0 of the measured split);
+ * from tbt_fec_sclc_wake_extra_down() below (ceil(delta0(n)) of the block's
+ * own split);
  * the uplink 8x32 block keeps two. A decode that fails is retried at
  * TBT_FEC_DECODE_RETRY_MS, and a new share clears that backoff: an arriving
  * share is new evidence, not a reason to wait. */
@@ -1882,28 +1903,21 @@ static inline bool tbt_fec_block_shape_ok(u16 n, u16 m, u16 shares,
 #define TBT_FEC_DECODE_RETRY_MS 50u
 #define TBT_FEC_DECODE_RETRY_MAX_MS 400u
 
-/* Minimum present parity a downlink block needs before an SC-LDPC attempt,
- * by DATA-share count. The values are the measured delta0 of the sclc-down
- * table:
- *   64:13, 76:14, 102:15, 128:16, 151:13, 178:12.
- * A split between two points takes the larger neighbour; a split outside
- * the measured range takes the largest measured value. Both choices delay
- * an attempt rather than start one the graph cannot finish. */
+/* Minimum present parity a downlink block needs before an SC-LDPC attempt.
+ * The margin is ceil(delta0(n)) from the density-evolution table for every
+ * DATA-share count 1..192, not a ladder interpolation: the controller and
+ * the wake line then use one basis for every split, including n < 64 where
+ * the old six-point table fell back to the largest measured value. */
 static inline u16 tbt_fec_sclc_wake_extra_down(u16 n)
 {
-    static const u16 split[6] = {64, 76, 102, 128, 151, 178};
-    static const u16 extra[6] = {13, 14, 15, 16, 13, 12};
-    u16 i;
+    u32 q;
 
-    for (i = 0; i < 6; i++)
-        if (n == split[i])
-            return extra[i];
-    if (n < split[0] || n > split[5])
-        return 16;
-    for (i = 1; i < 6; i++)
-        if (n < split[i])
-            return extra[i] > extra[i - 1] ? extra[i] : extra[i - 1];
-    return 16;
+    if (!n)
+        return 0;
+    if (n > TBT_FEC_SCLC_DELTA_DOWN_N)
+        n = TBT_FEC_SCLC_DELTA_DOWN_N;
+    q = tbt_fec_sclc_delta_down_q16[n - 1];
+    return (u16)((q + 0xffffu) >> 16);
 }
 
 /* All real DATA shares are present, or enough shares are present to cover

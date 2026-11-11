@@ -1011,6 +1011,188 @@ static void case_downlink_ladder(void)
     }
 }
 
+/* Route-A block boundary: a full block resets every group's nreal when its
+ * parity leaves, so the packetizer's seq is already at the next block's
+ * origin while blk_seq0/cur_block still name the old one. A switch must
+ * advance that boundary with the old blk_n first; changing blk_n before the
+ * advance reinterprets the old block's span and gives the next block the
+ * wrong origin. The test then encodes that next block at the switched-down
+ * shape and decodes it through the receiver's per-block formula. */
+struct tx_boundary
+{
+    u16 groups;
+    u16 n, m;
+    u16 blk_n, blk_m;
+    u64 seq, blk_seq0, cur_block;
+    u16 nreal;
+    u16 fill;
+};
+
+static bool tx_boundary_dirty(const struct tx_boundary *t)
+{
+    if (t->fill || t->nreal)
+        return true;
+    return t->seq - t->blk_seq0 >= (u64)t->groups * t->blk_n;
+}
+
+static void tx_boundary_advance(struct tx_boundary *t)
+{
+    if (t->fill || t->nreal || t->seq < t->blk_seq0)
+        return;
+    while (t->seq - t->blk_seq0 >= (u64)t->groups * t->blk_n)
+    {
+        t->blk_seq0 += (u64)t->groups * t->blk_n;
+        t->cur_block++;
+        t->blk_n = t->n;
+        t->blk_m = t->m;
+    }
+}
+
+static bool tx_boundary_switch(struct tx_boundary *t, u16 n, u16 m)
+{
+    tx_boundary_advance(t);
+    if (tx_boundary_dirty(t))
+        return false;
+    t->n = n;
+    t->m = m;
+    t->blk_n = n;
+    t->blk_m = m;
+    return true;
+}
+
+static void tx_boundary_fill(struct tx_boundary *t)
+{
+    t->seq += (u64)t->groups * t->blk_n;
+    t->nreal = t->blk_n; /* every share was written ... */
+    t->nreal = 0;        /* ... and the last one emitted parity */
+}
+
+static void case_block_switch_boundary(void)
+{
+    struct tx_boundary t;
+    struct tbt_fec_sclc_shape sh;
+    struct tbt_fec_grouped *tx, *rx;
+    uint8_t *data[64], *parity[192];
+    uint8_t *rxdata[64], *rxparity[192];
+    uint8_t present_d[64], present_p[192];
+    u64 seq0;
+    int i, rc;
+
+    memset(&t, 0, sizeof(t));
+    t.groups = 1;
+    t.n = 64;
+    t.m = 192;
+    t.blk_n = 64;
+    t.blk_m = 192;
+    tx_boundary_fill(&t);
+    ok(t.seq == 64 && t.blk_seq0 == 0 && t.cur_block == 0,
+       "switch: block 0 fills to its boundary");
+    ok(tx_boundary_dirty(&t),
+       "switch: a full block is dirty until its boundary advances");
+
+    /* Switch up. The advance must use the old n=64, not the new 128. */
+    ok(tx_boundary_switch(&t, 128, 128),
+       "switch: up applies after the full block closes");
+    ok(t.blk_seq0 == 64 && t.cur_block == 1 && t.blk_n == 128,
+       "switch: up advances with the old blk_n");
+    tx_boundary_fill(&t);
+    ok(t.seq == 192 && t.blk_seq0 == 64,
+       "switch: block 1 spans 128 shares from 64");
+
+    /* Switch down. The advance must use the old n=128. */
+    ok(tx_boundary_switch(&t, 64, 192),
+       "switch: down applies after the second full block closes");
+    ok(t.blk_seq0 == 192 && t.cur_block == 2 && t.blk_n == 64,
+       "switch: down advances with the old blk_n");
+
+    /* A buffered partial packet or an open block owns the current shape. */
+    t.fill = 1;
+    ok(!tx_boundary_switch(&t, 128, 128),
+       "switch: a partial packet blocks a switch");
+    t.fill = 0;
+    t.nreal = 1;
+    ok(!tx_boundary_switch(&t, 128, 128),
+       "switch: an open block blocks a switch");
+    t.nreal = 0;
+
+    /* Block 2 starts at 192 with 64/192. Encode it and decode it exactly as
+     * the receiver does: per-block n/m and group-major seq0 + share. */
+    ok(t.cur_block == 2 && t.blk_seq0 == 192 && t.blk_n == 64,
+       "switch: the next block keeps the switched-down shape");
+    ok(tbt_fec_data_seq(192, 0, 64, 5) == 197,
+       "switch: the next block maps share 5 to seq 197");
+
+    memset(&sh, 0, sizeof(sh));
+    ok_int(tbt_fec_sclc_shape_of(64, 192, 256, 0, 0, &sh), 0,
+           "switch: switched-down shape resolves");
+    tx = tbt_fec_grouped_new_ops(&tbt_fec_ops_sclc, 1, 64, 192,
+                                 sh.rate_ppm, sh.block, TBT_FEC_S, 0,
+                                 0x5eed);
+    ok(tx != NULL, "switch: tx codec builds");
+    rx = tbt_fec_grouped_new_ops(&tbt_fec_ops_sclc, 1, 64, 192,
+                                 sh.rate_ppm, sh.block, TBT_FEC_S, 0,
+                                 0x5eed);
+    ok(rx != NULL, "switch: rx codec builds");
+    if (!tx || !rx)
+        return;
+    for (i = 0; i < 64; i++)
+    {
+        data[i] = calloc(1, TBT_FEC_S);
+        rxdata[i] = calloc(1, TBT_FEC_S);
+        if (!data[i] || !rxdata[i])
+        {
+            ok(false, "switch: data buffers");
+            return;
+        }
+        fill_pattern(data[i], TBT_FEC_S, (uint32_t)(0x200 + i));
+    }
+    for (i = 0; i < 192; i++)
+    {
+        parity[i] = calloc(1, TBT_FEC_S);
+        rxparity[i] = calloc(1, TBT_FEC_S);
+        if (!parity[i] || !rxparity[i])
+        {
+            ok(false, "switch: parity buffers");
+            return;
+        }
+    }
+    ok_int(tbt_fec_grouped_encode(tx, 0, data, 64, parity), 0,
+           "switch: next block encodes");
+    memset(present_d, 1, sizeof(present_d));
+    memset(present_p, 1, sizeof(present_p));
+    for (i = 0; i < 64; i++)
+        if (i != 5)
+            memcpy(rxdata[i], data[i], TBT_FEC_S);
+    for (i = 0; i < 192; i++)
+        memcpy(rxparity[i], parity[i], TBT_FEC_S);
+    present_d[5] = 0;
+    rc = tbt_fec_grouped_decode(rx, 0, rxdata, rxparity, present_d,
+                                present_p, 64);
+    ok(rc >= 0, "switch: next block decodes");
+    ok(tbt_fec_grouped_is_known(rx, 0, 5) != 0,
+       "switch: the lost share is known");
+    ok(memcmp(rxdata[5], data[5], TBT_FEC_S) == 0,
+       "switch: the recovered share is byte-exact");
+
+    /* The origin the receiver derives from a DATA record's seq. */
+    ok(tbt_fec_data_seq0(t.blk_seq0 + 5, 0, 64, 5, &seq0) &&
+           seq0 == 192,
+       "switch: the receiver recovers block 2's origin");
+
+    tbt_fec_grouped_free(rx);
+    tbt_fec_grouped_free(tx);
+    for (i = 0; i < 64; i++)
+    {
+        free(data[i]);
+        free(rxdata[i]);
+    }
+    for (i = 0; i < 192; i++)
+    {
+        free(parity[i]);
+        free(rxparity[i]);
+    }
+}
+
 int main(void)
 {
     case_shape_of();
@@ -1018,6 +1200,7 @@ int main(void)
     case_init_shape_from_cfg();
     case_downlink_roundtrip();
     case_downlink_ladder();
+    case_block_switch_boundary();
     case_uplink_roundtrip();
     case_immediate_decode();
     case_rlnc_dispatch();

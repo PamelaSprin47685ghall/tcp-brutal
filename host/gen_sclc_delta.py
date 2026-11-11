@@ -146,7 +146,7 @@ def render(down, up_n, up_delta, len_eps, len_q16):
         " */\n")
     parts.append("#ifndef _TBT_FEC_SCLC_DELTA_H\n"
                  "#define _TBT_FEC_SCLC_DELTA_H\n\n"
-                 "#include \"tbt_fec.h\"\n\n")
+                 "#include \"tbt_uapi.h\"\n\n")
     parts.append("/* Downlink n in 1..192, n + m = 256. Index n - 1. */\n"
                  "#define TBT_FEC_SCLC_DELTA_DOWN_N %d\n"
                  "static const u32 tbt_fec_sclc_delta_down_q16[%d] = {\n"
