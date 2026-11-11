@@ -1872,8 +1872,14 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
     {
         u64 peer = READ_ONCE(tx->peer_pkts);
         u32 credit = READ_ONCE(tx->credit);
+        u64 span = (u64)tx->groups * tx->blk_n;
+        bool started = span && tx->seq > tx->blk_seq0 &&
+                       tx->seq - tx->blk_seq0 < span;
 
-        if (tx->seq > peer && tx->seq - peer >= credit)
+        /* Mid-block sends are exempt: the receiver cannot ACK a partial
+         * block, so finishing it is the contract, not a violation. Only a
+         * new block that opens past the packet window is counted. */
+        if (!started && tx->seq > peer && tx->seq - peer >= credit)
         {
             atomic64_inc(&sess->fec_credit_violation);
             if (debug)
