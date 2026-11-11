@@ -138,8 +138,9 @@ ss -tn | awk '$5 ~ /:19000$/ {print}'
 
 - 8 行全部为 `200`。
 - 8 个文件 SHA-256 都等于 far 的 `1m.bin`。
-- 运行期间到 `127.0.0.1:19000` 的 TCP 连接数为 **1 到 2 条**（smux 默认在流数
-  达到 `min-streams` 时可能再开一条会话），而不是 8 条。8 条说明 smux 没生效。
+- 运行期间到 `127.0.0.1:19000` 的 TCP 连接数为 **恰好 1 条**
+  （`max-connections: 1` 把子流钉在同一条会话上），而不是 8 条。多于 1 条说明
+  `max-connections` 没生效；8 条说明 smux 没生效。
 
 为什么这能证明“同一 mux”：tbtun 只看到 mihomo 到 `19000` 的**一条**字节流；
 8 个 HTTP 请求是这条流内部的 8 个 smux 子流。若看到 8 条 TCP，则 mux 未启用。
@@ -154,12 +155,12 @@ near mihomo 日志；`/proc/net/tbtun/stats`。
 
 ---
 
-## 5. S4 一条 UDP 查询（XUDP 路径）
+## 5. S4 一条 UDP 查询（默认：smux UDP）
 
-前提：near 配置必须是 `smux.only-tcp: true` + `xudp: true`。若 `only-tcp: false`，
-UDP 会走 smux 自己的 UDP，而不是 VLESS XUDP，本步不算通过。
+默认配置是 `only-tcp: false` + `max-connections: 1`：UDP 由 smux 在同一条 TCP
+连接上承载，不触发 VLESS XUDP。本步验证产品默认路径。
 
-把下面的脚本存成 `/tmp/tbt-xudp.py`，然后执行：
+把下面的脚本存成 `/tmp/tbt-udp.py`，然后执行：
 
 ```python
 #!/usr/bin/env python3
@@ -235,15 +236,69 @@ main()
 执行：
 
 ```sh
-python3 /tmp/tbt-xudp.py
+python3 /tmp/tbt-udp.py
 ```
 
 预期：`udp-ok ... rcode=0 answers>=1`。
 
+同时另开一个终端确认 UDP 没有另拨 TCP：
+
+```sh
+ss -tn | awk '$5 ~ /:19000$/ {print}' | wc -l   # 仍为 1
+```
+
 失败证据：脚本的异常栈；near mihomo 日志；`/proxies/tbtun` 的 `xudp`/`smux`；
 far `dmesg`；`/proc/net/tbtun/stats`。
 
-层：M（VLESS XUDP / CommandMux）。tbtun 只承载字节，不解析 UDP。
+层：M（smux 的 UDP 子流）。tbtun 只承载字节，不解析 UDP；本步不证明 XUDP。
+
+## 5b. S4b 原生 XUDP 触发第二条 TCP（当前阻断）
+
+目的：验证 `only-tcp: true` 时 UDP 走 VLESS `CommandMux`，并测出单 FEC flow 的
+边界。此步**不是产品默认配置**，预期失败。
+
+```sh
+# 基线：到 19000 的 TCP 连接数应为 1
+ss -tn | awk '$5 ~ /:19000$/ {print}' | wc -l
+ssh "$FAR" 'grep -o "fec_stream_refused=[0-9]*" /proc/net/tbtun/stats'
+
+# 只改 near 的这一行，然后重启 near mihomo
+sed -i 's/^\([[:space:]]*\)only-tcp: false/\1only-tcp: true/' /etc/mihomo-090/config.yaml
+kill "$(cat /run/tbtun-090/mihomo.pid)" 2>/dev/null || true
+sleep 1
+nohup mihomo -d /etc/mihomo-090 -f /etc/mihomo-090/config.yaml \
+  >>/var/log/tbtun-090/mihomo.log 2>&1 &
+echo $! > /run/tbtun-090/mihomo.pid
+sleep 2
+
+# 触发 UDP；预期脚本失败或超时
+python3 /tmp/tbt-udp.py; echo "udp_rc=$?"
+
+# 关键观测：XUDP 另拨的 TCP 是否出现，far 是否拒绝
+ss -tn | awk '$5 ~ /:19000$/ {print}'
+ssh "$FAR" 'grep -o "fec_stream_refused=[0-9]*" /proc/net/tbtun/stats'
+ssh "$FAR" 'dmesg | grep -i fec_stream_refused || true'
+
+# 恢复默认配置
+sed -i 's/^\([[:space:]]*\)only-tcp: true/\1only-tcp: false/' /etc/mihomo-090/config.yaml
+kill "$(cat /run/tbtun-090/mihomo.pid)" 2>/dev/null || true
+sleep 1
+nohup mihomo -d /etc/mihomo-090 -f /etc/mihomo-090/config.yaml \
+  >>/var/log/tbtun-090/mihomo.log 2>&1 &
+echo $! > /run/tbtun-090/mihomo.pid
+```
+
+预期（当前 0.8）：
+
+- 到 `127.0.0.1:19000` 的 TCP 连接数从 1 变成 **2**（`vless.go:369-404` 的
+  `v.dialContext` 为 UDP 另拨了一条）。
+- far 的 `fec_stream_refused` 增加，UDP 查询失败或超时。
+
+**当前会被单 FEC flow 限制阻断。** 这是预期结果，不是配置错误：far 只允许一条
+FEC flow（`README.md:661-662`），第二条 TCP 必然被拒。记录两次连接数、两次计数、
+`dmesg` 与脚本返回码即可；不要把本步标成 PASS，也不要靠改 `only-tcp` 反复重试。
+
+层：M（VLESS XUDP / CommandMux）× T（单 FEC flow 边界）。
 
 ---
 
@@ -301,16 +356,17 @@ ssh "$FAR" 'dmesg | grep -i fec_stream_refused || true'
 | --- | --- | --- | --- | --- | --- |
 | S1 1 KB | M×T | 200, SHA 相同 | | PASS/FAIL | |
 | S2 64 MiB | T | SHA 相同，<900 s | | PASS/FAIL/SLOW | 0.55 MB/s 缺陷 |
-| S3 8 并发 | M | 8×200，1–2 条 TCP | | PASS/FAIL | |
-| S4 UDP | M | rcode=0, answers≥1 | | PASS/FAIL | only-tcp=true 才算 XUDP |
+| S3 8 并发 | M | 8×200，恰好 1 条 TCP | | PASS/FAIL | `max-connections: 1` |
+| S4 UDP | M | rcode=0, answers≥1 | | PASS/FAIL | 默认 smux UDP，不是 XUDP |
+| S4b XUDP | M×T | 第二条 TCP 被拒 | | BLOCKED | 单 FEC flow 限制，预期失败 |
 | S5 重连 | T | 3×200，refused 不增 | | PASS/FAIL/BLOCKED | 半开流缺陷 |
 
 判定规则：
 
 - `PASS`：命令退出 0，且预期可观测全部成立。
-- `FAIL`：命令退出非 0，或预期可观测不成立，且不是下面两项。
+- `FAIL`：命令退出非 0，或预期可观测不成立，且不属于 SLOW/BLOCKED。
 - `SLOW`：数据完整但耗时超过预算；单独记为吞吐缺陷。
-- `BLOCKED`：失败原因落在第 8 节的三项已知缺陷内；仍要保留全部证据。
+- `BLOCKED`：失败原因落在第 8 节的已知缺陷内；仍要保留全部证据。
 
 ## 8. 当前已知阻断（0.8）
 
@@ -320,6 +376,10 @@ ssh "$FAR" 'dmesg | grep -i fec_stream_refused || true'
 3. **载体 stall-dead 抖动。** 256 载体下 stall/recover 每小时数千次
    （`CHANGELOG.md:336-341`）。S2/S3 期间若出现周期性卡顿，先看
    `/proc/net/tbtun/stats` 的 `stall_*`，不要先怀疑 mihomo。
+4. **单 FEC flow 限制。** `only-tcp: true` 的 XUDP 会为 UDP 另拨一条 TCP
+   （`vless.go:369-404`），far 只允许一条 FEC flow（`README.md:661-662`），
+   第二条被 `fec_stream_refused` 拒绝。S4b 因此预期 BLOCKED；产品默认保持
+   `only-tcp: false`，UDP 走 smux。
 
-在这三项关闭前，本清单只能证明“装配正确、配置被接受、单流功能可用”，不能证明
+在这四项关闭前，本清单只能证明“装配正确、配置被接受、单流功能可用”，不能证明
 0.9.0 的端到端产品目标。

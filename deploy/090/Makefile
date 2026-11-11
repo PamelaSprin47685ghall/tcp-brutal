@@ -121,14 +121,14 @@ configs: $(DIST)/near/config.yaml $(DIST)/far/config.yaml
 package-near: mihomo client $(DIST)/near/config.yaml
 	install -m 0755 $(DIST)/mihomo $(DIST)/near/mihomo
 	printf '%s\n' \
-	  "tunnel 1 role=near listen=127.0.0.1:$(NEAR_PORT) peer=$(FAR_IP):$(FAR_PORT) target=127.0.0.1:$(VLESS_PORT) n=4 m=4 fec=on mode=grouped carriers=256" \
+	  "tunnel 1 role=near listen=127.0.0.1:$(NEAR_PORT) peer=$(FAR_IP):$(FAR_PORT) target=127.0.0.1:$(VLESS_PORT) n=8 m=24 w=64 L=8 fec=on mode=sc-ldpc carriers=256 crypto=on adaptive=off" \
 	  > $(DIST)/near/tbtun.conf
 	install -m 0755 $(REPO_ROOT)/deploy/090/install-near.sh $(DIST)/near/install-near.sh
 
 package-far: mihomo module $(DIST)/far/config.yaml
 	install -m 0755 $(DIST)/mihomo $(DIST)/far/mihomo
 	printf '%s\n' \
-	  "tunnel 1 role=far listen=0.0.0.0:$(FAR_PORT) target=127.0.0.1:$(VLESS_PORT) n=4 m=4 fec=on mode=grouped carriers=256 peer=$(NEAR_IP)" \
+	  "tunnel 1 role=far listen=0.0.0.0:$(FAR_PORT) target=127.0.0.1:$(VLESS_PORT) n=128 m=128 w=256 L=8 fec=on mode=sc-ldpc carriers=256 crypto=on adaptive=off peer=$(NEAR_IP):$(NEAR_PORT)" \
 	  > $(DIST)/far/tbtun.conf
 	install -m 0755 $(REPO_ROOT)/deploy/090/install-far.sh $(DIST)/far/install-far.sh
 
@@ -146,6 +146,8 @@ package: package-near package-far
 verify:
 	$(DIST)/near/mihomo -t -f $(DIST)/near/config.yaml
 	$(DIST)/far/mihomo  -t -f $(DIST)/far/config.yaml
+	grep -q 'max-connections: 1' $(DIST)/near/config.yaml
+	grep -q 'only-tcp: false' $(DIST)/near/config.yaml
 	test -x $(DIST)/near/tbt_client
 	modinfo $(DIST)/far/tbtun.ko >/dev/null
 

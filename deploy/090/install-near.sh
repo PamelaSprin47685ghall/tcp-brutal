@@ -48,6 +48,8 @@ wait_port() {
 
 if [ "$start" -eq 1 ]; then
     # 1. userspace client listens on 19000
+    # tbt_client accepts --config FILE only as argv[1]; the file's first
+    # non-comment line is the tunnel line (host/tbt_client_main.c:128-170).
     if [ -f /run/tbtun-090/tbt_client.pid ] && \
        kill -0 "$(cat /run/tbtun-090/tbt_client.pid)" 2>/dev/null; then
         echo "install-near: tbt_client already running"

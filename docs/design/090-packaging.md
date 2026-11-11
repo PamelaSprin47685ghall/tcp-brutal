@@ -40,7 +40,7 @@ mihomo 已经原生提供本产品需要的两端：
 | near VLESS 出站 | `adapter/parser.go:65-71` 识别 `type: vless` 并调用 `outbound.NewVless`；字段在 `adapter/outbound/vless.go:59-72` |
 | far VLESS 入站 | `listener/parse.go:96-102` 识别 `type: vless`；实现在 `listener/sing_vless/` |
 | TCP 多路复用（smux） | `adapter/parser.go:234-241` 读取顶层 `smux:`，用 `outbound.NewSingMux` 包住任意出站 |
-| XUDP | `adapter/outbound/vless.go:69,387-396,458`；服务端 `listener/sing_vless/service.go:141-142` |
+| XUDP（可选，默认不走） | `adapter/outbound/vless.go:69,387-396,458`；服务端 `listener/sing_vless/service.go:141-142` |
 | 无 TLS 明文 | 出站 `tls` 默认 false（`adapter/outbound/vless.go:65`）；入站 `allow-insecure: true` 允许无 TLS 监听（`listener/sing_vless/server.go:265-277`） |
 
 `tbt_client` 与 `tbtun.ko` 对 mihomo 都只是透明 TCP 字节管道：mihomo 不感知载体、
@@ -149,14 +149,14 @@ configs: $(DIST)/near/config.yaml $(DIST)/far/config.yaml
 package-near: mihomo client $(DIST)/near/config.yaml
 	install -m 0755 $(DIST)/mihomo $(DIST)/near/mihomo
 	printf '%s\n' \
-	  "tunnel 1 role=near listen=127.0.0.1:$(NEAR_PORT) peer=$(FAR_IP):$(FAR_PORT) target=127.0.0.1:$(VLESS_PORT) n=4 m=4 fec=on mode=grouped carriers=256" \
+	  "tunnel 1 role=near listen=127.0.0.1:$(NEAR_PORT) peer=$(FAR_IP):$(FAR_PORT) target=127.0.0.1:$(VLESS_PORT) n=8 m=24 w=64 L=8 fec=on mode=sc-ldpc carriers=256 crypto=on adaptive=off" \
 	  > $(DIST)/near/tbtun.conf
 	install -m 0755 $(REPO_ROOT)/deploy/090/install-near.sh $(DIST)/near/install-near.sh
 
 package-far: mihomo module $(DIST)/far/config.yaml
 	install -m 0755 $(DIST)/mihomo $(DIST)/far/mihomo
 	printf '%s\n' \
-	  "tunnel 1 role=far listen=0.0.0.0:$(FAR_PORT) target=127.0.0.1:$(VLESS_PORT) n=4 m=4 fec=on mode=grouped carriers=256 peer=$(NEAR_IP)" \
+	  "tunnel 1 role=far listen=0.0.0.0:$(FAR_PORT) target=127.0.0.1:$(VLESS_PORT) n=128 m=128 w=256 L=8 fec=on mode=sc-ldpc carriers=256 crypto=on adaptive=off peer=$(NEAR_IP):$(NEAR_PORT)" \
 	  > $(DIST)/far/tbtun.conf
 	install -m 0755 $(REPO_ROOT)/deploy/090/install-far.sh $(DIST)/far/install-far.sh
 
@@ -210,7 +210,8 @@ proxies:
     smux:
       enabled: true
       protocol: h2mux
-      only-tcp: true
+      max-connections: 1   # or sing-mux opens a 2nd TCP session (client.go:180-189)
+      only-tcp: false      # UDP shares this smux connection; XUDP needs true
       padding: false
 
 proxy-groups:
@@ -307,10 +308,11 @@ GOBIN=$PWD/dist/090 GOOS=linux GOARCH=amd64 \
 | `network` | `tcp` | `adapter/outbound/vless.go:72` | 只选外层传输；空值等价 tcp（`vless.go:258-261`） |
 | `tls` | `false` | `adapter/outbound/vless.go:65` | false 时 `streamTLSConn` 原样返回（`vless.go:336-337`） |
 | `udp` | `true` | `adapter/outbound/vless.go:67` | 不置 true 则不声明 UDP |
-| `xudp` | `true` | `adapter/outbound/vless.go:69` | 显式写，不依赖默认值 |
+| `xudp` | `true` | `adapter/outbound/vless.go:69` | 显式写；默认部署下 `only-tcp: false`，UDP 实际走 smux，不走 XUDP |
 | `smux.enabled` | `true` | `adapter/parser.go:234-241` | 通用解析器只读 `smux` |
 | `smux.protocol` | `h2mux` | `adapter/outbound/singmux.go:25` | 可选 `smux`/`yamux`/`h2mux`（`sing-mux/client.go:57-71`） |
-| `smux.only-tcp` | `true` | `adapter/outbound/singmux.go:31` | true 时 UDP 绕过 smux，走 VLESS XUDP（`singmux.go:49-57,66-70`） |
+| `smux.max-connections` | `1` | `adapter/outbound/singmux.go:26` | 不写时默认 0；达到 `min-streams` 后 `offerNew` 会开第二条 TCP（`sing-mux/client.go:180-189`），撞上远端单 FEC flow |
+| `smux.only-tcp` | `false` | `adapter/outbound/singmux.go:31` | false 时 UDP 走同一条 smux TCP（`singmux.go:49-57`）；true 时 UDP 改走 VLESS XUDP，另拨 TCP（`vless.go:369-404`），受单 FEC flow 限制 |
 | `smux.padding` | `false` | `adapter/outbound/singmux.go:29` | 见 5.2 |
 
 `smux` 是出站构造完成后的通用包装，所以对 VLESS 同样生效：`adapter/parser.go:233-241`。
@@ -388,10 +390,10 @@ shadow-tls、res-tls、jls、reality、decryption **全部为空**时，才会�
 
 ```text
 # near (tbt_client --config)
-tunnel 1 role=near listen=127.0.0.1:19000 peer=FAR_IP:19002 target=127.0.0.1:19001 n=4 m=4 fec=on mode=grouped carriers=256
+tunnel 1 role=near listen=127.0.0.1:19000 peer=FAR_IP:19002 target=127.0.0.1:19001 n=8 m=24 w=64 L=8 fec=on mode=sc-ldpc carriers=256 crypto=on adaptive=off
 
 # far (写入 /proc/net/tbtun/config)
-tunnel 1 role=far listen=0.0.0.0:19002 target=127.0.0.1:19001 n=4 m=4 fec=on mode=grouped carriers=256 peer=NEAR_IP
+tunnel 1 role=far listen=0.0.0.0:19002 target=127.0.0.1:19001 n=128 m=128 w=256 L=8 fec=on mode=sc-ldpc carriers=256 crypto=on adaptive=off peer=NEAR_IP:19000
 ```
 
 - near 的 `target=` 只是 OPEN 的槽 0 默认端口；far 永远拨自己配置的 `target_addr`
@@ -399,10 +401,13 @@ tunnel 1 role=far listen=0.0.0.0:19002 target=127.0.0.1:19001 n=4 m=4 fec=on mod
   由 far 的 `target=` 决定。
 - far 的 `peer=` 是允许加入的 near 源地址锚点（`README.md:380`），必须是 near 的
   公网出口 IP；地址只接受字面量，不做 DNS（`README.md:598-602`）。
-- 除 `role`/`listen`/`peer`/`target` 的侧别差异外，两行的 `n`、`m`、`fec`、`mode`、
-  `carriers`、`crypto` 必须一致。`crypto` 未写时默认跟随 `fec`（`README.md:402`），
-  所以 `fec=on` 两端都会加密；`crypto_key` 由 near 生成并在 HELLO 下发
-  （`README.md:403`），不要只在一端手写。
+- `fec`、`mode`、`carriers`、`crypto`、`adaptive` 两端一致；`n`/`m`/`w` 按方向
+  不同：near 是上行 8×24、`w=64`，far 是下行 128×128、`w=256`。`w` 在
+  `mode=sc-ldpc` 下只接受 64/256/512，不写会默认 256（`tbt_parse.c:934-937`），
+  所以 near 必须显式 `w=64`。`L=8` 也是生产形状的一部分。接收端按对端的
+  `FEC_CFG` 形状解码（`README.md:52-53`），不要两端互相抄 `n/m/w`。
+- `crypto` 未写时默认跟随 `fec`（`README.md:402`），所以 `fec=on` 两端都会加密；
+  `crypto_key` 由 near 生成并在 HELLO 下发（`README.md:403`），不要只在一端手写。
 
 启动顺序：
 
@@ -434,12 +439,17 @@ VLESS 请求与载荷。far 的 `listen: 127.0.0.1` 只把入站入口限制在�
 
 - 客户端 `smux.enabled: true` 且 `only-tcp: false` 时，`SingMux.ListenPacketContext`
   直接把 UDP 交给 smux 的 `client.ListenPacket`（`adapter/outbound/singmux.go:49-57`），
-  VLESS 自己的 XUDP 根本不会走。
+  UDP 与 TCP 共用同一条 TCP 连接，tbtun 只看到一条应用流。
 - `only-tcp: true` 时，UDP 回落到 `ProxyAdapter.ListenPacketContext`
-  （`singmux.go:49-52`），VLESS 才用 `XUDP` 构造 `CommandMux` 并把流包进
-  `NewXUDPConn`（`vless.go:387-396,458`）。
-- 结论：要“mux + tcp + XUDP”三者同时成立，必须 `only-tcp: true`。只写
-  `xudp: true` 而 `only-tcp: false`，UDP 实际走的是 smux，不是 XUDP。
+  （`singmux.go:49-52`），VLESS 的 `ListenPacketContext` 先调用 `v.dialContext`
+  新拨一条 TCP（`adapter/outbound/vless.go:369-404`），再用 XUDP 构造
+  `CommandMux`（`vless.go:387-396,458`）。
+- 0.8 的 far 模块只允许一条 FEC flow（`README.md:661-662`），第二条 TCP 会被
+  `fec_stream_refused` 拒掉。所以默认部署用 `only-tcp: false`，UDP 走 smux；
+  `only-tcp: true` 只是验证原生 VLESS CommandMux XUDP 的单独路径（smoke S4b），
+  在单 FEC flow 限制解除前不能作为产品配置。
+- `max-connections: 1` 是配套项：不写时默认 0，smux 在流数达到 `min-streams`
+  后会 `offerNew` 开第二条 TCP（`sing-mux/client.go:180-189`），同样撞上单 flow。
 
 ### 5.2 服务端 padding 会拒绝非填充客户端
 
@@ -498,7 +508,7 @@ make -f deploy/090/Makefile package MIHOMO_VERSION=vX.Y.Z
 | `type: vless`（出/入） | 稳定 | `adapter/parser.go:65`；`listener/parse.go:96` |
 | `uuid` / `server` / `port` | 稳定 | `vless.go:61-63`；`inbound/vless.go:33-35` |
 | `network` / `tls` / `udp` | 稳定 | `vless.go:65-72` |
-| `smux.enabled` / `protocol` / `only-tcp` / `padding` | 较稳定，但**静默失败** | 见 5.4 |
+| `smux.enabled` / `protocol` / `max-connections` / `only-tcp` / `padding` | 较稳定，但**静默失败** | 见 5.1 / 5.4 |
 | `xudp` | 半稳定：代码支持、上游文档未收录 | `vless.go:69`；`docs/config.yaml` 无此键 |
 | `allow-insecure`（入站） | 稳定，且明文必需 | `inbound/vless.go:24`；`server.go:265-277` |
 | `packet-addr` / `packet-encoding` | 不使用 | 与 `xudp` 有静默覆盖（`vless.go:474-485`） |
@@ -518,9 +528,9 @@ make -f deploy/090/Makefile package MIHOMO_VERSION=vX.Y.Z
 4. 启动 near，`curl 127.0.0.1:9090/proxies/tbtun`，确认返回里 `smux` 为 true。
    该字段由 `adapter/adapter.go:155` 写入 `ProxyInfo.SMUX`，经
    `hub/route/proxies.go:62-67` 暴露。**没有 `smux` 就停下查 Release Notes**。
-5. 端到端两条：TCP（`curl https://example.com` 经 7890）与 UDP
-   （`dig @1.1.1.1 example.com` 经 7890）。TCP 通而 UDP 不通，优先怀疑 `xudp`
-   或 `only-tcp` 的语义变化。
+5. 端到端两条：TCP（`curl https://example.com` 经 7890）与 UDP（DNS 经 7890）。
+   默认 `only-tcp: false`，UDP 走 smux；要验证原生 XUDP 必须改 `only-tcp: true`，
+   它会另拨一条 TCP，当前受单 FEC flow 限制（smoke S4b，预期阻断）。
 6. Release 资产 404 时，查
    `https://api.github.com/repos/MetaCubeX/mihomo/releases/latest` 的资产名。
 
@@ -528,7 +538,8 @@ make -f deploy/090/Makefile package MIHOMO_VERSION=vX.Y.Z
 
 ## 7. 当前缺口：打包可以先做，端到端验收会被阻断
 
-这套设计依赖 0.8 分支的现状。0.8 还有三项未关闭的缺陷；在它们关闭前，
+这套设计依赖 0.8 分支的现状。0.8 还有三项未关闭的缺陷，另有一条单流架构限制；
+在它们解除前，
 `package` 与 `verify` 可以完成，但“真实链路可用”不能签字：
 
 1. **吞吐只有约 0.55 MB/s。** 0.8 的验收数字；分支内可佐证的同级数据是
@@ -540,11 +551,16 @@ make -f deploy/090/Makefile package MIHOMO_VERSION=vX.Y.Z
 3. **载体 stall-dead 抖动未定。** `CHANGELOG.md:336-341` 记录：256 载体下
    stall/recover 每小时触发数千次，99% 在 200 ms 内恢复，且这些日志曾是内核冻结前
    的最后输出。恢复时间短不等于无害；在 0.9.0 的 256 载体形状下必须先定性。
+4. **单 FEC flow 限制（架构限制，不是缺陷）。** far 每个会话只接受一条 FEC flow
+   （`README.md:661-662`）。`only-tcp: true` 的 XUDP 会为 UDP 另拨一条 TCP
+   （`vless.go:369-404`），第二条必然被 `fec_stream_refused` 拒绝。因此产品默认
+   `only-tcp: false`，UDP 走 smux；原生 XUDP 只能作为 S4b 的边界实验。
 
 因此交付顺序应为：
 
 - 现在可做：Makefile、两棵产物树、两个安装脚本、两份配置、`mihomo -t` 门禁。
-- 阻断项：上述三条关闭前，不做“端到端可用”的验收声明；不以打包完成代替链路可用。
+- 阻断项：上述三项缺陷关闭前，不做“端到端可用”的验收声明；第 4 条限制解除前，
+  不把 XUDP 写成产品能力。不以打包完成代替链路可用。
 
 ---
 
@@ -556,11 +572,14 @@ make -f deploy/090/Makefile package MIHOMO_VERSION=vX.Y.Z
    `go version -m /tmp/gobin/mihomo` 里 protobuf 的来源。
 2. **Release 资产命名是否长期稳定。** 只在 v1.19.34 核实过；每次升级先查 API。
 3. **smux/XUDP 的跨版本线兼容。** 无版本协商字段。实验：near vX、far vY 各跑
-   TCP+UDP；失败就回退同版本。
-4. **`xudp` 的文档地位。** 代码有、`docs/config.yaml` 没有。实验：在 7890 上发
-   真实 UDP 查询并确认走 `CommandMux`；升级后按 6.3 第 5 步复验。
-5. **`carriers=256` 与 `mode=grouped` 的稳定性。** 语法与上限见
-   `README.md:383-385`；0.8 的 stall 抖动见第 7 节。实验：按既有 smoke 矩阵逐步
+   TCP+UDP（默认的 UDP 走 smux）；XUDP 变体需 `only-tcp: true`，见 smoke S4b，
+   当前受单 FEC flow 限制。失败就回退同版本。
+4. **`xudp` 的文档地位。** 代码有、`docs/config.yaml` 没有。实验：把
+   `only-tcp` 改成 true 后发真实 UDP 查询，确认走 `CommandMux`，同时预期第二条
+   TCP 被 `fec_stream_refused` 拒绝（smoke S4b）。升级后按 6.3 第 5 步复验。
+5. **`carriers=256` 与 `mode=sc-ldpc` 的稳定性。** 语法与形状见
+   `README.md:397-401`、`tbt_parse.c:934-937`；0.8 的 stall 抖动见第 7 节。实验：
+   按既有 smoke 矩阵逐步
    加到 256，不要一次拉满。
 6. **far 的 `listen: 127.0.0.1` 是否满足部署 netns。** 源码只证明它绑本机；若模块
    与 mihomo 不在同一 netns，必须改成模块可达的地址。实验：目标 netns 里
@@ -568,7 +587,8 @@ make -f deploy/090/Makefile package MIHOMO_VERSION=vX.Y.Z
 
 ## 9. 一句话结论
 
-0.9.0 不需要“mihomo 插件”：near 一个原生 VLESS 出站（`smux.only-tcp` + `xudp`），
+0.9.0 不需要“mihomo 插件”：near 一个原生 VLESS 出站（`smux` + `max-connections: 1`，
+UDP 走 smux；原生 XUDP 变体受单 FEC flow 限制，见 smoke S4b），
 far 一个原生 VLESS 入站（`allow-insecure: true` 允许无 TLS），中间 near 跑
 `tbt_client`、far 跑 `tbtun.ko`。打包只做三件事：取上游 mihomo 二进制、构建
 `host/tbt_client` 与 `tbtun.ko`、渲染两份 YAML 与两行隧道配置。升级的唯一开关是
