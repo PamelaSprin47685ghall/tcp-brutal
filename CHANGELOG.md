@@ -13,31 +13,37 @@ and moves independently of the module version.
   applied. Any other trailing token is an error instead of being silently
   ignored. `host/test_client_args` pins the split, the file/command-line
   precedence and the byte-exact kernel line.
-- The userspace client's `adaptive=on` receiver no longer drops the block
-  outside its reorder ring. The ACK granted `TBT_RX_SLOTS - 1` blocks while
-  the sender is documented to carry one started block past the window, so
-  block id `rx_next + 8` arrived whole and was dropped: 18,826 shares at 20%
-  loss on `.92`. The grant is now `TBT_RX_SLOTS - 2` whole blocks, matching
-  the module's `K_eff - 2` policy. The control law also stops counting DATA
-  shares still in flight at the decode wake line as channel loss: a
-  first-attempt success samples `E = 0`, and only a failed attempt samples
-  its missing DATA count. On `.92` at 0% loss the old sample read ~44 missing
-  shares (max 82); the new one reads zero. The receiver follows block headers
-  and keeps the FBK target separately, with a 4-share deadband on
-  improvements and immediate loss responses, which cut the 20% run from 184
-  to 48 shape commits (`0.10.0` measured 1,448 at 256 MiB). The 20% loss
-  throughput gap against `adaptive=off` remains open: the NACK hold is
-  `max(carrier rtt) + 4 * rttvar`, which reaches ~1 s when a lossy carrier is
-  in RTO, so a block that needs repair waits about one second per 6-block
-  credit window. `host/test_client_rx` covers the credit headroom, the
-  sample policy and the `m_current`/`m_target` split.
-- The userspace client marks a short block's zero padding DATA slots as
-  known zero before an SC-LDPC decode, as the module already did. A
-  `64/192` block with `real=1` was handed 64 unknowns and one parity
-  equation, so the final `478 B` of a `760K -> HKG0` transfer never
-  decoded. `host/test_client_rx` pins that exact case (drop `DATA[0]`,
-  decode from `PARITY[0]` alone) and a `128/128` block with two lost
-  shares; both deliver byte-exact, with no padding bytes leaking.
+- The userspace client's receive ring is now nine slots and the ACK grants
+  `TBT_RX_SLOTS - 2` = seven whole blocks. The sender is documented to carry
+  one started block past the grant, so its eight-block lead now lands inside
+  the ring. With eight slots and a seven-block grant, block id
+  `rx_next + 8` arrived whole and was dropped: 2,209 shares at 32 MiB, 20%
+  loss and 18,826 at 256 MiB. `rx_win_drop` is zero on every measured run.
+- The `adaptive=on` control law no longer treats the in-flight tail as
+  channel loss or chases it with wire changes. A first-attempt success
+  samples `E = 0`; only a failed attempt samples its missing DATA count. The
+  receiver follows block headers, and the FBK reports the accepted block as
+  `m_current`/`n_current` and the split the CFG shipped as `m_target`.
+  Probes below that split are disabled: this transport loses shares to
+  carrier TCP RTOs, not to the code, and any split change moves the wake
+  line and adds repairs (a `135/121` probe truncated one 256 MiB run at
+  111 MiB). The shipped split is the operating point; the controller still
+  runs for diagnostics.
+- The host NACK hold follows the module's `tbt_fec_nack_hold_ns()`: the
+  worst carrier round trip, floored at two retry intervals (40 ms), capped
+  at 1 s. The old `rtt + 4 * rttvar` term reached about 1 s when a carrier
+  was in TCP RTO and froze every repair. A p75 percentile was tried and
+  rejected by evidence: it asked for in-flight shares and produced 368,481
+  replay shares on the 256 MiB baseline run.
+- The userspace engine no longer aborts a flow when a target that already
+  reached a clean EOF closes with `EPOLLHUP` in the same event as
+  `EPOLLRDHUP`. The echo target exits that way after the forwarded FIN, so
+  `host/test_client_loopback_san` reset the stream in 20-33% of runs
+  (`recv: Connection reset by peer`). A real `EPOLLERR`, or `EPOLLHUP`
+  without a clean read EOF, still aborts. The loopback passed 20 of 20
+  consecutive sanitizer runs after the change.
+- `host/test_client_rx` covers the nine-slot credit headroom, the
+  first-attempt sample policy and the `m_current`/`m_target` split.
 
 ## [0.10.0] - 2026-11-11
 

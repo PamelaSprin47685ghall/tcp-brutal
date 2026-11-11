@@ -459,9 +459,8 @@ static void test_marker_short_sequence(void)
     CHECK(count_nacks(ids, 16) == 0, "sequence: no NACK for delivered blocks");
 }
 
-/* The sender spends the full credit of TBT_RX_SLOTS-1 blocks: one head under
- * delivery plus seven in flight fill all eight slots, and no block is
- * dropped. This is the capacity invariant the old 8-block credit broke. */
+/* The sender spends its full lead: one head under delivery plus slots-1 in
+ * flight fill the ring, and no block is dropped. */
 static void test_credit_inflight(void)
 {
     int i;
@@ -472,7 +471,7 @@ static void test_credit_inflight(void)
     for (i = 1; i < TBT_RX_SLOTS; i++)
         marker_block((u64)i, (u64)i * 132, 132, 124);
 
-    CHECK(f.rx_used == TBT_RX_SLOTS, "credit: eight slots held");
+    CHECK(f.rx_used == TBT_RX_SLOTS, "credit: every slot held");
     CHECK(f.rx_window_drop == 0, "credit: full credit causes no drop");
     CHECK(f.rx_inflight_bad == 0, "credit: in-flight count is within slots-1");
     clear_pending();
@@ -482,16 +481,18 @@ static void test_credit_inflight(void)
           "credit: ACK grants slots-2 whole blocks");
     CHECK(f.rx_credit_bad == 0, "credit: credit invariant holds");
 
-    /* Complete the head; the seven markers drain behind it. */
+    /* Complete the head; the markers drain behind it. */
     send_parity(0, 0, 132, 124, 0, 1, 0);
-    CHECK(f.rx_next_block == 8, "credit: head and in-flight blocks drained");
+    CHECK(f.rx_next_block == TBT_RX_SLOTS,
+          "credit: head and in-flight blocks drained");
     CHECK(f.rx_used == 0, "credit: ring empty after drain");
     CHECK(f.rx_window_drop == 0, "credit: drain caused no drop");
     CHECK(f.rx_inflight_bad == 0, "credit: invariant held through drain");
 
-    /* The next block fits because one slot was reserved for delivery. */
-    marker_block(8, 8 * 132, 146, 110);
-    CHECK(f.rx_next_block == 9, "credit: post-drain block accepted");
+    /* The next block fits because the delivered slot was released. */
+    marker_block(TBT_RX_SLOTS, TBT_RX_SLOTS * 132, 146, 110);
+    CHECK(f.rx_next_block == TBT_RX_SLOTS + 1,
+          "credit: post-drain block accepted");
     CHECK(f.rx_used == 0 && f.rx_window_drop == 0,
           "credit: post-drain ring empty and no drop");
     CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 2) * (146u + 110u)) &&
@@ -499,9 +500,10 @@ static void test_credit_inflight(void)
           "credit: post-drain credit follows the new split");
 }
 
-/* Eight slots hold blocks 0..7. A ninth block before the head completes is
- * a sender violation and must be refused; NACK must name block 0 only; the
- * stub block 0 then completes with one real share and seven markers. */
+/* The ring holds blocks 0..slots-1. One block past it before the head
+ * completes is a sender violation and must be refused; NACK must name block
+ * 0 only; the stub block 0 then completes with one real share and seven
+ * group markers. */
 static void test_window_and_nack_base(void)
 {
     u64 ids[16];
@@ -513,12 +515,14 @@ static void test_window_and_nack_base(void)
     for (i = 1; i < TBT_RX_SLOTS; i++)
         marker_block((u64)i, (u64)i * 64, 8, 24);
 
-    send_data(8, 8 * 64, 8, 24, 0, 0, TBT_FEC_S, false);
-    CHECK(f.rx_window_drop == 1, "window: block 8 refused");
+    send_data(TBT_RX_SLOTS, TBT_RX_SLOTS * 64, 8, 24, 0, 0, TBT_FEC_S,
+              false);
+    CHECK(f.rx_window_drop == 1, "window: block next+slots refused");
     CHECK(f.rx_next_block == 0, "window: head still block 0");
 
     clear_pending();
-    flow_rx_nack(&f, now_ns() + TBT_NACK_FIRST_NS + 1000000u);
+    flow_rx_nack(&f, now_ns() + TBT_NACK_FIRST_NS +
+                         2u * TBT_NACK_RETRY_NS + 1000000u);
     n = count_nacks(ids, 16);
     CHECK(n >= 1, "nack: block 0 requested");
     for (i = 0; i < n && i < 16; i++)
@@ -538,19 +542,20 @@ static void test_window_and_nack_base(void)
     send_parity(0, 0, 8, 24, 0, 1, 0);
     for (i = 1; i < 8; i++)
         send_marker(0, 0, 8, 24, (u16)i);
-    CHECK(f.rx_next_block == 8, "window: blocks 0..7 drained");
+    CHECK(f.rx_next_block == TBT_RX_SLOTS, "window: every block drained");
     CHECK(f.rx_next_deliver == 1, "window: frontier is the one real share");
     CHECK(f.rx_deliver_bytes == TBT_FEC_S, "window: delivered one share");
     CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 2) * 8u * (8u + 24u)),
           "window: ACK credit follows the ring");
 
-    full_block(8, 8 * 64, 8, 24);
-    CHECK(f.rx_next_block == 9, "window: block 8 accepted after drain");
+    full_block(TBT_RX_SLOTS, TBT_RX_SLOTS * 64, 8, 24);
+    CHECK(f.rx_next_block == TBT_RX_SLOTS + 1,
+          "window: block next+slots accepted after drain");
     CHECK(f.rx_next_deliver == 65, "window: full block adds 64 packets");
 
     send_data(0, 0, 8, 24, 0, 0, TBT_FEC_S, false);
     CHECK(f.rx_late_share == 1, "late: old replay counted");
-    CHECK(f.rx_next_block == 9, "late: cursor unchanged");
+    CHECK(f.rx_next_block == TBT_RX_SLOTS + 1, "late: cursor unchanged");
 }
 
 /* A short 1x256 downlink block: three DATA shares present, share 3 missing,
@@ -574,7 +579,8 @@ static void test_nack_short_block_limits(void)
     send_data(0, 0, 128, 128, 0, 2, TBT_FEC_S, false);
     clear_pending();
 
-    t1 = now_ns() + TBT_NACK_FIRST_NS + 1000000ull;
+    t1 = now_ns() + TBT_NACK_FIRST_NS + 2ull * TBT_NACK_RETRY_NS +
+         1000000ull;
     flow_rx_nack(&f, t1);
     nack = nack_for_group(0);
     CHECK(nack != NULL, "nack limits: the head group is requested");
@@ -603,7 +609,7 @@ static void test_nack_short_block_limits(void)
     CHECK(f.rx[0].g[0].real_set && f.rx[0].g[0].real == 5,
           "nack limits: parity row 1 states the cut");
     clear_pending();
-    t2 = t1 + TBT_NACK_RETRY_NS + 1000000ull;
+    t2 = t1 + TBT_NACK_RETRY_NS + 2ull * TBT_NACK_RETRY_NS + 1000000ull;
     flow_rx_nack(&f, t2);
     nack = nack_for_group(0);
     CHECK(nack != NULL, "nack limits: the retry is sent");
@@ -690,13 +696,10 @@ static void test_nack_hold_follows_rtt(void)
     CHECK(last_ack_rtt() == 200000,
           "rtt: ACK carries the measured RTT, not 1000 us");
 
-    /* HKG0 V6: 149 ms mean and 212 ms deviation. The mean alone released a
-     * NACK while the replay was still crossing the pool, so the same share
-     * was re-requested four to eight times. Four deviations must widen the
-     * hold, and the ACK still carries the mean. */
+    /* The module's hold is one carrier round trip floored at two retry
+     * intervals, with no deviation term. */
     clear_engine();
     e.rtt_us = 150000;
-    e.rttvar_us = 200000;
     send_data(0, 0, 8, 24, 0, 0, TBT_FEC_S, false);
     t0 = now_ns();
     f.rx[0].first_ns = t0;
@@ -704,26 +707,24 @@ static void test_nack_hold_follows_rtt(void)
     f.rx[0].nack_tries = 0;
 
     clear_pending();
-    flow_rx_nack(&f, t0 + TBT_NACK_FIRST_NS + 150000000ull + 10000000ull);
+    flow_rx_nack(&f, t0 + TBT_NACK_FIRST_NS + 150000000ull - 1000000ull);
     CHECK(count_nacks(ids, 16) == 0,
-          "rttvar: 30 ms + the mean is still too early at 200 ms deviation");
+          "rtt: 30 ms + the RTT is still too early");
 
     clear_pending();
-    flow_rx_nack(&f, t0 + TBT_NACK_FIRST_NS + 150000000ull +
-                         4ull * 200000000ull + 1000000ull);
+    flow_rx_nack(&f, t0 + TBT_NACK_FIRST_NS + 150000000ull + 1000000ull);
     CHECK(count_nacks(ids, 16) >= 1,
-          "rttvar: 30 ms + RTT + 4 * rttvar releases");
+          "rtt: 30 ms + one RTT releases");
 
     clear_pending();
-    CHECK(flow_send_ack(&f) == 0, "rttvar: ACK sent");
+    CHECK(flow_send_ack(&f) == 0, "rtt: ACK sent");
     CHECK(last_ack_rtt() == 150000,
-          "rttvar: ACK still reports the mean, not the widened hold");
+          "rtt: ACK carries the measured RTT");
 
-    /* A 1 s / 1 s sample would hold 5 s without a cap; one loss spike must
-     * not freeze repair, so the hold stops at TBT_NACK_RTT_HOLD_MAX_NS. */
+    /* A 1 s sample would hold 1 s; one loss spike must not freeze repair,
+     * so the hold stops at TBT_NACK_RTT_HOLD_MAX_NS (now 1 s). */
     clear_engine();
     e.rtt_us = 1000000;
-    e.rttvar_us = 1000000;
     send_data(0, 0, 8, 24, 0, 0, TBT_FEC_S, false);
     t0 = now_ns();
     f.rx[0].first_ns = t0;
@@ -734,13 +735,13 @@ static void test_nack_hold_follows_rtt(void)
     flow_rx_nack(&f, t0 + TBT_NACK_FIRST_NS +
                          TBT_NACK_RTT_HOLD_MAX_NS - 1000000ull);
     CHECK(count_nacks(ids, 16) == 0,
-          "rttvar: the hold is capped at 4 s");
+          "rtt: the hold is capped at 1 s");
 
     clear_pending();
     flow_rx_nack(&f, t0 + TBT_NACK_FIRST_NS +
                          TBT_NACK_RTT_HOLD_MAX_NS + 1000000ull);
     CHECK(count_nacks(ids, 16) >= 1,
-          "rttvar: the cap releases on time");
+          "rtt: the cap releases on time");
 }
 
 /* The far side reaps a stall-dead carrier, and on a lossy WAN its FIN can be
@@ -893,7 +894,7 @@ static void test_downlink_shapes(void)
           "down: 132/124 codec builds");
     CHECK(flow_rx_codec(&f, 146, 110) != NULL,
           "down: 146/110 codec builds");
-    CHECK(!flow_set_target(&f, 200, 56),
+    CHECK(!tbt_fec_block_shape_ok(200, 56, 0, 0, 256, 1, true),
           "down: a split above 192 is refused");
 }
 
@@ -2074,12 +2075,8 @@ static void test_shape_switch_inflight(void)
                           TBT_FEC_S, false, dp[0]);
     CHECK(f.rx_used == TBT_RX_SLOTS, "inflight: every slot is occupied");
 
-    CHECK(flow_set_target(&f, NEW_N, NEW_M),
-          "inflight: the new split becomes the FBK target");
     CHECK(f.rx_n == OLD_N && f.rx_m == OLD_M,
-          "inflight: the target does not move the RX expectation");
-    CHECK(f.ctl_n == NEW_N && f.ctl_m == NEW_M,
-          "inflight: the target is remembered for the next FBK");
+          "inflight: the RX expectation follows the draining block");
     CHECK(f.rx_credit_shares == (TBT_RX_SLOTS - 2) * 256u,
           "inflight: credit is 6 * (n+m), independent of the split");
 
@@ -2686,9 +2683,8 @@ static void test_stall_dump(void)
     e.cfg.verbose = 0;
 }
 
-/* The FBK names two different splits: m_current/n_current describe the
- * block just accepted, m_target the split the peer should send next. The
- * receiver keeps following headers and does not adopt the target. */
+/* The FBK names the accepted block as m_current/n_current and the shipped
+ * split as m_target. The receiver keeps following headers. */
 static void test_fbk_commit(void)
 {
     int i;
@@ -2697,9 +2693,10 @@ static void test_fbk_commit(void)
     clear_engine();
     f.ctl_ready = false;
     e.cfg.cfg.adaptive = 1;
-    CHECK(flow_set_target(&f, 9, 23), "fbk: target 9/23");
+    f.ctl_init_n = 8;
+    f.ctl_init_m = 24;
     CHECK(f.rx_n == 8 && f.rx_m == 24,
-          "fbk: the target does not move the RX expectation");
+          "fbk: the shipped split is the accepted split");
     (void)flow_rx_credit_update(&f);
     clear_pending();
     CHECK(flow_send_fbk(&f, 0, 1) == 0, "fbk: send");
@@ -2712,8 +2709,8 @@ static void test_fbk_commit(void)
         found++;
         CHECK(rec[TBT_FEC_HDR_LEN + TBT_FEC_FBK_M_CURRENT] == 24,
               "fbk: m_current is the accepted block's m");
-        CHECK(rec[TBT_FEC_HDR_LEN + TBT_FEC_FBK_M_TARGET] == 23,
-              "fbk: m_target is the new target");
+        CHECK(rec[TBT_FEC_HDR_LEN + TBT_FEC_FBK_M_TARGET] == 24,
+              "fbk: m_target is the shipped split");
         CHECK(rec[TBT_FEC_HDR_LEN + TBT_FEC_FBK_N_CURRENT] == 8,
               "fbk: n_current is the accepted block's n");
     }
@@ -2725,10 +2722,10 @@ static void test_fbk_commit(void)
     CHECK(f.rx_credit_bad == 0, "fbk: credit invariant holds");
 }
 
-/* The ring is 8 slots and the sender may carry one started block past the
- * granted window. A slots-1 grant therefore let it open the first block
- * outside the ring, which arrived as a whole block of rx_window_drop. The
- * grant is slots-2 so the sender's headroom lands in the last valid slot. */
+/* The sender may carry one started block past a slots-2 grant. Nine ring
+ * slots make the grant seven blocks and leave the sender's eight-block lead
+ * inside the ring; eight slots let the first block outside arrive whole as
+ * rx_window_drop. */
 static void test_credit_headroom(void)
 {
     uint32_t credit;
@@ -2744,10 +2741,10 @@ static void test_credit_headroom(void)
     CHECK(last_ack_credit() == (int)credit,
           "credit: the ACK carries the same grant");
 
-    /* The first share of block 8 is outside an 8-slot ring at next 0. */
+    /* The first share of block 9 is outside a nine-slot ring at next 0. */
     send_data(0, 0, 128, 128, 0, 0, TBT_FEC_S, false);
-    send_data(8, 8u * 128, 128, 128, 0, 0, TBT_FEC_S, false);
-    CHECK(f.rx_window_drop == 1, "credit: block next+8 is outside the ring");
+    send_data(9, 9u * 128, 128, 128, 0, 0, TBT_FEC_S, false);
+    CHECK(f.rx_window_drop == 1, "credit: block next+9 is outside the ring");
 }
 
 /* The controller sees a first-attempt success as zero missing DATA shares,
@@ -2762,9 +2759,9 @@ static void init_adaptive_down(void)
     f.ctl_ready = !tbt_fec_adapt_sclc_init(
         &f.ctl, 256, 1, tbt_fec_sclc_wake_extra_down(128), 128,
         TBT_FEC_SCLC_DOWN);
-    f.ctl_n = 128;
-    f.ctl_m = 128;
-    f.ctl_change_ns = now_ns();
+    f.ctl_init_n = 128;
+    f.ctl_init_m = 128;
+    f.ctl_blocks = f.ctl.blocks;
 }
 
 static void feed_ctl_sample(u16 wake_e, u16 wake_s, bool ok, u16 real)
@@ -2816,6 +2813,29 @@ static void test_adaptive_sample_policy(void)
     CHECK(f.ctl.q_q16 > (32u << 16),
           "sample: a failure burst raises the quantile");
     CHECK(f.ctl.backup_off >= 2, "sample: the backup added shares");
+
+    /* The wire target never exceeds the shipped split, whatever the law
+     * computes: above it the payload shrinks and the wake line moves into
+     * the in-flight tail. */
+    {
+        int found = 0;
+        int i2;
+
+        clear_pending();
+        CHECK(flow_send_fbk(&f, 0, 1) == 0, "sample: FBK sends");
+        for (i2 = 0; i2 < e.npending; i2++)
+        {
+            const u8 *rec = e.pending[i2].rec;
+
+            if (rec[0] != TBT_FEC_FBK)
+                continue;
+            found++;
+            CHECK(rec[TBT_FEC_HDR_LEN + TBT_FEC_FBK_M_TARGET] ==
+                      f.ctl_init_m,
+                  "sample: m_target is the shipped split, not the law's output");
+        }
+        CHECK(found == 1, "sample: one FBK queued");
+    }
 }
 
 /* A local FIN whose peer FIN never arrives used to occupy a flow slot

@@ -51,7 +51,11 @@
 
 #define TBT_CAR_MAX 256
 #define TBT_FLOW_MAX 8
-#define TBT_RX_SLOTS 8
+/* The sender may carry one started block past a slots-2 grant. With nine
+ * slots the grant is seven blocks and the sender's eight-block lead lands
+ * inside the ring; eight slots made block id rx_next + 8 arrive whole and
+ * drop. */
+#define TBT_RX_SLOTS 9
 #define TBT_REPLAY_BLOCKS 8
 #define TBT_RX_CODECS 4
 #define TBT_CAR_RBUF 65536
@@ -69,18 +73,15 @@
 #define TBT_TX_IDLE_SEAL_NS (25ull * 1000 * 1000)
 #define TBT_NACK_FIRST_NS (30ull * 1000 * 1000)
 #define TBT_NACK_RETRY_NS (20ull * 1000 * 1000)
-/* Ceiling on the RTT + 4 * rttvar part of a NACK hold. A single loss spike
- * must not freeze repair for the rest of the connection. */
-#define TBT_NACK_RTT_HOLD_MAX_NS (4000ull * 1000 * 1000)
+/* Ceiling on the RTT part of a NACK hold. A single loss spike must not
+ * freeze repair for the rest of the connection. */
+#define TBT_NACK_RTT_HOLD_MAX_NS (1000ull * 1000 * 1000)
 #define TBT_FBK_NS (100ull * 1000 * 1000)
-/* A wire shape change rebuilds a codec and moves every share's slot. The
- * controller's own noise is ~sigma shares, so a small improvement waits for
- * the deadband and one extra feedback period; a loss response goes at once.
- * Measured on .92: 1,448 commits in 480 s at 20% loss without this. */
-#define TBT_FBK_M_DEADBAND 4u
-#define TBT_FBK_M_UP 2u
-#define TBT_FBK_SHAPE_NS (200ull * 1000 * 1000)
-#define TBT_FBK_SHAPE_FAST 16u
+/* This transport loses shares to carrier TCP RTOs, not to the code. A wire
+ * split change moves the wake line and multiplies repairs: on .92 a 256 MiB
+ * run at 20% loss with a single 135/121 probe stalled the head and let the
+ * far kill the stream, while 128/128 completed. The controller still runs
+ * for diagnostics, but the FBK target stays at the split the CFG shipped. */
 #define TBT_ACK_NS (10ull * 1000 * 1000)
 #define TBT_FLOW_IDLE_NS (30ull * 1000 * 1000 * 1000)
 #define TBT_FLOW_CLOSE_NS (10ull * 1000 * 1000 * 1000)
@@ -275,10 +276,9 @@ struct flow
     /* feedback controller */
     struct tbt_fec_adapt_sclc_ctl ctl;
     bool ctl_ready;
-    u16 ctl_n;       /* the split the last FBK asked the peer to send */
-    u16 ctl_m;
+    u16 ctl_init_n;  /* the split the CFG shipped: the only wire target */
+    u16 ctl_init_m;
     u32 ctl_blocks;  /* ctl.blocks at the previous tick, for d */
-    u64 ctl_change_ns;
     u64 last_fbk_ns;
 
     /* application output */
@@ -373,7 +373,6 @@ struct engine
      * a share that is still in flight only buys a duplicate, and a lossy
      * path's mean alone understates how long a replay can take. */
     u32 rtt_us;
-    u32 rttvar_us;
     u64 rtt_sample_ns;
 
     struct pending_ctl pending[TBT_CTL_PENDING];
@@ -1735,30 +1734,6 @@ static struct tbt_fec_grouped *flow_rx_codec(struct flow *f, u16 n, u16 m)
     return codec;
 }
 
-/* Remember one n/m as the split the next FBK asks the peer to send. The
- * receiver does not adopt it: the peer switches at a block boundary, and
- * every block header states its own shape. Moving the local expectation
- * first counted every share still in flight as a mismatch (measured .92:
- * 631,585 at 20% loss) and echoed the previous block's shape back into the
- * next target. */
-static bool flow_set_target(struct flow *f, u16 n, u16 m)
-{
-    if (!n || !m || (u16)(n + m) != f->rx_shares)
-        return false;
-    if (!tbt_fec_block_shape_ok(n, m, 0, 0, f->rx_shares, f->rx_groups,
-                               true))
-        return false;
-    if (f->ctl_n != n || f->ctl_m != m)
-    {
-        logmsg(f->e, "tbt_client: flow %llu cfg rx n=%u m=%u (fbk)\n",
-               (unsigned long long)f->sid, n, m);
-        f->ctl_n = n;
-        f->ctl_m = m;
-        f->ctl_change_ns = now_ns();
-    }
-    return true;
-}
-
 static int flow_send_fbk(struct flow *f, u8 flags, u32 epoch)
 {
     struct engine *e = f->e;
@@ -1777,9 +1752,6 @@ static int flow_send_fbk(struct flow *f, u8 flags, u32 epoch)
         u32 blocks = f->ctl.blocks - f->ctl_blocks;
         u16 d = blocks ? (u16)(blocks > 0xffffu ? 0xffffu : blocks) : 1u;
         u32 w_ppm = (u32)d * 1000000u;
-        u16 target;
-        u16 n_new;
-        bool send;
 
         if (w_ppm > 10000000u)
             w_ppm = 10000000u;
@@ -1794,23 +1766,9 @@ static int flow_send_fbk(struct flow *f, u8 flags, u32 epoch)
                    out.delta_off_q16, out.burst_q16, out.eps_q16,
                    out.sigma_q16, out.backup, out.reason, out.m_target,
                    f->rx_n, f->rx_m);
-        target = out.m_target;
-        /* Raise at once when the change is worth a switch; the next block
-         * needs the margin. Lower only after the deadband, and a large
-         * recovery at once. */
-        send = target >= f->ctl_m + TBT_FBK_M_UP ||
-               (target + TBT_FBK_SHAPE_FAST <= f->ctl_m) ||
-               (target + TBT_FBK_M_DEADBAND <= f->ctl_m &&
-                now - f->ctl_change_ns >= TBT_FBK_SHAPE_NS);
-        if (target && target != f->ctl_m && send)
-        {
-            n_new = (u16)(f->rx_shares - target);
-            if (!flow_set_target(f, n_new, target))
-                f->rx_shape_bad++;
-        }
     }
     fb.m_current = (u8)f->rx_m;
-    fb.m_target = (u8)f->ctl_m;
+    fb.m_target = (u8)f->ctl_init_m;
     fb.n_current = (u8)f->rx_n;
     fb.expected_shares = (u16)(f->rx_groups * f->rx_shares);
     fb.received_shares = fb.expected_shares;
@@ -1820,7 +1778,8 @@ static int flow_send_fbk(struct flow *f, u8 flags, u32 epoch)
     fb.rate_ppm_current =
         (u32)(((u64)f->rx_n * 1000000u + f->rx_shares - 1u) / f->rx_shares);
     fb.rate_ppm_target =
-        (u32)(((u64)f->ctl_n * 1000000u + f->rx_shares - 1u) / f->rx_shares);
+        (u32)(((u64)f->ctl_init_n * 1000000u + f->rx_shares - 1u) /
+              f->rx_shares);
     {
         u16 i;
 
@@ -2424,16 +2383,21 @@ static void flow_send_nack_group(struct flow *f, struct rx_block *b,
 }
 
 /* One hold shared by the first NACK and every retry: the worst carrier round
- * trip plus four deviations, the same sizing RFC 6298 gives an RTO. On the
- * HKG0 V6 path (149 ms mean, 212 ms deviation) the mean alone released the
- * NACK while the replay was still crossing the pool, so the same share was
- * requested four to eight times. The cap stops a transient spike from
- * freezing repair. */
+ * trip, floored at two retry intervals. On the HKG0 V6 path (149 ms mean,
+ * 212 ms deviation) the mean alone released the NACK while the replay was
+ * still crossing the pool, so the same share was requested four to eight
+ * times. The cap stops a transient spike from freezing repair. */
 static u64 nack_rtt_hold_ns(const struct engine *e)
 {
-    u64 hold_ns = (u64)e->rtt_us * 1000ull +
-                  4ull * (u64)e->rttvar_us * 1000ull;
+    u64 hold_ns = (u64)e->rtt_us * 1000ull;
+    u64 floor_ns = 2ull * (u64)TBT_NACK_RETRY_NS;
 
+    /* The module's tbt_fec_nack_hold_ns(): one carrier round trip, never
+     * less than two retry intervals. A replay may ride any carrier, so the
+     * pool maximum is the right bound; adding 4 * rttvar on top held every
+     * repair for ~1 s when a lossy carrier was in RTO. */
+    if (hold_ns < floor_ns)
+        hold_ns = floor_ns;
     return hold_ns < TBT_NACK_RTT_HOLD_MAX_NS ? hold_ns :
                                                  TBT_NACK_RTT_HOLD_MAX_NS;
 }
@@ -2886,10 +2850,9 @@ static int handle_cfg(struct flow *f, const u8 *body)
     extra = sh.groups > 1 ? TBT_FEC_SCLC_WAKE_EXTRA_UP
                           : tbt_fec_sclc_wake_extra_down(sh.n);
     f->ctl_ready = false;
-    f->ctl_n = sh.n;
-    f->ctl_m = sh.m;
+    f->ctl_init_n = sh.n;
+    f->ctl_init_m = sh.m;
     f->ctl_blocks = 0;
-    f->ctl_change_ns = now_ns();
     if (e->cfg.cfg.adaptive &&
         !tbt_fec_adapt_sclc_init(&f->ctl, (u16)(sh.n + sh.m), sh.groups,
                                  extra, sh.n, variant))
@@ -3241,10 +3204,14 @@ static void flow_target_event(struct flow *f, uint32_t events)
         flow_out_flush(f);
     if (events & (EPOLLIN | EPOLLRDHUP))
         flow_app_read(f);
-    if (events & (EPOLLERR | EPOLLHUP))
-        /* Both roles abort here: a target connect that failed, or an
-         * application that reset its side. This is not the half-close case
-         * (EOF arrives as EPOLLRDHUP and is handled by flow_app_read()). */
+    /* A peer that closed after a clean EOF sets EPOLLHUP together with
+     * EPOLLRDHUP: the echo target does exactly that when it exits after the
+     * forwarded FIN. Aborting there reset the stream before the last echoed
+     * bytes and the FIN could reach the near side (host/test_client_loopback
+     * failed 20-33% of runs with ECONNRESET). A real error, or EPOLLHUP
+     * without a clean read EOF, still aborts. */
+    if ((events & EPOLLERR) ||
+        ((events & EPOLLHUP) && !f->app_eof))
         flow_abort(f);
 }
 
@@ -3699,18 +3666,18 @@ static void engine_accept_carrier(struct engine *e)
     }
 }
 
-/* Sample the carrier RTT and its mean deviation once per half second. The
- * NACK hold and the ACK's rtt field both need one carrier round trip: a NACK
- * sent before the first copy could arrive asks for a share still in flight,
- * and the replay it buys then competes with the DATA it was meant to repair.
- * The deviation widens that hold because a lossy path's mean says little
- * about its tail. The maximum keeps both safe on a skewed pool; zero leaves
- * the 30 ms floor in place. */
+/* Sample the carrier RTT once per half second. The NACK hold and the ACK's
+ * rtt field both need one carrier round trip: a NACK sent before the first
+ * copy could arrive asks for a share still in flight, and the replay it buys
+ * then competes with the DATA it was meant to repair. A replay may ride any
+ * carrier, so the maximum bounds it. The hold adds no deviation term: the
+ * old rtt + 4 * rttvar reached ~1 s and froze repair, while a p75 instead
+ * asked for in-flight shares and produced a 368k-share replay storm on the
+ * 256 MiB, 20% loss run. Zero leaves the 30 ms floor in place. */
 static void engine_sample_rtt(struct engine *e, u64 now)
 {
     u16 i;
     u32 max_us = 0;
-    u32 max_var_us = 0;
 
     if (e->rtt_sample_ns && now - e->rtt_sample_ns < 500ull * 1000 * 1000)
         return;
@@ -3728,13 +3695,9 @@ static void engine_sample_rtt(struct engine *e, u64 now)
             continue;
         if (ti.tcpi_rtt > max_us)
             max_us = ti.tcpi_rtt;
-        if (ti.tcpi_rttvar > max_var_us)
-            max_var_us = ti.tcpi_rttvar;
     }
     if (max_us)
         e->rtt_us = max_us < 2000000u ? max_us : 2000000u;
-    if (max_var_us)
-        e->rttvar_us = max_var_us < 2000000u ? max_var_us : 2000000u;
 }
 
 static void engine_tick(struct engine *e)
