@@ -61,9 +61,13 @@ bool debug_loss;
 module_param(debug_loss, bool, 0444);
 MODULE_PARM_DESC(debug_loss, "Allow carrier drop_ppm (frame loss injection) writes; 0 refuses them");
 
-/* Peripheral BBR hold: the 50 ms carrier poll restores the last good cwnd and
- * pacing rate while a carrier is idle, so BBR does not start the next burst
- * from an idle-collapsed window. Default on; write 0 to
+/* Peripheral BBR hold: after 200 ms of carrier idleness the 50 ms poll saves
+ * snd_cwnd and sk_pacing_rate, then restores both while the session stays
+ * idle and TCP has nothing in flight, so BBR does not start the next burst
+ * from an idle-collapsed window. The snapshot is bounded by snd_wnd/mss,
+ * snd_cwnd_clamp, sk_sndbuf/mss and sk_max_pacing_rate. A non-PAD write
+ * cancels the hold before it queues bytes, so BBR's first real ACK owns the
+ * next decision. Default on; write 0 to
  * /sys/module/tbtun/parameters/hold_enable to opt out. It writes tcp_sock
  * fields directly, which is not a stable kernel API. */
 bool tbt_hold_enable = true;
