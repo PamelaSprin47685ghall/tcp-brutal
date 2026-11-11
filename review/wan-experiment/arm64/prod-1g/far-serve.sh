@@ -23,6 +23,10 @@
 #   FAR_SIZE=<bytes>
 #   FAR_HTTPD_PID=<pid>
 #   FAR_RESULT PASS|FAIL
+#
+# A cold --start may spend minutes generating and hashing the 1 GiB file.
+# The caller must use a deadline that outlasts DD_TIMEOUT plus the hash; the
+# 20 s SSH control timeout used for ordinary commands is not enough.
 set -eu
 
 MODE=start
@@ -31,6 +35,7 @@ FILE=${FILE:-accept-1g.bin}
 SIZE_MIB=${SIZE_MIB:-1024}
 PORT=${PORT:-5210}
 BIND=${BIND:-127.0.0.1}
+DD_TIMEOUT=${DD_TIMEOUT:-300}
 BYTES=$((SIZE_MIB * 1024 * 1024))
 PATH_FILE=$FAR_DIR/$FILE
 SHA_FILE=$PATH_FILE.sha256
@@ -203,8 +208,8 @@ if [ "$size" -ne "$BYTES" ]; then
         exit 3
     fi
     rm -f "$PATH_FILE" "$SHA_FILE"
-    say "   generating $SIZE_MIB MiB from /dev/urandom (timeout 300 s)"
-    if ! timeout 300 dd if=/dev/urandom of="$PATH_FILE" bs=1M \
+    say "   generating $SIZE_MIB MiB from /dev/urandom (timeout $DD_TIMEOUT s)"
+    if ! timeout "$DD_TIMEOUT" dd if=/dev/urandom of="$PATH_FILE" bs=1M \
         count="$SIZE_MIB" status=none 2>"$FAR_DIR/dd.log"; then
         check dd 1 "$(tail -n 1 "$FAR_DIR/dd.log" 2>/dev/null)"
         say "FAR_RESULT FAIL"

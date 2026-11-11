@@ -75,6 +75,11 @@ MODULES_LOADED=${MODULES_LOADED:-0}
 CARRIERS=${CARRIERS:-256}
 JOIN_TIMEOUT=${JOIN_TIMEOUT:-180}
 SSH_TMO=${SSH_TMO:-20}
+# The far source may have to regenerate 1 GiB from /dev/urandom and hash it
+# on a cold cache. That is not a control-plane operation and must not inherit
+# SSH_TMO: a 20 s wrapper truncated far-serve.sh --start after sha256sum on
+# the 0.2.4 gate and the sender never started. This wrapper owns that step.
+FAR_SERVE_TMO=${FAR_SERVE_TMO:-420}
 TRANSFER_MAX_TIME=${TRANSFER_MAX_TIME:-7200}
 TRANSFER_TMO=${TRANSFER_TMO:-$((TRANSFER_MAX_TIME + 300))}
 KEEP_SRC=${KEEP_SRC:-0}
@@ -109,6 +114,7 @@ Environment:
   NEAR_SRCVERSION= FAR_SRCVERSION=   empty: read from the ko
   MODULES_LOADED=0                 1: do not insmod, only verify
   CARRIERS=256 JOIN_TIMEOUT=180 SSH_TMO=20
+  FAR_SERVE_TMO=420                far-serve.sh --start: cold 1 GiB dd + sha256
   TRANSFER_MAX_TIME=7200           curl --max-time on the near side (2 h)
   TRANSFER_TMO=7500                ssh wrapper timeout for the transfer step only
   NEAR_DEV=eth0                    dev= for near carriers; set empty to disable
@@ -147,6 +153,9 @@ mark() {
 
 ssh_near() { timeout "$SSH_TMO" ssh -o BatchMode=yes "$NEAR_HOST" "$@"; }
 ssh_far() { timeout "$SSH_TMO" ssh -o BatchMode=yes "$FAR_HOST" "$@"; }
+# far-serve.sh --start may create and hash the 1 GiB source; give it the
+# long deadline its dd timeout already assumes.
+ssh_far_serve() { timeout "$FAR_SERVE_TMO" ssh -o BatchMode=yes "$FAR_HOST" "$@"; }
 # The 1 GiB step must not inherit the 20 s control timeout: the near-side
 # curl owns the deadline (--max-time). This wrapper only catches a dead ssh.
 ssh_near_transfer() { timeout "$TRANSFER_TMO" ssh -o BatchMode=yes "$NEAR_HOST" "$@"; }
@@ -662,7 +671,7 @@ if ! scp_far "$(dirname -- "$0")/far-stream-watch.sh" "$FAR_HOST:/root/far-strea
     check far_upload 1 "scp far-stream-watch.sh failed"
     exit 4
 fi
-far_out=$(ssh_far "sh /root/far-serve.sh --start" 2>&1) || true
+far_out=$(ssh_far_serve "sh /root/far-serve.sh --start" 2>&1) || true
 printf '%s\n' "$far_out" | tee "$EV/far-serve.log" >&2
 FAR_HASH=$(printf '%s\n' "$far_out" | sed -n 's/^FAR_SHA256=//p' | tail -n 1)
 FAR_SIZE=$(printf '%s\n' "$far_out" | sed -n 's/^FAR_SIZE=//p' | tail -n 1)

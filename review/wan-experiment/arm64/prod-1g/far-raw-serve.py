@@ -16,6 +16,7 @@ No SO_SNDTIMEO is set anywhere on the body path.
 
 import argparse
 import os
+import re
 import socket
 import time
 
@@ -81,6 +82,36 @@ def main():
             req = raw.split(b"\r\n", 1)[0].decode("latin1", "replace") if raw else ""
             is_head = req.startswith("HEAD ")
             is_get = req.startswith("GET ")
+            is_post = req.startswith("POST ") or req.startswith("PUT ")
+            if is_post:
+                # Uplink acceptance: read and discard the body, then answer.
+                # The near side POSTs a large file through the tunnel; the
+                # body length is the uplink application payload.
+                head, _sep, body_prefix = raw.partition(b"\r\n\r\n")
+                hdr_text = head.decode("latin1", "replace").lower()
+                m = re.search(r"content-length:\s*(\d+)", hdr_text)
+                clen = int(m.group(1)) if m else 0
+                if "expect: 100-continue" in hdr_text:
+                    conn.sendall(b"HTTP/1.1 100 Continue\r\n\r\n")
+                # read_request() may already hold the first body bytes.
+                received = len(body_prefix)
+                remaining = clen - received
+                if remaining < 0:
+                    remaining = 0
+                while remaining > 0:
+                    chunk = conn.recv(min(CHUNK, remaining))
+                    if not chunk:
+                        break
+                    received += len(chunk)
+                    remaining -= len(chunk)
+                body = b"ok\n"
+                conn.sendall(b"HTTP/1.1 200 OK\r\n"
+                             b"Content-Length: 3\r\nConnection: close\r\n\r\n" +
+                             body)
+                conn.shutdown(socket.SHUT_WR)
+                log(args.log, "%s recv=%d elapsed=%.3f"
+                    % (req, received, time.time() - t0))
+                continue
             if not (is_head or is_get):
                 body = b"405 Method Not Allowed\n"
                 conn.sendall(b"HTTP/1.1 405 Method Not Allowed\r\n"

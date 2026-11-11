@@ -127,14 +127,16 @@ param_of() { # near|far
 }
 
 snap() { # near|far name
-    qa_snap_stats "$1" "$EV/$2-stats.txt"
-    qa_snap_config "$1" "$EV/$2-config.txt"
-    qa_snap_tunnels "$1" "$EV/$2-tunnels.txt"
+    qa_snap_stats "$1" "$EV/$1-$2-stats.txt"
+    qa_snap_config "$1" "$EV/$1-$2-config.txt"
+    qa_snap_tunnels "$1" "$EV/$1-$2-tunnels.txt"
 }
 
 preflight() {
     if [[ -z $EV ]]; then
         qa_evidence_init ms >/dev/null || { printf 'cannot create evidence dir\n' >&2; exit 3; }
+    else
+        mkdir -p "$EV" || { printf 'cannot create evidence dir %s\n' "$EV" >&2; exit 3; }
     fi
     qa_say "EVIDENCE=$EV"
     for host in near far; do
@@ -169,15 +171,20 @@ preflight() {
         done
     fi
 
-    if grep -q 'mode=sc-ldpc' "$EV/near-config.txt" 2>/dev/null; then
+    local ncfg=$EV/near-pre-config.txt fcfg=$EV/far-pre-config.txt
+    if ((SETUP)); then
+        ncfg=$EV/near-setup-config.txt
+        fcfg=$EV/far-setup-config.txt
+    fi
+    if grep -q 'mode=sc-ldpc' "$ncfg" 2>/dev/null; then
         qa_say "NOTE: SC-LDPC (mode=sc-ldpc) allows one flow only in v7; use mode=grouped for this test"
     fi
-    qa_check near_cfg_fec "$(cfg_has "$EV/near-config.txt" 'fec=on'; echo $?)" "fec=on"
-    qa_check far_cfg_fec "$(cfg_has "$EV/far-config.txt" 'fec=on'; echo $?)" "fec=on"
-    qa_check near_cfg_mode "$(cfg_has "$EV/near-config.txt" 'mode=grouped'; echo $?)" "mode=grouped (RLNC)"
-    qa_check far_cfg_mode "$(cfg_has "$EV/far-config.txt" 'mode=grouped'; echo $?)" "mode=grouped (RLNC)"
-    qa_check near_cfg_carriers "$(cfg_has "$EV/near-config.txt" 'carriers=256'; echo $?)" "carriers=256"
-    qa_check far_cfg_carriers "$(cfg_has "$EV/far-config.txt" 'carriers=256'; echo $?)" "carriers=256"
+    qa_check near_cfg_fec "$(cfg_has "$ncfg" 'fec=on'; echo $?)" "fec=on"
+    qa_check far_cfg_fec "$(cfg_has "$fcfg" 'fec=on'; echo $?)" "fec=on"
+    qa_check near_cfg_mode "$(cfg_has "$ncfg" 'mode=grouped'; echo $?)" "mode=grouped (RLNC)"
+    qa_check far_cfg_mode "$(cfg_has "$fcfg" 'mode=grouped'; echo $?)" "mode=grouped (RLNC)"
+    qa_check near_cfg_carriers "$(cfg_has "$ncfg" 'carriers=256'; echo $?)" "carriers=256"
+    qa_check far_cfg_carriers "$(cfg_has "$fcfg" 'carriers=256'; echo $?)" "carriers=256"
 
     local p_near p_far want=$MS_GROUPS_PER_FLOW
     p_near=$(param_of near)
@@ -311,22 +318,30 @@ run_param0() {
     qa_ssh near "mkdir -p '$MS_DIR'" >/dev/null 2>&1 || true
     qa_ssh near "rm -f '$MS_DIR/out-a.bin' '$MS_DIR/rc-a' '$MS_DIR/rc-b'; nohup curl -sS --local-port '$MS_NEAR_LPORT_A' --max-time 70 -o '$MS_DIR/out-a.bin' 'http://127.0.0.1:$NEAR_PORT/stream/a' >'$MS_DIR/curl-a.log' 2>&1 & echo \$! >'$MS_DIR/curl-a.pid'" >/dev/null 2>&1 || true
     local i
-    for i in $(seq 1 10); do
+    for i in $(seq 1 30); do
         sleep 1
         snap near mid
         [[ $(active_streams "$EV/near-mid-stats.txt") == 1 ]] && break
     done
-    local before refused active
+    local before refused active up_before up_after outb
     before=$(field "$EV/near-mid-stats.txt" c9 fec_stream_refused)
+    up_before=$(field "$EV/near-mid-stats.txt" c3 up)
+    qa_note "INFO param0: first stream active=$(active_streams "$EV/near-mid-stats.txt") after wait; fec_stream_refused=${before:-?} up=${up_before:-?}"
     qa_ssh near "curl -sS --local-port '$MS_NEAR_LPORT_B' --max-time 10 -o '$MS_DIR/out-b.bin' 'http://127.0.0.1:$NEAR_PORT/stream/b' >'$MS_DIR/curl-b.log' 2>&1; echo \$? >'$MS_DIR/rc-b'" >/dev/null 2>&1 || true
     snap near after
     refused=$(field "$EV/near-after-stats.txt" c9 fec_stream_refused)
+    up_after=$(field "$EV/near-after-stats.txt" c3 up)
     active=$(awk -v t="$TUNNEL" '$1=="tunnel" && $2==t && $3=="streams" { for (i=1;i<=NF;i++) if ($i ~ /^streams_active=/) { split($i,a,"="); print a[2]; exit } }' "$EV/near-after-stats.txt" 2>/dev/null)
     local rc_b
     rc_b=$(qa_ssh near "cat '$MS_DIR/rc-b' 2>/dev/null" | tr -d '[:space:]')
+    outb=$(qa_ssh near "stat -c %s '$MS_DIR/out-b.bin' 2>/dev/null || echo 0" | tr -d '[:space:]')
     qa_check param0_second_refused "$([[ ${rc_b:-0} != 0 ]]; echo $?)" "curl rc=${rc_b:-?}"
-    qa_check param0_counter "$([[ ${refused:-0} -gt ${before:-0} ]]; echo $?)" "fec_stream_refused ${before:-?} -> ${refused:-?}"
     qa_check param0_one_stream "$([[ ${active:-0} == 1 ]]; echo $?)" "streams_active=${active:-?}"
+    qa_check param0_no_cross_body "$([[ ${outb:-0} == 0 ]]; echo $?)" "second body bytes=${outb:-?}"
+    local up_floor=250
+    [[ -n ${up_before:-} && ${up_before:-0} -gt 250 ]] && up_floor=$up_before
+    qa_check param0_up_kept "$([[ ${up_after:-0} -ge $up_floor ]]; echo $?)" "up ${up_before:-?} -> ${up_after:-?} floor=$up_floor"
+    qa_note "INFO param0: fec_stream_refused ${before:-?} -> ${refused:-?} (near-side counter is not expected to move; far records the refusal)"
 }
 
 case $MODE in

@@ -302,7 +302,8 @@ cleanup_traffic() {
 }
 
 latency_phase() { # phase outfile
-    local phase=$1 out=$2 remote=/tmp/perf-direct-lat-$phase.csv
+    local phase=$1 out=$2
+    local remote=/tmp/perf-direct-lat-$phase.csv
     ssh_near_long 900 "rm -f '$remote'
         i=0
         while [ \$i -lt $LAT_ITERS ]; do

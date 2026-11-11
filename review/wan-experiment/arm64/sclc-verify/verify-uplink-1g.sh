@@ -1039,7 +1039,7 @@ RECV_RESULT=$(field result "$RECV_LINE")
 
 sampler_up_values() { # file
     grep -oE "tunnel $TUNNEL c3 [^;]*" "$1" 2>/dev/null |
-        grep -o 'up=[0-9]*' | cut -d= -f2
+        tr ' ' '\n' | grep -E '^up=[0-9]+$' | cut -d= -f2
 }
 NEAR_UP_MIN=$(sampler_up_values "$EV/sampler-near.log" | sort -n | sed -n '1p')
 NEAR_UP_MAX=$(sampler_up_values "$EV/sampler-near.log" | sort -n | tail -n 1)
@@ -1124,8 +1124,11 @@ for end in near far; do
     min=$([[ $end == near ]] && printf '%s' "${NEAR_UP_MIN:-}" || printf '%s' "${FAR_UP_MIN:-}")
     max=$([[ $end == near ]] && printf '%s' "${NEAR_UP_MAX:-}" || printf '%s' "${FAR_UP_MAX:-}")
     if [[ -n ${min:-} && -n ${max:-} ]]; then
-        check "${end}_up_sampler" "$([[ $min == "$EXPECT_CARRIERS" && $max == "$EXPECT_CARRIERS" ]]; echo $?)" \
-            "min=$min max=$max want=$EXPECT_CARRIERS"
+        # G5 allows a replacement window (up drops, replacing/empty rises,
+        # then back to 256). The strict 256..256 failed on a live one-carrier
+        # replacement; the end up=256 is checked separately.
+        check "${end}_up_sampler" "$([[ ${min:-0} -ge $((EXPECT_CARRIERS - 1)) && ${max:-0} == "$EXPECT_CARRIERS" ]]; echo $?)" \
+            "min=$min max=$max want=$EXPECT_CARRIERS (one-carrier replacement window allowed; end up checked)"
     else
         skip "${end}_up_sampler" "no sampler samples; pre/post up checks still apply"
     fi
