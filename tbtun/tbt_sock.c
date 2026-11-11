@@ -699,14 +699,16 @@ static void tbt_kill_work(struct work_struct *w)
 
 /* The parent stream carries the application's bytes: the near accepted
  * socket and the far target socket both use it. The kernel doubles
- * SO_*BUF, so 8 MiB here is a 16 MiB buffer per direction. The 400 ms BDP
- * lives on the carrier subflows, not on this local loopback parent socket.
- * FORCE ignores
- * rmem_max/wmem_max; when the caller lacks the capability the capped
- * option is the fallback, never a failed attach. */
+ * SO_*BUF, so the module parameter's quarter is half the effective local
+ * queue; the capture ring takes the other half (tbt_fec_data.c). The
+ * default 1 MiB keeps a PING or DNS frame behind at most ~1 MiB of a
+ * saturated upload instead of the old 32 MiB, while the 400 ms BDP still
+ * lives on the carrier subflows, not on this loopback socket.
+ * FORCE ignores rmem_max/wmem_max; when the caller lacks the capability
+ * the capped option is the fallback, never a failed attach. */
 void tbt_parent_setsockbuf(struct socket *s)
 {
-    int v = 8 * 1024 * 1024;
+    int v = (int)tbt_local_sockbuf_request(READ_ONCE(local_queue_bytes));
 
     if (!s)
         return;

@@ -737,7 +737,9 @@ static void case_short_block_parity(void)
     uint8_t wire[TBT_FEC_HDR_LEN], wire2[TBT_FEC_HDR_LEN];
     int i;
 
-    /* A short SC-LDPC block sends one covering row per real share. */
+    /* A short downlink block sends one covering row per real share; the
+     * uplink 32-share group keeps a ten-row floor so a loss is recoverable
+     * without a NACK (see tbt_fec_tx_parity_count). */
     ok_u16(tbt_fec_tx_parity_count(1, 128, 128, true), 1,
            "short block: one cut row");
     ok_u16(tbt_fec_tx_parity_count(2, 128, 128, true), 2,
@@ -748,8 +750,10 @@ static void case_short_block_parity(void)
            "127-share block: one row per real share");
     ok_u16(tbt_fec_tx_parity_count(128, 128, 128, true), 128,
            "full block: every parity row");
-    ok_u16(tbt_fec_tx_parity_count(7, 8, 24, true), 7,
-           "uplink short block: one row per real share");
+    ok_u16(tbt_fec_tx_parity_count(1, 8, 24, true), 10,
+           "uplink one-share block: ten-row floor");
+    ok_u16(tbt_fec_tx_parity_count(7, 8, 24, true), 10,
+           "uplink seven-share block: ten-row floor");
     ok_u16(tbt_fec_tx_parity_count(8, 8, 24, true), 24,
            "uplink full block: every parity row");
     ok_u16(tbt_fec_tx_parity_count(1, 128, 4, false), 4,
@@ -782,6 +786,10 @@ static void case_short_block_parity(void)
            "full block: every row may be named");
     ok_u16(tbt_fec_nack_parity_limit(true, 1, 128, 4, false), 4,
            "RLNC short block: every row may be named");
+    ok_u16(tbt_fec_nack_parity_limit(true, 1, 8, 24, true), 10,
+           "uplink one-share block: the floor rows may be named");
+    ok_u16(tbt_fec_nack_parity_limit(true, 7, 8, 24, true), 10,
+           "uplink seven-share block: the floor rows may be named");
 
     /* The one record a short block sends is a normal PARITY row: same
      * 48-byte layout, win_len states the cut, epoch states the last share's
@@ -841,12 +849,10 @@ static void case_short_block_parity(void)
     }
 }
 
-/* A short GF(16) block sends one covering row per real share, and those rows
- * can recover a lost real share. n = 8, m = 24, six shares written: the old
- * row-0-only rule left share 5 with no covering equation. The coupled graph
- * is not a per-share MDS code, so this pins the case the row set does solve
- * rather than claiming every short-block loss is parity-recoverable; the
- * NACK replay covers the rest. */
+/* A short GF(16) block sends the ten-row floor, and those rows recover a
+ * lost real share. n = 8, m = 24, six shares written: the old row-0-only
+ * rule left share 5 with no covering equation, and the one-row-per-share
+ * rule still missed losses the coupled graph could not peel. */
 static void case_short_block_decode(void)
 {
     const u16 nreal = 6, lost = 5;
@@ -880,7 +886,7 @@ static void case_short_block_decode(void)
            "short decode: encode");
 
     rows = tbt_fec_tx_parity_count(nreal, 8, 24, true);
-    ok_u16(rows, nreal, "short decode: one covering row per real share");
+    ok_u16(rows, 10, "short decode: the ten-row floor");
     for (i = 0; i < nreal; i++)
         if (i != lost)
         {

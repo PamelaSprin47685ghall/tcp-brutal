@@ -284,6 +284,8 @@ extern unsigned int debug;
 extern unsigned int tbt_fec_groups_per_flow;
 extern unsigned int max_tunnels;
 extern unsigned int max_carriers;
+/* Module param local_queue_bytes: app-socket + capture-ring queue bound. */
+extern unsigned int local_queue_bytes;
 /* Close hard cap for a half-open stream, in milliseconds. */
 extern unsigned int close_hard_cap_ms;
 /* Peripheral BBR hold, opt-in (module param hold_enable). */

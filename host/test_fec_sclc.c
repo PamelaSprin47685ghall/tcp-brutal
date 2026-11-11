@@ -421,6 +421,94 @@ static void test_short_tail(void)
     ops->free(c);
 }
 
+/* The short-block guarantee. On n <= m every real DATA share of a block
+ * with real * 8 <= n lives in coupling block 0, and the codec gives wire
+ * parity bit b the check that carries payload bit b. With p = win_len rows
+ * (no extra wire bytes), a first-attempt decode must recover one or two
+ * lost real shares; the full-block delta0 wake margin would otherwise wait
+ * for a 17th row that a short block never sends. */
+static void test_short_block_recovery(void)
+{
+    struct tbt_fec_ops const *ops = &tbt_fec_ops_sclc;
+    void *c = ops->new(N, M, 500, 256, SHARE, 0, 0x5b10);
+    u8 *data = alloc_shares(N), *parity = alloc_shares(M);
+    u8 **dp = share_ptrs(data, N), **pp = share_ptrs(parity, M);
+    u8 *orig = alloc_shares(N);
+    u8 *data_present = calloc(N, 1), *parity_present = calloc(M, 1);
+    u16 win;
+
+    if (!c || !data_present || !parity_present)
+    {
+        check(0, "short block: setup");
+        return;
+    }
+    for (win = 1; win <= N / 8; win++)
+    {
+        u16 p = tbt_fec_tx_parity_count(win, N, M, true);
+        size_t k;
+
+        check(p == win, "short block: p equals the real share count");
+        for (k = 0; k < 5; k++)
+        {
+            u16 loss[2];
+            u16 nloss;
+            int rc, j;
+
+            if (k < 3)
+            {
+                loss[0] = (u16)(k == 0 ? 0 : (k == 1 ? win - 1 : win / 2));
+                nloss = 1;
+            }
+            else
+            {
+                loss[0] = 0;
+                loss[1] = (u16)(k == 3 ? 1 : win - 1);
+                nloss = 2;
+            }
+            if (nloss == 2 && win < 2)
+                continue;
+            for (j = 0; j < N; j++)
+            {
+                if (j < win)
+                    fill_random(data + (size_t)j * SHARE, SHARE);
+                else
+                    memset(data + (size_t)j * SHARE, 0, SHARE);
+            }
+            memcpy(orig, data, (size_t)win * SHARE);
+            rc = ops->encode(c, dp, N, pp);
+            check(rc == 0, "short block: encode");
+            memset(data_present, 1, N);
+            for (j = 0; j < nloss; j++)
+            {
+                data_present[loss[j]] = 0;
+                memset(data + (size_t)loss[j] * SHARE, 0x5A, SHARE);
+            }
+            memset(parity_present, 0, M);
+            memset(parity_present, 1, p);
+            check(tbt_fec_sclc_decode_wake(win, N, M, 1, win - nloss, p),
+                  "short block: the wire rows cross the wake line");
+            rc = ops->decode(c, dp, pp, data_present, parity_present, N);
+            check(rc == nloss, "short block: every lost share recovered");
+            for (j = 0; j < win; j++)
+                if (!ops->is_known(c, (u32)j) ||
+                    memcmp(data + (size_t)j * SHARE,
+                           orig + (size_t)j * SHARE, SHARE))
+                {
+                    check(0, "short block: recovery is byte-exact");
+                    break;
+                }
+        }
+    }
+    free(data_present);
+    free(parity_present);
+    free(dp);
+    free(pp);
+    free_shares(data, N);
+    free_shares(parity, M);
+    free(orig);
+    ops->free(c);
+}
+
 static void test_stopping_set(void)
 {
     struct tbt_fec_ops const *ops = &tbt_fec_ops_sclc;
@@ -549,6 +637,7 @@ int main(void)
     test_params();
     test_roundtrip();
     test_mapping();
+    test_short_block_recovery();
     test_short_tail();
     test_stopping_set();
     test_advance();

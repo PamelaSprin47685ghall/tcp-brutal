@@ -515,6 +515,18 @@ static void set_carrier_sockopts(int fd)
 #endif
 }
 
+/* The application socket is the local queue in front of the FEC flow.
+ * Set both directions explicitly so TCP receive autotuning cannot grow it
+ * to the system maximum behind a saturated upload; the request keeps the
+ * module's quarter-of-budget rule and the kernel doubles it. */
+static void set_app_sockbuf(int fd, u32 local_queue)
+{
+    int buf = (int)tbt_local_sockbuf_request(local_queue);
+
+    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buf, sizeof(buf));
+    setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &buf, sizeof(buf));
+}
+
 static int ep_add(struct engine *e, int fd, uint32_t events,
                   struct ep_src *src)
 {
@@ -2010,14 +2022,12 @@ static void rx_group_try(struct flow *f, struct rx_block *b, u16 group)
     }
     if (!g->real_set)
         return;
-    {
-        u16 extra = f->rx_groups > 1
-                        ? TBT_FEC_SCLC_WAKE_EXTRA_UP
-                        : tbt_fec_sclc_wake_extra_down(n);
-
-        if ((u32)g->ndata + g->nparity < (u32)real + extra)
-            return;
-    }
+    /* The same wake line the module uses. A short downlink block is
+     * covered one for one by its p = real rows, so the full-block delta0
+     * margin must not hold its first attempt back. */
+    if (!tbt_fec_sclc_decode_wake(real, n, m, f->rx_groups, g->ndata,
+                                  g->nparity))
+        return;
     {
         struct tbt_fec_grouped *codec = flow_rx_codec(f, n, m);
 
@@ -2865,6 +2875,7 @@ static int flow_target_connect(struct flow *f, u16 port)
     if (fd < 0)
         return -errno;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    set_app_sockbuf(fd, e->cfg.local_queue_bytes);
     f->app_fd = fd;
     f->ep.kind = EP_FLOW_APP;
     f->ep.p = f;
@@ -3551,6 +3562,7 @@ static void engine_accept_app(struct engine *e)
             return;
         }
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+        set_app_sockbuf(fd, e->cfg.local_queue_bytes);
         f = flow_alloc(e, e->next_sid++, fd, true, &why);
         if (!f)
         {

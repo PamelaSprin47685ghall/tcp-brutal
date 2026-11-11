@@ -50,6 +50,40 @@ and moves independently of the module version.
 
 ### Changed
 
+- SC-LDPC short blocks recover a loss on the first attempt. The downlink
+  codec now gives wire parity bit `b` the check that carries payload bit `b`
+  of the same coupling block (`tbt_fec_sclc.c` relabels the parity variable
+  by `slot^-1[perm[b]]`); rows `0..win_len-1` therefore cover the first
+  `win_len` DATA shares one for one with the existing `min(m, win_len)`
+  parity count, i.e. no extra wire bytes. The graph is the same edge set
+  under a vertex renaming: over 1000 iid decode trials on each of 128/128,
+  151/105 and 178/78 the failure counts were identical to the old mapping
+  (675/676, 625/625, 803/803) and a 40-nonce probe recovered 21,200/21,200
+  single- and double-loss cases on win_len 1..16. `tbt_fec_sclc_decode_wake`
+  drops the delta0 margin when `real * 8 <= n` and `n <= m`, so those blocks
+  attempt on the rows the sender actually writes (16/128 was blocked by the
+  old `real + 16` line). The 32-share uplink groups keep the wire rule but
+  floor the parity rows at 10: across 200 nonces the one-row-per-share rule
+  recovered no case at win_len 1 or 2 and still failed 127/1400 at p = 5,
+  26/1400 at p = 6 and 16/1400 at p = 7, while p = 10 recovered 9400/9400.
+  The floor costs at most nine 1 KiB shares on
+  a short uplink seal. The NACK parity limit now equals the sender's row
+  count for every block, so a full 32-share block can also name rows
+  8..23. The downlink relabel is codec-visible but not a wire
+  format change (`TBT_FEC_CONV` stays `0x100b`); both ends must run the same
+  build, as every SC-LDPC graph change already requires.
+- Local queuing in front of the wire is bounded by the `local_queue_bytes`
+  module parameter (default 1 MiB; new flows read it). The parent socket
+  asks for a quarter per direction (the kernel doubles it) and the
+  unencoded capture ring takes half: 256 KiB request + 512 KiB ring at the
+  default, 8 MiB + 16 MiB at the maximum 32 MiB. This bounds a PING or DNS
+  frame behind a saturated upload to about 1 MiB of local data instead of
+  the old 32 MiB. On a real loopback pair the default queued 982,722 B
+  (7.32 ms at 128 MB/s) against 10,461,797 B (77.95 ms) at the maximum, and
+  `host/test_local_queue.c` pins the rule. The host client takes the same
+  `local_queue_bytes=` userspace key and sets both app-socket buffers.
+  Carrier buffers and the 64-block FEC flight window are untouched.
+
 - `TBT_VERSION` is `0.9.0` and `TBT_CONV` moves to `0x000c`. `TBT_FEC_CONV`
   stays `0x100b` because the 48-byte FEC header and every offset are
   unchanged, exactly as the `0x000b` cut left it; the HELLO's own version

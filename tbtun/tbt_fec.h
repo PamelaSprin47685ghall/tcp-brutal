@@ -1810,27 +1810,44 @@ static inline bool tbt_fec_nack_unstarted_group(u64 total_pkts, u16 groups,
                                              block, group, total_known);
 }
 
+#define TBT_FEC_SCLC_UP_PARITY_FLOOR 10u
+
 /* How many parity rows the sender emits for one block.
  *
  * A short block must state its cut (win_len and epoch) and cover the shares
- * it actually wrote. Both SC-LDPC codecs route DATA share s to parity row
- * s mod m, so rows 0..win_len-1 each cover one of the first win_len shares.
- * The old row-0-only rule left shares 1..win_len-1 with no covering row at
- * all, and a lost one could only return through a NACK replay. A full set of
- * m rows would put a megabyte of parity behind a one-share interactive
- * write, so a short SC-LDPC block sends min(m, win_len); a block that
- * reached win_len == n is full and keeps all m rows. The coupled graph can
- * still need more equations than one row per share; the NACK replay remains
- * the fallback for the rest. Every other codec keeps all m rows.
+ * it actually wrote. The downlink codec labels each wire parity bit with the
+ * check that carries the same payload bit of the same coupling block, and
+ * the first n / 8 DATA shares live in coupling block 0, so parity rows
+ * 0..win_len-1 cover the first win_len shares one for one. The old
+ * row-0-only rule left shares 1..win_len-1 with no covering row at all, and
+ * a lost one could only return through a NACK replay. A full set of m rows
+ * would put a megabyte of parity behind a one-share interactive write, so a
+ * short downlink block sends min(m, win_len); a block that reached
+ * win_len == n is full and keeps all m rows.
+ *
+ * The uplink GF(16) codec builds 32-share groups (n + m == 32). Its parity
+ * rotation gives a lost share one covering symbol per DATA share, but the
+ * coupled graph needs ten of the m rows before a loss is recoverable
+ * without a NACK. Across 200 graph nonces and every single, double and
+ * triple loss set on win_len 1..8, the wire rule recovered no case at
+ * win_len 1 or 2 and still failed 127/1400 at p = 5, 26/1400 at p = 6 and
+ * 16/1400 at p = 7; p = 10 recovered 9400/9400. The floor costs at most
+ * nine 1 KiB shares on a sub-10-share seal. Every other codec keeps all m
+ * rows.
  */
 static inline u16 tbt_fec_tx_parity_count(u16 win_len, u16 n, u16 m,
                                           bool block_code)
 {
+    u16 rows;
+
     if (!m || !win_len)
         return 0;
-    if (block_code)
-        return win_len >= n ? m : (win_len < m ? win_len : m);
-    return m;
+    if (!block_code)
+        return m;
+    rows = win_len >= n ? m : (win_len < m ? win_len : m);
+    if ((u16)(n + m) == 32 && rows < TBT_FEC_SCLC_UP_PARITY_FLOOR)
+        rows = TBT_FEC_SCLC_UP_PARITY_FLOOR;
+    return rows;
 }
 
 /* How many DATA shares a NACK may name for one block.
@@ -1855,21 +1872,21 @@ static inline u16 tbt_fec_nack_data_limit(bool win_len_set, u16 real,
 /* How many parity rows a NACK may name for one block.
  *
  * Before win_len arrives only row 0 is named: it states the cut, and until
- * then the block may hold any number of rows. After the cut is known, a
- * short SC-LDPC block has min(m, real) rows, while a full block has all m.
- * Every other codec keeps m, because there the rows are the repair.
+ * then the block may hold any number of rows. After the cut is known the
+ * sender's rule (tbt_fec_tx_parity_count) names the row set exactly, so a
+ * short uplink block's floor is requested rather than under-asked. Every
+ * other codec keeps m, because there the rows are the repair.
  */
 static inline u16 tbt_fec_nack_parity_limit(bool win_len_set, u16 real,
                                             u16 n, u16 m, bool block_code)
 {
-    (void)n;
     if (!m)
         return 0;
     if (!block_code)
         return m;
     if (!win_len_set)
         return 1;
-    return real < m ? real : m;
+    return tbt_fec_tx_parity_count(real, n, m, true);
 }
 
 /* Delivery length of share p in a block whose real share count is `real`.
@@ -2282,6 +2299,15 @@ static inline bool tbt_fec_sclc_decode_wake(u16 real, u16 n, u16 m,
         return true;
     if (ndata + nparity < real)
         return false;
+    /* A short downlink block whose real shares all sit in coupling block 0
+     * (real * 8 <= n, n <= m for the slot bijection) is covered one for one
+     * by the sender's p = min(m, real) rows: wire parity bit b owns the
+     * check that carries payload bit b, and both live in block 0. The
+     * delta0 margin the full-block wake adds would block an attempt for
+     * every real = 1..16 on 128/128, because the wire never sends 17 rows
+     * for those blocks. */
+    if (groups == 1 && n <= m && (u32)real * 8u <= n)
+        return true;
     extra = groups > 1 ? TBT_FEC_SCLC_WAKE_EXTRA_UP
                        : tbt_fec_sclc_wake_extra_down(n);
     return (u32)ndata + nparity >= (u32)real + extra;

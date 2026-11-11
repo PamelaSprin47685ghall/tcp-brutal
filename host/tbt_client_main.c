@@ -26,7 +26,7 @@ static void usage(const char *argv0)
             "usage: %s [--config FILE] [role=near|far] key=value ...\n"
             "       keys: listen= target= peer= n= m= mode= carriers= crypto=\n"
             "             w= L= profile= adaptive= keepalive_ms=\n"
-            "       userspace: drop_ppm= run_ms= verbose=1\n"
+            "       userspace: drop_ppm= run_ms= local_queue_bytes= verbose=1\n"
             "       --config FILE reads the first tunnel line of FILE\n",
             argv0);
 }
@@ -86,6 +86,8 @@ static int build_line(int argc, char **argv, char *line, size_t cap,
         {
             if (take_u32_key(tok, "drop_ppm", &ec->drop_ppm) ||
                 take_u32_key(tok, "run_ms", &ec->run_ms) ||
+                take_u32_key(tok, "local_queue_bytes",
+                             &ec->local_queue_bytes) ||
                 take_u32_key(tok, "verbose", (u32 *)&ec->verbose))
                 continue;
             if (!first && out + 1 < sizeof(clean))
@@ -119,6 +121,7 @@ int main(int argc, char **argv)
     memset(&ec, 0, sizeof(ec));
     ec.cfg.id = 1;
     ec.cfg.role = TBT_ROLE_NEAR;
+    ec.local_queue_bytes = TBT_LOCAL_QUEUE_DEFAULT;
 
     if (argc < 2)
     {

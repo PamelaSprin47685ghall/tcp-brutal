@@ -56,6 +56,18 @@ unsigned int max_carriers = TBT_MAX_CARRIERS_LIMIT;
 module_param(max_carriers, uint, 0444);
 MODULE_PARM_DESC(max_carriers, "Carrier sockets per session, 1..256 (default 256)");
 
+/* Bound on local queuing in front of the wire: the near parent socket's
+ * SO_SNDBUF/SO_RCVBUF request (the kernel doubles it) plus the unencoded
+ * FEC capture ring. A PING or DNS frame behind a saturated upload waits for
+ * at most this much local data; the carrier BDP and the 64-block FEC flight
+ * window are separate and unchanged. 32 MiB restores the old 8 MiB request
+ * + 16 MiB ring sizing used by the 400 ms / 128 MB/s lab. New flows read
+ * this at attach, so a raised value applies to the next stream. */
+unsigned int local_queue_bytes = TBT_LOCAL_QUEUE_DEFAULT;
+module_param(local_queue_bytes, uint, 0644);
+MODULE_PARM_DESC(local_queue_bytes,
+                 "App-socket plus capture-ring local queue bound in bytes (default 1048576; 33554432 = old 8+16 MiB high-BDP sizing)");
+
 /* Final bound for a stream whose close never completes: the peer FIN never
  * arrives, or the target neither finishes nor sends. It must be far longer
  * than any legitimate in-flight transfer, because a legal half-close (the
