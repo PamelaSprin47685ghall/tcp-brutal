@@ -8045,7 +8045,16 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     tx->credit_cap = tbt_fec_credit_packets(groups, n, sess->fec_replay_k,
                                             sess->fec_slots,
                                             tbt_fec_credit_max_packets(sess));
-    tx->credit = tx->credit_cap;
+    {
+        /* Before the first ACK the peer has not named its window. Opening
+         * the full cap here let the sender blast K-2 blocks at a receiver
+         * whose arena may be smaller; the receiver dropped the excess and
+         * its ACK froze. Start with one super-block and let the first ACK
+         * open the window it can actually buffer. */
+        u32 one = (u32)groups * n;
+
+        tx->credit = one && one < tx->credit_cap ? one : tx->credit_cap;
+    }
     {
         u64 want = (u64)tx->credit * TBT_FEC_S;
 
