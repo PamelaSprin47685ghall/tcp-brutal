@@ -712,14 +712,93 @@ static void tbt_fec_adapt_sclc_sort(u16 *v, u32 n)
     }
 }
 
-/* The 16 cold samples seed q with the empirical (1-eps) quantile and sigma
- * with the median absolute deviation. This is the only bootstrap; every
- * later q change is the Robbins-Monro update. */
+/* Analytic margin at the current n. The downlink adds the finite-length
+ * term; the uplink uses the core bound alone. */
+static u32 tbt_fec_adapt_sclc_delta_base(const struct tbt_fec_adapt_sclc_ctl *c,
+                                         u16 n, u32 eps_q16)
+{
+    u32 base = c->variant == TBT_FEC_SCLC_UP
+                   ? tbt_fec_adapt_sclc_delta_up(n)
+                   : tbt_fec_adapt_sclc_delta_down(n);
+
+    if (c->variant == TBT_FEC_SCLC_DOWN)
+        base += tbt_fec_adapt_sclc_len(eps_q16);
+    return base;
+}
+
+/* Place the integrated delta `d` inside the current n's clamp. delta0 is the
+ * analytic baseline for this n; the stored offset is only the difference
+ * between the total and that baseline. A change of n therefore moves the
+ * baseline and the clamp without feeding the baseline slope back into m
+ * (the uplink core bound rises steeply as n falls). */
+static void tbt_fec_adapt_sclc_delta_apply(
+    struct tbt_fec_adapt_sclc_ctl *c, long long d)
+{
+    u32 base = tbt_fec_adapt_sclc_delta_base(c, c->n_cur, c->eps_q16);
+    u32 lo = c->variant == TBT_FEC_SCLC_UP
+                 ? TBT_FEC_ADAPT_SCLC_ONE
+                 : base / 2u;
+    u32 hi = base + (8u << 16);
+
+    if (d < (long long)lo)
+        d = lo;
+    if (d > (long long)hi)
+        d = hi;
+    c->delta0_q16 = base;
+    c->delta_off_q16 = (int)(d - (long long)base);
+    c->delta_q16 = (u32)d;
+}
+
+/* 128-bit first-failure history, newest bit in bit 0 of [0]. */
+static void tbt_fec_adapt_sclc_hist_push(u32 h[4], bool fail, u16 *count)
+{
+    int i;
+
+    for (i = 3; i > 0; i--)
+        h[i] = (h[i] << 1) | (h[i - 1] >> 31);
+    h[0] = (h[0] << 1) | (fail ? 1u : 0u);
+    if (*count < TBT_FEC_ADAPT_SCLC_BACKUP_MAX)
+        (*count)++;
+}
+
+static u32 tbt_fec_adapt_sclc_hist_count(const u32 h[4], u32 win)
+{
+    u32 full = win / 32u;
+    u32 rem = win % 32u;
+    u32 n = 0;
+    u32 i;
+
+    for (i = 0; i < full; i++)
+        n += tbt_fec_adapt_sclc_popcount(h[i]);
+    if (rem)
+        n += tbt_fec_adapt_sclc_popcount(h[full] & ((1u << rem) - 1u));
+    return n;
+}
+
+/* max(32, ceil(1/(2*eps))), capped by the 128-bit history. */
+static u32 tbt_fec_adapt_sclc_backup_win(u32 eps_q16)
+{
+    u32 win = (32768u + eps_q16 - 1u) / eps_q16;
+
+    if (win < TBT_FEC_ADAPT_SCLC_BACKUP_WIN)
+        win = TBT_FEC_ADAPT_SCLC_BACKUP_WIN;
+    if (win > TBT_FEC_ADAPT_SCLC_BACKUP_MAX)
+        win = TBT_FEC_ADAPT_SCLC_BACKUP_MAX;
+    return win;
+}
+
+/* The 16 cold samples seed q with the empirical (1-eps) quantile when that
+ * quantile is resolvable, and with m_init - delta0 otherwise. Sixteen
+ * samples cannot resolve a quantile below 1/16, and using the sample maximum
+ * there would pull q down and m to its floor. Sigma comes from the median
+ * absolute deviation. This is the only bootstrap; every later q change is
+ * the Robbins-Monro update. */
 static void tbt_fec_adapt_sclc_cold_seed(struct tbt_fec_adapt_sclc_ctl *c)
 {
     u16 v[TBT_FEC_ADAPT_SCLC_COLD_BLOCKS];
     u32 mad_sum = 0;
-    u32 mad, sigma, eps, rank;
+    u32 mad, sigma, eps, rank, q_emp, q_init, mean = 0;
+    bool enough;
     u16 med;
     u32 i;
 
@@ -742,13 +821,29 @@ static void tbt_fec_adapt_sclc_cold_seed(struct tbt_fec_adapt_sclc_ctl *c)
         rank = 1;
     if (rank > TBT_FEC_ADAPT_SCLC_COLD_BLOCKS)
         rank = TBT_FEC_ADAPT_SCLC_COLD_BLOCKS;
-    c->q_q16 = (u32)v[rank - 1] << 16;
+    q_emp = (u32)v[rank - 1] << 16;
+    if (c->m_cur > (c->delta0_q16 >> 16))
+        q_init = (u32)(c->m_cur - (c->delta0_q16 >> 16)) << 16;
+    else
+        q_init = (u32)c->extra << 16;
+    enough = (u64)TBT_FEC_ADAPT_SCLC_COLD_BLOCKS * eps >=
+             TBT_FEC_ADAPT_SCLC_ONE;
+    c->q_q16 = (enough && q_emp > q_init) ? q_emp : q_init;
+    if (c->q_q16 > ((u32)c->shares << 16))
+        c->q_q16 = (u32)c->shares << 16;
     c->q_act_q16 = c->q_q16;
     c->sigma_q16 = sigma;
     c->eps_q16 = eps;
+    for (i = 0; i < TBT_FEC_ADAPT_SCLC_COLD_BLOCKS; i++)
+        mean += v[i];
+    mean = (mean + TBT_FEC_ADAPT_SCLC_COLD_BLOCKS / 2) /
+           TBT_FEC_ADAPT_SCLC_COLD_BLOCKS;
+    c->ewma_fast_q16 = mean << 16;
+    c->ewma_slow_q16 = mean << 16;
+    c->blocks_tick = 0;
     c->cold_done = 1;
     c->fail_run = 0;
-    c->fail_hist = 0;
+    memset(c->fail_hist, 0, sizeof(c->fail_hist));
     c->fail_hist_n = 0;
 }
 
@@ -798,32 +893,17 @@ int tbt_fec_adapt_sclc_init(struct tbt_fec_adapt_sclc_ctl *c, u16 shares,
     c->w_ppm = 1000000u;
     c->sigma_q16 = 2u * TBT_FEC_ADAPT_SCLC_ONE;
     c->eps_q16 = tbt_fec_adapt_sclc_eps(c->sigma_q16, shares, c->w_ppm);
-    if (variant == TBT_FEC_SCLC_DOWN)
-    {
-        delta0 = tbt_fec_adapt_sclc_delta_down(n_init);
-        delta0 += tbt_fec_adapt_sclc_len(c->eps_q16);
-    }
-    else
-    {
-        delta0 = tbt_fec_adapt_sclc_delta_up(n_init);
-    }
-    c->delta0_q16 = delta0;
-    c->delta_q16 = delta0;
-    if (delta0 < TBT_FEC_ADAPT_SCLC_ONE)
-    {
-        /* The uplink core bound can be zero; the rank bound is one share.
-         * Keep delta0 as the analytic reference so the upper clamp stays
-         * delta0 + 8. */
-        c->delta_q16 = TBT_FEC_ADAPT_SCLC_ONE;
-    }
-    if (m_init > (delta0 >> 16))
-        c->q_q16 = (u32)(m_init - (delta0 >> 16)) << 16;
+    delta0 = tbt_fec_adapt_sclc_delta_base(c, n_init, c->eps_q16);
+    tbt_fec_adapt_sclc_delta_apply(c, delta0);
+    if (m_init > (c->delta_q16 >> 16))
+        c->q_q16 = (u32)(m_init - (c->delta_q16 >> 16)) << 16;
     else
         c->q_q16 = (u32)extra << 16;
     if (c->q_q16 > ((u32)shares << 16))
         c->q_q16 = (u32)shares << 16;
     c->q_act_q16 = c->q_q16;
     c->ewma_fast_q16 = (u32)extra << 16;
+    c->ewma_slow_q16 = (u32)extra << 16;
     return 0;
 }
 
@@ -835,6 +915,13 @@ void tbt_fec_adapt_sclc_block_sample(struct tbt_fec_adapt_sclc_ctl *c,
 
     if (!c || !c->ready || !real)
         return;
+    if (c->frozen)
+    {
+        /* The tick contract freezes q, delta, the failure window and the
+         * backup. Only the abandoned-share denominator moves. */
+        c->delivered += real;
+        return;
+    }
     if ((u32)real * 2 < c->n_cur)
     {
         c->delivered += real;
@@ -856,6 +943,8 @@ void tbt_fec_adapt_sclc_block_sample(struct tbt_fec_adapt_sclc_ctl *c,
         return;
     }
 
+    if (c->blocks_tick < 0xffffu)
+        c->blocks_tick++;
     e = (u32)E << 16;
     gamma = tbt_fec_adapt_sclc_gamma_q(c->d);
     {
@@ -863,16 +952,24 @@ void tbt_fec_adapt_sclc_block_sample(struct tbt_fec_adapt_sclc_ctl *c,
         long long step = ((long long)gamma *
                           ((long long)ind - (long long)c->eps_q16)) >>
                          16;
-        long long q = (long long)c->q_q16 + step;
+        long long q;
 
-        if (q < 0)
-            q = 0;
-        if (q > ((long long)c->shares << 16))
-            q = (long long)c->shares << 16;
-        c->q_q16 = (u32)q;
+        /* Do not wind q up while the actuator is pinned at m_max. */
+        if (!(c->sat_max && ind))
+        {
+            q = (long long)c->q_q16 + step;
+            if (q < 0)
+                q = 0;
+            if (q > ((long long)c->shares << 16))
+                q = (long long)c->shares << 16;
+            c->q_q16 = (u32)q;
+        }
     }
     {
-        u32 diff = e > c->q_q16 ? e - c->q_q16 : c->q_q16 - e;
+        /* Scale around the slow mean, not around q: a deliberately
+         * conservative q seed must not inflate sigma and eps. */
+        u32 diff = e > c->ewma_slow_q16 ? e - c->ewma_slow_q16
+                                        : c->ewma_slow_q16 - e;
         int ds = (int)diff - (int)c->sigma_q16;
 
         c->sigma_q16 = (u32)((int)c->sigma_q16 + ds / 16);
@@ -881,8 +978,10 @@ void tbt_fec_adapt_sclc_block_sample(struct tbt_fec_adapt_sclc_ctl *c,
     }
     {
         int df = (int)e - (int)c->ewma_fast_q16;
+        int ds = (int)e - (int)c->ewma_slow_q16;
 
         c->ewma_fast_q16 = (u32)((int)c->ewma_fast_q16 + df / 4);
+        c->ewma_slow_q16 = (u32)((int)c->ewma_slow_q16 + ds / 64);
     }
 
     if (first_ok)
@@ -890,47 +989,45 @@ void tbt_fec_adapt_sclc_block_sample(struct tbt_fec_adapt_sclc_ctl *c,
         int err = (int)(c->extra + 1u) - (int)S;
         bool grow = err > 0;
 
+        if (err > 4)
+            err = 4;
+        if (err < -4)
+            err = -4;
         if (!(grow && c->sat_max) && !(!grow && c->sat_min))
         {
-            long long d = (long long)c->delta_q16 + (long long)err * 1024;
-            u32 lo = c->variant == TBT_FEC_SCLC_UP
-                         ? TBT_FEC_ADAPT_SCLC_ONE
-                         : c->delta0_q16 / 2;
-            u32 hi = c->delta0_q16 + (8u << 16);
-
-            if (d < (long long)lo)
-                d = lo;
-            if (d > (long long)hi)
-                d = hi;
-            c->delta_q16 = (u32)d;
+            tbt_fec_adapt_sclc_delta_apply(
+                c, (long long)c->delta_q16 + (long long)err * 1024);
         }
     }
 
-    c->fail_hist = (c->fail_hist << 1) | (first_ok ? 0u : 1u);
-    if (c->fail_hist_n < TBT_FEC_ADAPT_SCLC_BACKUP_WIN)
-        c->fail_hist_n++;
+    tbt_fec_adapt_sclc_hist_push(c->fail_hist, !first_ok, &c->fail_hist_n);
     if (first_ok)
         c->fail_run = 0;
     else if (c->fail_run < 0xffffu)
         c->fail_run++;
 
-    if (c->fail_run >= TBT_FEC_ADAPT_SCLC_BACKUP_RUN ||
-        (c->fail_hist_n >= TBT_FEC_ADAPT_SCLC_BACKUP_WIN &&
-         (tbt_fec_adapt_sclc_popcount(c->fail_hist) << 16) >
-             (u32)(2u * TBT_FEC_ADAPT_SCLC_BACKUP_WIN) * c->eps_q16))
     {
-        u32 add = c->n_cur / 16u;
+        u32 win = tbt_fec_adapt_sclc_backup_win(c->eps_q16);
+        u32 fails = tbt_fec_adapt_sclc_hist_count(c->fail_hist, win);
+        bool trip = c->fail_run >= TBT_FEC_ADAPT_SCLC_BACKUP_RUN ||
+                    (c->fail_hist_n >= win &&
+                     (fails << 16) > (u32)(2u * win) * c->eps_q16);
 
-        if (add < 2)
-            add = 2;
-        if ((u32)c->backup_off + add > c->shares)
-            c->backup_off = c->shares;
-        else
-            c->backup_off = (u16)(c->backup_off + add);
-        c->freeze_ticks = 1;
-        c->fail_run = 0;
-        c->fail_hist = 0;
-        c->fail_hist_n = 0;
+        if (trip)
+        {
+            u32 add = c->n_cur / 16u;
+
+            if (add < 2)
+                add = 2;
+            if ((u32)c->backup_off + add > c->shares)
+                c->backup_off = c->shares;
+            else
+                c->backup_off = (u16)(c->backup_off + add);
+            c->freeze_ticks = 1;
+            c->fail_run = 0;
+            memset(c->fail_hist, 0, sizeof(c->fail_hist));
+            c->fail_hist_n = 0;
+        }
     }
 }
 
@@ -940,6 +1037,7 @@ static void tbt_fec_adapt_sclc_fill_out(
 {
     out->n_target = c->n_cur;
     out->m_target = c->m_cur;
+    out->m_req = c->m_cur;
     out->q_q16 = c->q_act_q16;
     out->q_raw_q16 = c->q_q16;
     out->delta_q16 = c->delta_q16;
@@ -960,6 +1058,8 @@ void tbt_fec_adapt_sclc_tick(struct tbt_fec_adapt_sclc_ctl *c, u64 now_ns,
     u32 m_req;
     u32 m_out;
     u32 n_out;
+    u16 k;
+    u16 j;
 
     if (!out)
         return;
@@ -978,6 +1078,8 @@ void tbt_fec_adapt_sclc_tick(struct tbt_fec_adapt_sclc_ctl *c, u64 now_ns,
                 (abandoned && (u64)abandoned * 100u > c->delivered)
                     ? 1
                     : 0;
+    k = c->blocks_tick;
+    c->blocks_tick = 0;
 
     if (c->frozen)
     {
@@ -1004,18 +1106,22 @@ void tbt_fec_adapt_sclc_tick(struct tbt_fec_adapt_sclc_ctl *c, u64 now_ns,
     {
         c->eps_q16 =
             tbt_fec_adapt_sclc_eps(c->sigma_q16, c->shares, c->w_ppm);
+        tbt_fec_adapt_sclc_delta_apply(c, c->delta_q16);
+        for (j = 0; j < k && j < 64u; j++)
         {
             int dq = (int)c->q_q16 - (int)c->q_act_q16;
 
             c->q_act_q16 = (u32)((int)c->q_act_q16 + dq / 4);
         }
         {
-            u32 raw = c->ewma_fast_q16 > c->q_act_q16
-                          ? c->ewma_fast_q16 - c->q_act_q16
+            u32 raw = c->ewma_fast_q16 > c->ewma_slow_q16
+                          ? c->ewma_fast_q16 - c->ewma_slow_q16
                           : 0u;
-            u32 b = c->burst_q16 - (c->burst_q16 >> 3);
+            u32 b = c->burst_q16;
             u32 cap = ((u32)c->n_cur << 16) / 4u;
 
+            for (j = 0; j < k && j < 64u; j++)
+                b -= b >> 3;
             if (raw > b)
                 b = raw;
             if (b < TBT_FEC_ADAPT_SCLC_ONE / 8u)
@@ -1070,6 +1176,7 @@ void tbt_fec_adapt_sclc_tick(struct tbt_fec_adapt_sclc_ctl *c, u64 now_ns,
                    : ((c->sat_max || c->sat_min)
                           ? TBT_FEC_ADAPT_SCLC_R_SATURATED
                           : TBT_FEC_ADAPT_SCLC_R_STEADY)));
+    out->m_req = (u16)m_req;
     if (!c->backup_hold && c->backup_off)
         c->backup_off--;
     c->delivered = 0;

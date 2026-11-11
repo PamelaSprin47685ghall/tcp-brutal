@@ -108,17 +108,28 @@ static void feed_up(struct tbt_fec_adapt_sclc_est *e, u64 now_ns,
  * Continuous controller harness
  * ------------------------------------------------------------------ */
 
-static void init_down(struct tbt_fec_adapt_sclc_ctl *c)
+static void init_down_n(struct tbt_fec_adapt_sclc_ctl *c, u16 n_init)
 {
-    eq_u32((u32)tbt_fec_adapt_sclc_init(c, 256, 1, 8, 128,
+    eq_u32((u32)tbt_fec_adapt_sclc_init(c, 256, 1, 8, n_init,
                                         TBT_FEC_SCLC_DOWN),
            0, "init: downlink");
 }
 
+static void init_down(struct tbt_fec_adapt_sclc_ctl *c)
+{
+    init_down_n(c, 128);
+}
+
+static void init_up_n(struct tbt_fec_adapt_sclc_ctl *c, u16 n_init)
+{
+    eq_u32((u32)tbt_fec_adapt_sclc_init(c, 32, 8, 2, n_init,
+                                        TBT_FEC_SCLC_UP),
+           0, "init: uplink");
+}
+
 static void init_up(struct tbt_fec_adapt_sclc_ctl *c)
 {
-    eq_u32((u32)tbt_fec_adapt_sclc_init(c, 32, 8, 2, 16, TBT_FEC_SCLC_UP),
-           0, "init: uplink");
+    init_up_n(c, 16);
 }
 
 static void feed(struct tbt_fec_adapt_sclc_ctl *c, u16 E, u16 S,
@@ -691,19 +702,16 @@ static void case_est_unknown(void)
  * Quantile convergence and step response
  * ------------------------------------------------------------------ */
 
-static u32 rng_state;
-
-static u32 rng_next(void)
+static u32 rng_next(u32 *s)
 {
-    rng_state = rng_state * 1664525u + 1013904223u;
-    return rng_state;
+    *s = *s * 1664525u + 1013904223u;
+    return *s;
 }
 
-/* P(k) = 0.3 * 0.7^k, capped at 8 shares: the cold seed can only land on
- * or below the (1-eps) quantile, so the estimate never has to walk down. */
-static u16 geom_e(void)
+/* P(k) = 0.3 * 0.7^k, capped at 8 shares. */
+static u16 geom_e(u32 *s)
 {
-    double u = (double)(rng_next() >> 8) / 16777216.0;
+    double u = (double)(rng_next(s) >> 8) / 16777216.0;
     u16 k = 0;
 
     while (u >= 0.3 && k < 8)
@@ -714,22 +722,39 @@ static u16 geom_e(void)
     return k;
 }
 
-static void sort_u16(u16 *v, u32 n)
+/* Uniform over the same 0..8 range. */
+static u16 uniform_e(u32 *s)
 {
-    u32 i, j;
+    return (u16)(rng_next(s) % 9u);
+}
 
-    for (i = 1; i < n; i++)
+/* Empirical (1-eps) quantile of `n` samples in 0..8. A histogram avoids
+ * sorting 20000 entries. */
+static u16 ref_quantile(const u16 *v, u32 n, u32 eps_q16)
+{
+    u32 count[9] = {0};
+    u32 rank, acc = 0;
+    u32 i;
+
+    for (i = 0; i < n; i++)
     {
-        u16 x = v[i];
+        u16 x = v[i] > 8 ? 8 : v[i];
 
-        j = i;
-        while (j && v[j - 1] > x)
-        {
-            v[j] = v[j - 1];
-            j--;
-        }
-        v[j] = x;
+        count[x]++;
     }
+    rank = (u32)((((u64)(TBT_FEC_ADAPT_SCLC_ONE - eps_q16) * n) +
+                  TBT_FEC_ADAPT_SCLC_ONE - 1u) >> 16);
+    if (!rank)
+        rank = 1;
+    if (rank > n)
+        rank = n;
+    for (i = 0; i < 9; i++)
+    {
+        acc += count[i];
+        if (acc >= rank)
+            return (u16)i;
+    }
+    return 8;
 }
 
 static void case_q_convergence(void)
@@ -744,37 +769,72 @@ static void case_q_convergence(void)
     {
         struct tbt_fec_adapt_sclc_ctl c;
         struct tbt_fec_adapt_sclc_out out;
-        u16 hist[512];
+        static u16 ref[20000];
+        u32 drive = 0x12345678u + (u32)kind * 977u;
+        u32 refs = 0x9e3779b9u + (u32)kind * 31u;
         u64 now = SEC;
-        u32 i, rank;
-        double q, diff;
+        u32 i;
+        u16 qref;
+        double diff;
 
-        rng_state = kind ? 0x9e3779b9u : 0x12345678u;
         init_up(&c);
         for (i = 0; i < 16 + 2000; i++)
         {
-            u16 E = kind ? (u16)(rng_next() % 9u) : geom_e();
+            u16 E = kind ? uniform_e(&drive) : geom_e(&drive);
 
             if (E > c.n_cur)
                 E = c.n_cur;
             feed(&c, E, 3, true, 32);
             tick(&c, &now, &out);
-            if (i >= 16 + 2000 - 512)
-                hist[i - (16 + 2000 - 512)] = E;
         }
-        sort_u16(hist, 512);
-        rank = (u32)((((u64)(TBT_FEC_ADAPT_SCLC_ONE - out.eps_q16) * 512u) +
-                      TBT_FEC_ADAPT_SCLC_ONE - 1u) >> 16);
-        if (!rank)
-            rank = 1;
-        if (rank > 512)
-            rank = 512;
-        q = (double)hist[rank - 1];
-        diff = out.q_raw_q16 / 65536.0 - q;
-        ok(diff <= 1.5 && diff >= -1.5, msg[kind]);
+        /* The reference is an independent 20000-sample draw, so the
+         * comparison does not depend on the samples that drove q. */
+        for (i = 0; i < 20000; i++)
+            ref[i] = kind ? uniform_e(&refs) : geom_e(&refs);
+        qref = ref_quantile(ref, 20000, out.eps_q16);
+        diff = out.q_raw_q16 / 65536.0 - qref;
+        ok(diff <= 2.0 && diff >= -2.0, msg[kind]);
         ok(out.eps_q16 >= TBT_FEC_ADAPT_SCLC_ONE / 32u &&
            out.eps_q16 <= TBT_FEC_ADAPT_SCLC_EPS_MAX_Q16,
            "q converge: eps stays inside the clamp");
+    }
+
+    /* One uplink super-block is eight blocks: a tick must advance the
+     * per-block low-pass eight steps, not one. */
+    {
+        struct tbt_fec_adapt_sclc_ctl c;
+        struct tbt_fec_adapt_sclc_out out;
+        static u16 ref[20000];
+        u32 drive = 0xdeadbeefu;
+        u32 refs = 0xcafebabeu;
+        u64 now = SEC;
+        u32 i, j, gap;
+        u16 qref;
+        double diff;
+
+        init_up(&c);
+        for (i = 0; i < 200; i++)
+        {
+            for (j = 0; j < 8; j++)
+            {
+                u16 E = geom_e(&drive);
+
+                if (E > c.n_cur)
+                    E = c.n_cur;
+                feed(&c, E, 3, true, 32);
+            }
+            tick(&c, &now, &out);
+        }
+        for (i = 0; i < 20000; i++)
+            ref[i] = geom_e(&refs);
+        qref = ref_quantile(ref, 20000, out.eps_q16);
+        diff = out.q_raw_q16 / 65536.0 - qref;
+        ok(diff <= 2.0 && diff >= -2.0,
+           "q converge: batch-8 q_raw is the empirical quantile");
+        gap = out.q_raw_q16 > out.q_q16 ? out.q_raw_q16 - out.q_q16
+                                        : out.q_q16 - out.q_raw_q16;
+        ok(gap <= 2u * TBT_FEC_ADAPT_SCLC_ONE,
+           "q converge: batch-8 q_act tracks q_raw");
     }
 }
 
@@ -783,31 +843,40 @@ static void case_q_step(void)
     struct tbt_fec_adapt_sclc_ctl c;
     struct tbt_fec_adapt_sclc_out out;
     u64 now = SEC;
-    u32 i, q_prev, m_before, m8 = 0;
-    bool monotone = true, bounded = true;
+    u32 i, q_post, m_post;
+    bool bounded = true, no_rise = true, below_m = true;
     double diff;
 
-    init_up(&c);
-    run(&c, &now, 100, 2, 3, true, 32, &out);
-    m_before = out.m_target;
-    q_prev = out.q_raw_q16;
-    for (i = 0; i < 200; i++)
+    /* Start at the top of the downlink range: n = 192, m = m_min = 64. */
+    init_down_n(&c, 192);
+    run(&c, &now, 16, 2, 9, true, 256, &out);
+    eq_u32(out.m_target, 64, "q step: the cold start holds m at 64");
+    for (i = 0; i < 300; i++)
     {
-        feed(&c, 12, 3, true, 32);
+        feed(&c, 40, 9, true, 256);
         tick(&c, &now, &out);
-        if ((u64)out.q_raw_q16 + TBT_FEC_ADAPT_SCLC_ONE < q_prev)
-            monotone = false;
-        if (out.q_raw_q16 > 14u * TBT_FEC_ADAPT_SCLC_ONE)
+        if (out.q_raw_q16 > 42u * TBT_FEC_ADAPT_SCLC_ONE)
             bounded = false;
-        q_prev = out.q_raw_q16;
-        if (i == 7)
-            m8 = out.m_target;
     }
-    ok(m8 > m_before, "q step: m_target rises within 8 ticks");
-    ok(monotone, "q step: q_raw never drops more than one share");
-    ok(bounded, "q step: q_raw never exceeds 14 shares");
-    diff = out.q_raw_q16 / 65536.0 - 12.0;
-    ok(diff <= 1.5 && diff >= -1.5, "q step: q_raw settles on 12 shares");
+    diff = out.q_raw_q16 / 65536.0 - 40.0;
+    ok(diff <= 2.0 && diff >= -2.0, "q step: q_raw settles on 40 shares");
+    ok(bounded, "q step: q_raw never exceeds 42 shares");
+    ok(out.m_target > 64, "q step: m rises above the cold value");
+    q_post = out.q_raw_q16;
+    m_post = out.m_target;
+    for (i = 0; i < 2000; i++)
+    {
+        feed(&c, 2, 11, true, 256);
+        tick(&c, &now, &out);
+        if ((u64)out.q_raw_q16 > (u64)q_post + TBT_FEC_ADAPT_SCLC_ONE)
+            no_rise = false;
+        if (out.m_target > m_post)
+            below_m = false;
+    }
+    ok(out.q_raw_q16 < q_post, "q step: q_raw ends below the post-up value");
+    ok(no_rise, "q step: q_raw never rises above the post-up value");
+    ok(below_m, "q step: m_target never exceeds the post-up value");
+    eq_u32(out.m_target, c.m_min, "q step: m reaches m_min");
 }
 
 /* ------------------------------------------------------------------ *
@@ -816,23 +885,25 @@ static void case_q_step(void)
 
 static void case_delay_stability(void)
 {
-    int d;
+    static const u16 ds[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 24, 32};
+    u32 k;
 
-    for (d = 0; d <= 8; d++)
+    for (k = 0; k < sizeof(ds) / sizeof(ds[0]); k++)
     {
         struct tbt_fec_adapt_sclc_ctl c;
         struct tbt_fec_adapt_sclc_out out;
-        static u16 mh[1200];
+        static u16 mh[4000];
         u64 now = SEC;
+        int d = ds[k];
         int i, dir = 0, changes = 0;
         u16 mn = 0xffff, mx = 0;
         bool in_range = true;
 
-        init_down(&c);
-        for (i = 0; i < 1200; i++)
+        init_down_n(&c, 192);
+        for (i = 0; i < 4000; i++)
         {
             int j = i - 1 - d;
-            u16 md = j >= 0 ? mh[j] : 128;
+            u16 md = j >= 0 ? mh[j] : 64;
             u16 E = md < 160 ? (u16)(160 - md) : 0;
 
             feed(&c, E, 9, true, 256);
@@ -840,13 +911,13 @@ static void case_delay_stability(void)
             mh[i] = out.m_target;
             if (out.m_target < c.m_min || out.m_target > c.m_max)
                 in_range = false;
-            if (i >= 800)
+            if (i >= 3600)
             {
                 if (mh[i] < mn)
                     mn = mh[i];
                 if (mh[i] > mx)
                     mx = mh[i];
-                if (i > 800)
+                if (i > 3600)
                 {
                     int step = (int)mh[i] - (int)mh[i - 1];
 
@@ -873,12 +944,12 @@ static void case_burst_onset(void)
     struct tbt_fec_adapt_sclc_ctl c;
     struct tbt_fec_adapt_sclc_out out;
     u64 now = SEC;
-    u32 i, m0, peak = 0;
-    bool saw_burst = false;
+    u32 i, steady, peak = 0;
+    bool saw_burst = false, held = true;
 
     init_up(&c);
     run(&c, &now, 100, 2, 3, true, 32, &out);
-    m0 = out.m_target;
+    steady = out.m_target;
     for (i = 0; i < 2; i++)
     {
         feed(&c, 20, 3, true, 32);
@@ -889,12 +960,33 @@ static void case_burst_onset(void)
             peak = out.m_target;
     }
     ok(saw_burst, "burst: burst_q16 is positive during onset");
-    ok(peak >= m0 + 3, "burst: m_target rises by at least 3 shares");
+    ok(peak >= steady + 3, "burst: m_target rises by at least 3 shares");
     run(&c, &now, 32, 2, 3, true, 32, &out);
-    ok((u32)out.m_target + 2u >= m0 && m0 + 2u >= (u32)out.m_target,
+    ok((u32)out.m_target + 2u >= steady && steady + 2u >= (u32)out.m_target,
        "burst: m_target returns to the pre-burst value");
     eq_u32(out.burst_q16, 0,
            "burst: burst_q16 is zero after 32 clean blocks");
+
+    /* A long burst must hold the feedforward up for every burst block. */
+    run(&c, &now, 100, 2, 3, true, 32, &out);
+    steady = out.m_target;
+    saw_burst = false;
+    for (i = 0; i < 16; i++)
+    {
+        feed(&c, 20, 3, true, 32);
+        tick(&c, &now, &out);
+        if (out.burst_q16 > 0)
+            saw_burst = true;
+        if (out.m_target < steady + 3)
+            held = false;
+    }
+    ok(saw_burst, "burst: the long burst keeps burst_q16 positive");
+    ok(held, "burst: m_target stays three shares above steady");
+    run(&c, &now, 128, 2, 3, true, 32, &out);
+    ok((u32)out.m_target + 2u >= steady && steady + 2u >= (u32)out.m_target,
+       "burst: m_target returns after the long burst");
+    eq_u32(out.burst_q16, 0,
+           "burst: burst_q16 is zero after 128 clean blocks");
 }
 
 static void case_low_sample(void)
@@ -985,14 +1077,19 @@ static void case_backup(void)
     run(&c, &now, 20, 2, 3, true, 32, &out);
     eq_u32(out.backup, 0, "backup: decays after 20 good blocks");
 
-    /* Downlink: the first failure in a full 32-block window is above the
-     * 2*eps first-failure rate, so one failure backs the loop up. */
+    /* Downlink: the first-failure window is max(32, ceil(1/(2*eps))) = 128
+     * blocks at the 1/256 floor. One failure in 128 is exactly the 2*eps
+     * threshold and must not trip; two must. */
     init_down(&c);
     run(&c, &now, 16, 2, 9, true, 256, &out);
-    run(&c, &now, 32, 2, 9, true, 256, &out);
+    run(&c, &now, 127, 2, 9, true, 256, &out);
     feed(&c, 2, 9, false, 256);
     tick(&c, &now, &out);
-    ok(out.backup > 0, "backup: one downlink failure in 32 blocks");
+    eq_u32(out.backup, 0,
+           "backup: one downlink failure in 128 blocks is not enough");
+    feed(&c, 2, 9, false, 256);
+    tick(&c, &now, &out);
+    ok(out.backup > 0, "backup: two downlink failures in 128 blocks");
 }
 
 static void case_freeze(void)
@@ -1023,6 +1120,47 @@ static void case_freeze(void)
     eq_u32(out.frozen, 0, "freeze: recovery clears frozen");
     ok(out.reason != TBT_FEC_ADAPT_SCLC_R_PAUSED,
        "freeze: recovery resumes the loop");
+}
+
+/* A block sampled while the last tick was frozen updates only the
+ * abandoned-share denominator: q, delta, the failure window and the backup
+ * stay put, and the next unfrozen sample moves them again. */
+static void case_frozen_sample(void)
+{
+    struct tbt_fec_adapt_sclc_ctl c;
+    struct tbt_fec_adapt_sclc_out out;
+    u64 now = SEC;
+    u32 q16, d16;
+    u16 fail_n, backup;
+    u16 i;
+    bool held = true, paused = true;
+
+    init_up(&c);
+    run(&c, &now, 20, 2, 3, true, 32, &out);
+    tick_ex(&c, &now, 1, 1000000u, 0, 0, 0, &out);
+    eq_u32(out.reason, TBT_FEC_ADAPT_SCLC_R_PAUSED,
+           "frozen sample: a dead population pauses");
+    q16 = c.q_q16;
+    d16 = c.delta_q16;
+    fail_n = c.fail_hist_n;
+    backup = c.backup_off;
+    for (i = 0; i < 8; i++)
+    {
+        feed(&c, 20, 3, false, 32);
+        tick_ex(&c, &now, 1, 1000000u, 0, 0, 0, &out);
+        if (out.reason != TBT_FEC_ADAPT_SCLC_R_PAUSED)
+            paused = false;
+        if (c.q_q16 != q16 || c.delta_q16 != d16 ||
+            c.fail_hist_n != fail_n || c.backup_off != backup)
+            held = false;
+    }
+    ok(held, "frozen sample: a frozen block updates nothing");
+    ok(paused, "frozen sample: every paused tick reports PAUSED");
+
+    tick_ex(&c, &now, 1, 1000000u, 256, 0, 0, &out);
+    feed(&c, 20, 3, false, 32);
+    ok(c.q_q16 != q16 || c.fail_hist_n != fail_n,
+       "frozen sample: an unfrozen block samples again");
 }
 
 /* ------------------------------------------------------------------ *
@@ -1075,6 +1213,69 @@ static void case_buildable_output(void)
             }
         }
         ok(good, msg[dir]);
+    }
+}
+
+/* Every start split must survive the clamp and the buildable mapping: the
+ * output never asks for less parity than the unclamped control sum (up to
+ * m_max), and n + m always spans the block. */
+static void case_n_sweep(void)
+{
+    static const u16 down[] = {1, 16, 32, 64, 96, 128, 160, 178, 191, 192};
+    static const u16 up[] = {1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+                             16, 17, 18, 21, 22, 23, 24, 25, 28, 30};
+    u32 n_down = (u32)(sizeof(down) / sizeof(down[0]));
+    u32 n_up = (u32)(sizeof(up) / sizeof(up[0]));
+    u32 k;
+
+    for (k = 0; k < n_down + n_up; k++)
+    {
+        struct tbt_fec_adapt_sclc_ctl c;
+        struct tbt_fec_adapt_sclc_out out;
+        u64 now = SEC;
+        u16 n_init, S, real, E, i;
+        bool is_up = k >= n_down;
+        bool good = true;
+
+        if (is_up)
+        {
+            n_init = up[k - n_down];
+            S = 3;
+            real = 32;
+            init_up_n(&c, n_init);
+        }
+        else
+        {
+            n_init = down[k];
+            S = 9;
+            real = 256;
+            init_down_n(&c, n_init);
+        }
+        run(&c, &now, 16, 2, S, true, real, &out);
+        for (E = 0; E < 2; E++)
+        {
+            u16 e = E ? 40 : 2;
+
+            for (i = 0; i < 4; i++)
+            {
+                feed(&c, e, S, true, real);
+                tick(&c, &now, &out);
+                if ((u16)(out.n_target + out.m_target) != c.shares ||
+                    !tbt_fec_adapt_sclc_buildable(c.variant,
+                                                  out.n_target,
+                                                  out.m_target) ||
+                    out.m_target < (out.m_req < c.m_max ? out.m_req
+                                                        : c.m_max))
+                {
+                    printf("n sweep: %s n_init=%u E=%u n=%u m=%u "
+                           "m_req=%u\n", is_up ? "up" : "down", n_init, e,
+                           out.n_target, out.m_target, out.m_req);
+                    good = false;
+                }
+            }
+        }
+        ok(good, is_up ? "n sweep: uplink split"
+                       : "n sweep: downlink split");
     }
 }
 
@@ -1390,7 +1591,9 @@ int main(void)
     case_delta_online();
     case_backup();
     case_freeze();
+    case_frozen_sample();
     case_buildable_output();
+    case_n_sweep();
     case_wire_profile();
     case_wire_continuous();
     case_asymmetric_init();

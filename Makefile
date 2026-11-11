@@ -208,6 +208,9 @@ HOST_TSAN       := host/test_tsan_race
 HOST_TSAN_SRCS  := host/test_tsan_race.c tbtun/tbt_crypto.c
 HOST_TSAN_HDRS  := tbtun/tbt_fec.h tbtun/tbt_crypto.h tbtun/tbt_uapi.h
 SAN_CFLAGS      := -g -fsanitize=address,undefined -fno-omit-frame-pointer
+# A sanitizer run must stop at the first undefined-behaviour report instead
+# of continuing through the rest of the suite.
+export UBSAN_OPTIONS ?= halt_on_error=1
 TSAN_CFLAGS     := -g -fsanitize=thread -fno-omit-frame-pointer
 
 obj-m           += tbtun.o

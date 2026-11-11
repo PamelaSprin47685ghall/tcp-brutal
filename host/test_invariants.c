@@ -323,7 +323,8 @@ static void adapt_check(struct adapt *m,
     /* A paused or cold tick reports the burst of the last control tick; that
      * burst was capped by the n in force then, which is not today's n. */
     if (out->reason != TBT_FEC_ADAPT_SCLC_R_PAUSED &&
-        out->reason != TBT_FEC_ADAPT_SCLC_R_COLD)
+        out->reason != TBT_FEC_ADAPT_SCLC_R_COLD &&
+        out->reason != TBT_FEC_ADAPT_SCLC_R_BACKUP)
         m->n_cap = m->n_prev;
     eq64((u64)out->n_target + out->m_target, m->shares,
          "adapt: n + m == shares");
