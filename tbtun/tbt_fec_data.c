@@ -3019,6 +3019,18 @@ void tbt_fec_tx_work(struct work_struct *w)
         atomic_fetch_or(1u << TBT_FEC_AGAIN_BIT, &sess->fec_tx_run);
         goto out;
     }
+    {
+        /* Stamp the work entry, not the pump entry: a body stuck before
+         * tbt_fec_tx_pump() must still be visible to the close-tick
+         * watchdog. */
+        struct tbt_fec_tx *tx;
+
+        rcu_read_lock();
+        tx = rcu_dereference(sess->fec_tx);
+        if (tx)
+            WRITE_ONCE(tx->last_pump_ns, ktime_get_ns());
+        rcu_read_unlock();
+    }
     tbt_fec_tx_work_body(sess);
     atomic_fetch_and(~(1u << TBT_FEC_RUN_BIT), &sess->fec_tx_run);
     if (atomic_fetch_and(~(1u << TBT_FEC_AGAIN_BIT), &sess->fec_tx_run) &
