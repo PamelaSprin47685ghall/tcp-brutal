@@ -358,6 +358,7 @@ static void tbt_drain_body(struct tbt_stream *st)
 {
     struct tbt_frame *fr;
     bool eof = false;
+    bool fec_wake = false;
 
     might_sleep();
 
@@ -429,14 +430,25 @@ static void tbt_drain_body(struct tbt_stream *st)
             break;
 
         spin_lock_bh(&st->rx_lock);
+        /* FEC delivery does not use st->paused (setting it would freeze every
+         * carrier reader and with it the reverse ACK/NACK path). Its
+         * backpressure is a parked share in tbt_fec_deliver_ready(); arm the
+         * FEC receive work whenever the ready queue has room so the parked
+         * share is retried the moment the application drains. */
+        fec_wake = st->sess && st->sess->fec &&
+                   st->rx_queued < TBT_RX_READY_LOW;
         if (st->paused && st->rx_queued < TBT_RX_READY_LOW)
         {
             WRITE_ONCE(st->paused, false);
             spin_unlock_bh(&st->rx_lock);
             tbt_carrier_resume(st->sess);
+            if (fec_wake)
+                tbt_session_arm(st->sess, TBT_SW_FEC_RX, 0);
             continue;
         }
         spin_unlock_bh(&st->rx_lock);
+        if (fec_wake)
+            tbt_session_arm(st->sess, TBT_SW_FEC_RX, 0);
     }
 
     /* EOF is stream-ordered. The peer's FIN carries the byte offset that
@@ -456,6 +468,8 @@ static void tbt_drain_body(struct tbt_stream *st)
         st->rx_fin_done_ns = ktime_get_ns();
         eof = true;
     }
+    fec_wake = st->sess && st->sess->fec &&
+               st->rx_queued < TBT_RX_READY_LOW;
     /* If the last delivered frame took the queue below the low-water mark, the
      * in-loop check may not have run (partial frame, or the loop exited right
      * after the last frame). Resume the carriers here too; a pause that is
@@ -470,6 +484,11 @@ static void tbt_drain_body(struct tbt_stream *st)
     {
         spin_unlock_bh(&st->rx_lock);
     }
+    /* A FEC stream never pauses the carriers, so the check above is a no-op
+     * for it; this arm is the wake tbt_fec_deliver_ready() waits for after
+     * the ready queue fell below the low-water mark. */
+    if (fec_wake)
+        tbt_session_arm(st->sess, TBT_SW_FEC_RX, 0);
     if (eof)
     {
         tbt_sock_shutdown_wr(st);

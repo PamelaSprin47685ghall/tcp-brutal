@@ -180,13 +180,16 @@ atomic_stats_names='
     pub_actor_calls tx_submit_calls tx_submit_bytes dbg_alloc_fail
     dbg_over_qmax dbg_copy_fail dbg_empty_len dbg_pump_runs dbg_pump_nocar
     ctl_lost retired_tx_bytes retired_data_frames retired_retx_data
-    stall_paused_skips
+    stall_paused_skips carrier_bytes http_req http_resp dropped_by_ppm
 '
 
 # Print one line per access to one of the named session counters that is not
 # wrapped in an atomic64_* call (or tbt_stat_read()). Labels such as
 # `retx_queued:` and the key text inside seq_printf strings are ignored: the
-# match requires `->name`, and comment-only lines are skipped.
+# match requires a session receiver (`sess->name` or `s->name`) and
+# comment-only lines are skipped. Receiver-aware matching matters for
+# dropped_by_ppm: the per-carrier counter of the same name is a plain u64
+# with a single writer, and `c->dropped_by_ppm` is not the session stat.
 atomic_stats_violations() {
     _file=$1
     shift
@@ -198,7 +201,7 @@ atomic_stats_violations() {
                 if (line ~ /^\*/ || line ~ /^\/\*/)
                     next
                 gsub(/\/\*[^*]*\*\//, "", line)
-                if (line !~ ("->[[:space:]]*" name "([^A-Za-z0-9_]|$)"))
+                if (line !~ ("(^|[^A-Za-z0-9_])(sess|s)->[[:space:]]*" name "([^A-Za-z0-9_]|$)"))
                     next
                 if (line ~ /atomic64_(read|set|inc|add|sub|dec|xchg|cmpxchg|add_return|inc_return|dec_return|fetch_add|fetch_sub|try_cmpxchg)[[:space:]]*\(/ ||
                     line ~ /tbt_stat_read[[:space:]]*\(/)
@@ -209,7 +212,7 @@ atomic_stats_violations() {
 }
 
 # ---------------------------------------------------------------------------
-# The 16 checks.
+# The 17 checks.
 
 check_pump_lock() {
     v=$(pump_lock_violations "$1/src/kernel/tbt_carrier.c")
@@ -440,9 +443,16 @@ check_retain_trim() {
         printf 'retention trim runs on the capture path; a pump batch/candidate can still reference the entry'
         return 1
     fi
-    blk=$(awk '/if \(st->retain_max/{ p = 1 } p { print } p && /tbt_tx_wake\(sess\)/{ exit }' \
-        "$1/src/kernel/tbt_tx.c")
-    printf '%s\n' "$blk" | grep -qF 'fr->ret = NULL' && return 0
+    # The clear lives in tbt_tx_retain_unlink_queued(), called by both
+    # tbt_tx_retain_trim() and tbt_tx_retain_gc(). Inspecting the trim body
+    # alone (the old awk window) never reached the helper, so the check
+    # failed on a correct tree.
+    trim=$(func_body "$1/src/kernel/tbt_tx.c" tbt_tx_retain_trim)
+    unlink=$(func_body "$1/src/kernel/tbt_tx.c" tbt_tx_retain_unlink_queued)
+    if printf '%s\n' "$trim" | grep -qF 'tbt_tx_retain_unlink_queued' &&
+        printf '%s\n' "$unlink" | grep -qF 'fr->ret = NULL'; then
+        return 0
+    fi
     printf 'trim frees retains without clearing fr->ret'
     return 1
 }

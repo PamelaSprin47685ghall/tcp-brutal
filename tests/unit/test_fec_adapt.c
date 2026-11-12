@@ -817,6 +817,13 @@ static void case_carrier_helpers(void)
        "alive: never received");
     ok(!tbt_fec_adapt_carrier_alive(true, false, true, 0, 0, 100000),
        "alive: never received at time zero");
+
+    ok(tbt_fec_adapt_carrier_alive_ka(true, false, true, now, now - 4900 * MS,
+                                      100000, 5000),
+       "alive_ka: 4.9 s inside 5 s keepalive + slack stays alive");
+    ok(!tbt_fec_adapt_carrier_alive_ka(true, false, true, now, now - 7100 * MS,
+                                       100000, 5000),
+       "alive_ka: 7.1 s past 5 s keepalive + slack is dead");
 }
 
 /* The estimator fold in tbt_fec_data.c keeps one entry per physical group in

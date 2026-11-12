@@ -87,6 +87,38 @@ int tbt_portmap_alloc(unsigned long *used, u16 lo, u16 hi, u16 *port)
     return -ENOSPC;
 }
 
+int tbt_portmap_alloc_next(unsigned long *used, u16 lo, u16 hi, u16 *cursor,
+                           u16 *port)
+{
+    unsigned int p, start;
+
+    if (!used || !port || !cursor || !lo || lo > hi)
+        return -EINVAL;
+    /* Resume from the cursor when it still names a port inside the window,
+     * else restart at the bottom. The second loop is the wrap: it is empty
+     * when start == lo, so the scan never visits a bit twice. */
+    start = (*cursor >= lo && *cursor <= hi) ? *cursor : lo;
+    for (p = start; p <= hi; p++)
+    {
+        if (tbt_portmap_test(used, p))
+            continue;
+        goto found;
+    }
+    for (p = lo; p < start; p++)
+    {
+        if (tbt_portmap_test(used, p))
+            continue;
+        goto found;
+    }
+    return -ENOSPC;
+
+found:
+    tbt_portmap_set(used, p);
+    *port = (u16)p;
+    *cursor = (p == hi) ? lo : (u16)(p + 1);
+    return 0;
+}
+
 void tbt_portmap_free(unsigned long *used, u16 port)
 {
     if (!used || !port)

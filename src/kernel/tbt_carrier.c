@@ -646,9 +646,11 @@ static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
  *
  * The event-driven path is the normal driver, but a wake can be coalesced with
  * a run that then finds nothing, or lost against a pause transition; a queue
- * then sits full with no scheduled reader. Re-check the three queues every
- * 50 ms and re-arm the work item that has something to do. It never copies
- * application bytes; the only socket lock it takes is the drip write.
+ * then sits full with no scheduled reader. Re-check this carrier's queues
+ * every 50 ms and re-arm the work item that has something to do; the
+ * session's pass scans the streams' delivery queues once for all carriers.
+ * It never copies application bytes; the only socket lock it takes is the
+ * drip write.
  *
  * It is also the carrier's health check. A closed socket marks the carrier
  * lost and asks for a replacement. Unacknowledged data that has not moved for
@@ -664,7 +666,6 @@ static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
 static void tbt_car_poll_one(struct tbt_carrier *c, bool paused)
 {
     struct tbt_session *sess = c->sess;
-    struct tbt_stream *st;
     struct tcp_sock *tp;
     struct sock *sk = NULL;
     u64 now = ktime_get_ns();
@@ -742,6 +743,32 @@ static void tbt_car_poll_one(struct tbt_carrier *c, bool paused)
         }
         tbt_carrier_sk_put(sk);
         return;
+    }
+
+    /* A spare promoted by tbt_replace_body() covers a dead primary while its
+     * replacement is dialled. Once every primary is up again it returns to
+     * the idle pool: the session must carry n_pri DATA paths plus M warm
+     * spares, never n_pri + 1 paths and no spare. tbt_sched_rebuild() drops
+     * an inactive spare from the next DATA order. */
+    if (c->spare && c->active)
+    {
+        bool all_up = true;
+
+        for (i = 0; i < (int)sess->n_pri; i++)
+        {
+            struct tbt_carrier *p = READ_ONCE(sess->car[i]);
+
+            if (!p || atomic_read(&p->stopping) || !atomic_read(&p->up))
+            {
+                all_up = false;
+                break;
+            }
+        }
+        if (all_up)
+        {
+            c->active = false;
+            c->state = TBT_CAR_SPARE;
+        }
     }
 
     if (!sk)
@@ -1127,20 +1154,8 @@ static void tbt_car_poll_one(struct tbt_carrier *c, bool paused)
         if (tbt_carrier_arm_tx(c))
             rescued = true;
     }
-    rcu_read_lock();
-    for (i = 0; i < TBT_STREAM_HT; i++)
-        hlist_for_each_entry_rcu(st, &sess->streams[i], node)
-            if (!list_empty(&st->rx_q))
-            {
-                if (tbt_stream_schedule(st, &st->w_drain,
-                                        TBT_STREAM_F_SCHED_DRAIN))
-                    rescued = true;
-            }
-    rcu_read_unlock();
     if (rescued)
         atomic64_inc(&sess->poll_rescues);
-    if (sess->fec)
-        tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
     tbt_carrier_sk_put(sk);
 }
 
@@ -1158,6 +1173,7 @@ static void tbt_car_poll_one(struct tbt_carrier *c, bool paused)
 static void tbt_session_poll_body(struct tbt_session *sess)
 {
     struct tbt_carrier *c;
+    struct tbt_stream *st;
     struct tbt_carrier **prov = NULL;
     unsigned int nprov = 0;
     bool paused;
@@ -1238,11 +1254,49 @@ static void tbt_session_poll_body(struct tbt_session *sess)
         tbt_carrier_put(prov[i]);
     }
     kfree(prov);
+    /* A stream's delivery queue is drained by w_drain work. The event path
+     * schedules it, but a wake can be lost against a pause transition or
+     * coalesced with a run that found nothing, so one scan per 50 ms pass
+     * re-arms every non-empty queue. This is the session's scan: the old
+     * form repeated it once per carrier (256 RCU walks every 50 ms). */
+    {
+        bool scheduled = false;
+
+        rcu_read_lock();
+        for (i = 0; i < TBT_STREAM_HT; i++)
+            hlist_for_each_entry_rcu(st, &sess->streams[i], node)
+                if (!list_empty(&st->rx_q) &&
+                    tbt_stream_schedule(st, &st->w_drain,
+                                        TBT_STREAM_F_SCHED_DRAIN))
+                    scheduled = true;
+        rcu_read_unlock();
+        if (scheduled)
+            atomic64_inc(&sess->poll_rescues);
+    }
     /* Backpressure is the last resort: only a session with no usable carrier
      * and no room to grow reaches it. The check also grows the stripe when
      * it can, so the next pass has capacity without touching the user. */
     tbt_carrier_capacity_check(sess);
     tbt_tx_fec_poll(sess);
+    /* Retrigger the FEC writer only when it has something to write. The old
+     * unconditional arm queued a no-op work item on every 50 ms pass of every
+     * session, even an idle one. */
+    if (sess->fec)
+    {
+        struct tbt_fec_tx *tx;
+        bool ring = false;
+
+        rcu_read_lock();
+        tx = rcu_dereference(sess->fec_tx);
+        if (tx)
+            ring = ((u64)(READ_ONCE(tx->head) - READ_ONCE(tx->tail)) +
+                    READ_ONCE(tx->fill)) != 0;
+        rcu_read_unlock();
+        if (ring || atomic_read(&sess->fec_outq_queued) ||
+            READ_ONCE(sess->fec_out_ctl_depth) ||
+            READ_ONCE(sess->fec_replay_queued))
+            tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+    }
     if (!READ_ONCE(sess->closing))
         tbt_session_arm(sess, TBT_SW_POLL, msecs_to_jiffies(50));
 }
@@ -1259,7 +1313,8 @@ void tbt_session_poll_work(struct work_struct *w)
 }
 
 /* One non-EAGAIN receive error: count it and stop this carrier. Shared by the
- * actor and the pending-parse retry so the two cannot drift. */
+ * pending-parse retry and the copy actor's error path so the two cannot
+ * drift. */
 static void tbt_car_rx_error(struct tbt_carrier *c, int err)
 {
     atomic64_inc(&c->sess->rx_errs);
@@ -1279,58 +1334,48 @@ static void tbt_car_rx_error(struct tbt_carrier *c, int err)
     atomic_set(&c->stopping, 1);
 }
 
-static int tbt_car_rx_actor(read_descriptor_t *desc, struct sk_buff *skb, unsigned int offset, size_t len)
+/* Copy-only actor: tcp_read_sock() runs it under lock_sock(sk), so it does
+ * nothing but move bytes from the skb into the per-carrier parser buffer. The
+ * parse itself runs in tbt_car_rx_body() after release_sock(). A HELLO handler
+ * can reach tbt_session_reincarnate() and the sleeping FEC flow setup; taking
+ * another AF_INET socket lock (sock_release/lock_sock on a stream) while this
+ * carrier's sk_lock is held is the nested sk_lock-AF_INET acquisition the lock
+ * contract forbids. */
+static int tbt_car_rx_copy_actor(read_descriptor_t *desc, struct sk_buff *skb,
+                                 unsigned int offset, size_t len)
 {
     struct tbt_carrier *c = desc->arg.data;
-    size_t used = 0;
-    int err = 0;
+    struct tbt_parser *p;
+    size_t take;
 
     if (!c || atomic_read(&c->stopping))
         return 0;
-    /* One work item may not parse a whole multi-megabyte receive queue: the
+    /* One work item may not drain a whole multi-megabyte receive queue: the
      * far side reported tbt_car_rx_work hogging a worker for >10 ms. Stop
-     * between pieces once the body's deadline is spent. A 0-byte actor
-     * return is "nothing consumed" to tcp_read_sock(): it stops the walk and
-     * leaves the remaining bytes in the socket, and tbt_car_rx_body()
-     * re-arms because copied_seq != rcv_nxt. */
+     * between skbs once the body's deadline is spent. A 0-byte actor return
+     * is "nothing consumed" to tcp_read_sock(): it stops the walk and leaves
+     * the remaining bytes in the socket, and tbt_car_rx_body() sees
+     * copied_seq != rcv_nxt and re-arms. */
     if (tbt_rx_budget_stopped(&c->rx_budget, ktime_get_ns()))
     {
         atomic64_inc(&c->sess->rx_budget_yields);
         return 0;
     }
-    atomic64_inc(&c->sess->rx_drain_entries);
-    atomic64_add(len, &c->sess->rx_drain_bytes);
-
-    while (used < len)
-    {
-        size_t n = 0;
-        size_t take = min_t(size_t, len - used, TBT_RX_RUN_SLICE);
-
-        err = tbt_rx_skb(c, skb, offset + used, take, &n);
-        used += n;
-        tbt_rx_budget_charge(&c->rx_budget, n);
-        if (err)
-            break;
-        /* A short return is legal: tcp_read_sock() advances copied_seq and
-         * calls the actor again for the same skb. The next call sees the
-         * deadline and returns 0, so the yield is always between pieces. */
-        if (tbt_rx_budget_stopped(&c->rx_budget, ktime_get_ns()))
-            break;
-    }
-    if (err)
-    {
-        if (err == -EAGAIN)
-        {
-            /* The delivery ring is full. Return the consumed byte count so
-             * tcp_read_sock() advances copied_seq past exactly those bytes;
-             * the record that did not fit stays in the parser for the
-             * resume. */
-            return used;
-        }
-        tbt_car_rx_error(c, err);
+    p = c->parser;
+    /* `have` is a length in both parsers; a dirty value would make the room
+     * computation below underflow to a huge `take`. */
+    if (!p || p->have > sizeof(p->buf))
         return 0;
-    }
-    return used;
+    take = min_t(size_t, len, sizeof(p->buf) - p->have);
+    if (!take)
+        return 0;
+    if (skb_copy_bits(skb, offset, p->buf + p->have, take))
+        return -EFAULT;
+    atomic64_inc(&c->sess->rx_drain_entries);
+    atomic64_add(take, &c->sess->rx_drain_bytes);
+    p->have += take;
+    tbt_rx_budget_charge(&c->rx_budget, take);
+    return (int)take;
 }
 
 static void tbt_car_rx_body(struct tbt_carrier *c)
@@ -1338,7 +1383,8 @@ static void tbt_car_rx_body(struct tbt_carrier *c)
     read_descriptor_t desc = {};
     struct tbt_stream *st;
     struct sock *sk;
-    int i, drained;
+    size_t drained = 0;
+    int i;
 
     atomic64_inc(&c->sess->rx_work_runs);
     /* Consume the wake this run was queued for; the running bit stays set
@@ -1398,49 +1444,84 @@ static void tbt_car_rx_body(struct tbt_carrier *c)
 
     atomic64_inc(&c->sess->rx_reads);
     tbt_rx_budget_start(&c->rx_budget, ktime_get_ns());
-    /* Retry a record an earlier -EAGAIN left in the parser before reading the
-     * socket. Without this, the record is unreachable: its bytes are already
-     * out of the socket (copied_seq == rcv_nxt), so neither sk_data_ready nor
-     * the poll's copied_seq check will ever enter the actor again, and every
-     * record behind it -- FBK included -- waits for data the peer cannot send
-     * because it is waiting for that very feedback. -EAGAIN here means the
-     * reason has not cleared; the 50 ms poll and the drain resume will retry. */
-    /* tbt_rx_parse_pending() never touches the socket -- its bytes are
-     * already out of it -- so it must not run under lock_sock(sk). This
-     * record can be a HELLO, whose handler reaches tbt_session_reincarnate()
-     * and the sleeping FEC flow setup; taking another AF_INET socket lock
-     * (sock_release/lock_sock on a stream) while holding this carrier's
-     * sk_lock is the nested sk_lock-AF_INET acquisition the lock contract
-     * forbids. */
-    {
-        int perr = tbt_rx_parse_pending(c);
 
-        if (perr == -EAGAIN)
+    /* One loop alternates two steps outside lock_sock(sk): parse what the
+     * parser already holds, then copy more bytes out of the socket with the
+     * lightweight actor. A record an earlier -EAGAIN left behind is retried
+     * before reading: its bytes are already out of the socket
+     * (copied_seq == rcv_nxt), so neither sk_data_ready nor the poll's
+     * copied_seq check can reach it again, and every record behind it -- FBK
+     * included -- waits for data the peer cannot send because it is waiting
+     * for that very feedback. -EAGAIN means the reason has not cleared; the
+     * 50 ms poll and the drain resume will retry. */
+    for (;;)
+    {
+        int perr, d;
+
+        if (atomic_read(&c->stopping))
+            break;
+        if (c->parser->have)
         {
+            perr = tbt_rx_parse_pending(c);
+            if (perr == -EAGAIN)
+            {
+                tbt_carrier_sk_put(sk);
+                return;
+            }
+            if (perr)
+            {
+                tbt_car_rx_error(c, perr);
+                tbt_carrier_sk_put(sk);
+                return;
+            }
+        }
+        if (tbt_rx_budget_stopped(&c->rx_budget, ktime_get_ns()))
+            break;
+        /* A full parser buffer can only be freed by parsing, which the next
+         * work item does; copying over it would lose data. */
+        if (c->parser->have >= sizeof(c->parser->buf))
+            break;
+        if (READ_ONCE(tcp_sk(sk)->copied_seq) ==
+            READ_ONCE(tcp_sk(sk)->rcv_nxt))
+            break;
+
+        desc.count = SIZE_MAX;
+        lock_sock(sk);
+        d = tcp_read_sock(sk, &desc, tbt_car_rx_copy_actor);
+        release_sock(sk);
+        if (d < 0)
+        {
+            WRITE_ONCE(c->sess->rx_last_drained, 0);
+            atomic64_inc(&c->sess->rx_read_zero);
+            if (READ_ONCE(sk->sk_state) != TCP_ESTABLISHED)
+                break;
+            /* skb_copy_bits() cannot produce this, but a socket-level read
+             * failure is not something retrying the same bytes can fix. */
+            tbt_car_rx_error(c, d);
             tbt_carrier_sk_put(sk);
             return;
         }
-        if (perr)
+        if (d > 0)
         {
-            tbt_car_rx_error(c, perr);
-            tbt_carrier_sk_put(sk);
-            return;
+            drained += (size_t)d;
+            atomic64_add(d, &c->sess->rx_read_bytes);
+            c->last_rx_ns = ktime_get_ns();
         }
+        else
+        {
+            atomic64_inc(&c->sess->rx_read_zero);
+        }
+        WRITE_ONCE(c->sess->rx_last_drained, d > 0 ? d : 0);
+        /* No progress (empty socket, full parser, or a spent budget) leaves
+         * the resume rule below to decide the wake. Otherwise parse the
+         * copied bytes before taking another read. */
+        if (d <= 0 || c->parser->have == 0)
+            break;
     }
-    lock_sock(sk);
-    drained = tcp_read_sock(sk, &desc, tbt_car_rx_actor);
-    release_sock(sk);
-    if (drained > 0)
-        atomic64_add(drained, &c->sess->rx_read_bytes);
-    else
-        atomic64_inc(&c->sess->rx_read_zero);
-    WRITE_ONCE(c->sess->rx_last_drained, drained > 0 ? drained : 0);
-    if (drained > 0)
-        c->last_rx_ns = ktime_get_ns();
 
     /* The peer closed the connection: a carrier never sends FIN, so a zero
      * read with a non-established socket is the end of this path. */
-    if (drained <= 0 && READ_ONCE(sk->sk_state) != TCP_ESTABLISHED)
+    if (!drained && READ_ONCE(sk->sk_state) != TCP_ESTABLISHED)
     {
         tbt_carrier_lost(c->sess, c, "peer-closed");
     }
@@ -1577,6 +1658,7 @@ static int tbt_carrier_send_segs(struct tbt_carrier *c, struct sock *sk,
 {
     struct msghdr msg = {};
     struct kvec iov[TBT_BATCH_SEG_MAX];
+    u32 cap = c->part_cap ? c->part_cap : TBT_CAR_PART_MAX;
     u32 wmem, sndbuf;
     u64 mem_avail;
     unsigned int i;
@@ -1585,7 +1667,7 @@ static int tbt_carrier_send_segs(struct tbt_carrier *c, struct sock *sk,
     lockdep_assert_held(&c->tx_lock);
     if (!sk)
         return -ENOTCONN;
-    if (!nseg || nseg > TBT_BATCH_SEG_MAX || total > TBT_CAR_PART_MAX)
+    if (!nseg || nseg > TBT_BATCH_SEG_MAX || total > cap)
         return -EINVAL;
     err = tbt_carrier_part_flush(c, sk);
     if (err)
@@ -1628,7 +1710,7 @@ static int tbt_carrier_send_segs(struct tbt_carrier *c, struct sock *sk,
         u32 tail;
 
         if (!tbt_fec_batch_tail(segs, nseg, total, (size_t)err, c->part,
-                                TBT_CAR_PART_MAX, &tail))
+                                cap, &tail))
             return -EIO;
         c->part_len = tail;
         c->part_off = 0;
@@ -1643,8 +1725,9 @@ static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
                                   const void *data, size_t len)
     {
     struct tbt_fec_batch_seg seg;
+    u32 cap = c->part_cap ? c->part_cap : TBT_CAR_PART_MAX;
 
-    if (len > TBT_CAR_PART_MAX)
+    if (len > cap)
         return -EINVAL;
     seg.base = data;
     seg.len = (u32)len;
@@ -1680,17 +1763,6 @@ static size_t tbt_http_header_build(struct tbt_carrier *c, char *buf, size_t cap
 
         return tbt_http_resp_header(buf, cap, &cfg);
     }
-}
-
-/* Keep the size line and the first record bytes of the near side's carrier 0
- * chunk for /proc/net/tbtun/http. A snapshot, not a transcript: the length is
- * published after the bytes, so a reader that sees it has them. */
-static void tbt_http_capture_chunk(struct tbt_session *sess, const char *chunk, size_t n)
-{
-    size_t cap = min_t(size_t, n, sizeof(sess->http_cap_chunk));
-
-    memcpy(sess->http_cap_chunk, chunk, cap);
-    WRITE_ONCE(sess->http_cap_chunk_len, (u16)cap);
 }
 
 /* Start the HTTP container for this carrier if it has not started yet. The
@@ -1762,11 +1834,11 @@ static int tbt_carrier_http_begin(struct tbt_carrier *c, struct sock *sk)
     c->http_started = true;
     c->last_tx_ns = ktime_get_ns();
     c->tx_bytes += hlen;
-    sess->carrier_bytes += hlen;
+    atomic64_add(hlen, &sess->carrier_bytes);
     if (sess->tunnel->cfg.role == TBT_ROLE_NEAR)
-        sess->http_req++;
+        atomic64_inc(&sess->http_req);
     else
-        sess->http_resp++;
+        atomic64_inc(&sess->http_resp);
     mutex_unlock(&c->http_lock);
     return 0;
 }
@@ -1851,7 +1923,7 @@ int tbt_carrier_send_fec_batch(struct tbt_carrier *c,
         c->tx_frames += count;
         c->tx_bytes += total;
         c->last_tx_ns = ktime_get_ns();
-        sess->carrier_bytes += total;
+        atomic64_add(total, &sess->carrier_bytes);
         if (sent)
             *sent = count;
     }
@@ -1885,7 +1957,7 @@ static int tbt_carrier_xmit_locked(struct tbt_session *sess,
     {
         pr_warn_once("tbtun: dropping frames: debug_loss=1 and drop_ppm=%u\n", c->drop_ppm);
         c->dropped_by_ppm++;
-        sess->dropped_by_ppm++;
+        atomic64_inc(&sess->dropped_by_ppm);
         fr->dropped = true;
         c->drop_snd_nxt = READ_ONCE(tcp_sk(sk)->snd_nxt);
         /* The injector's drop is a real record loss and must stay in the hole
@@ -1931,8 +2003,6 @@ static int tbt_carrier_xmit_locked(struct tbt_session *sess,
             atomic64_inc(&sess->http_parse_err);
             return -EIO;
         }
-        if (sess->tunnel->cfg.role == TBT_ROLE_NEAR && c->index == 0)
-            tbt_http_capture_chunk(sess, c->http_tx, n);
         err = tbt_carrier_send_whole(c, sk, c->http_tx, n);
         if (fr->hdr.type == TBT_F_HELLO && err != -EAGAIN)
             TBT_DIAG("HELLO chunk write tunnel=%llu carrier=%u gen=%u ret=%d len=%zu write_seq=%u snd_una=%u sndbuf=%u wmem=%u",
@@ -1949,7 +2019,7 @@ static int tbt_carrier_xmit_locked(struct tbt_session *sess,
         if (fr->hdr.type == TBT_F_DATA)
             c->data_frames++;
         c->last_tx_ns = ktime_get_ns();
-        sess->carrier_bytes += n;
+        atomic64_add(n, &sess->carrier_bytes);
         return 0;
     }
     /* hdrbuf is the header alone; the payload stays in its own iovec so this
@@ -2080,7 +2150,7 @@ static int tbt_carrier_xmit_locked(struct tbt_session *sess,
     if (fr->hdr.type == TBT_F_DATA)
         c->data_frames++;
     c->last_tx_ns = ktime_get_ns();
-    sess->carrier_bytes += total;
+    atomic64_add(total, &sess->carrier_bytes);
     return 0;
 }
 
@@ -2157,7 +2227,20 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
         c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX, GFP_KERNEL);
         c->http_rx = kzalloc(sizeof(*c->http_rx), GFP_KERNEL);
     }
-    c->part = kmalloc(TBT_CAR_PART_MAX, GFP_KERNEL);
+    /* A FEC session never writes a DATA frame: its share batches are bounded
+     * by TBT_FEC_BATCH_MAX HTTP-wrapped 1072-byte records. The ARQ container
+     * needs the full 8244-byte frame per short-write slot. A smaller buffer is
+     * an order-0 allocation on a 256-carrier session. */
+    if (sess->fec)
+    {
+        c->part_cap = TBT_HTTP_FEC_FRAME_MAX * TBT_FEC_BATCH_MAX;
+        c->part = kmalloc(c->part_cap, GFP_KERNEL);
+    }
+    else
+    {
+        c->part_cap = TBT_CAR_PART_MAX;
+        c->part = kmalloc(TBT_CAR_PART_MAX, GFP_KERNEL);
+    }
     /* Zeroed is the defined initial state: have == 0 for the parser and a
      * SIZE-state chunk parser for the assembler. kmalloc() would hand the
      * carrier whatever the previous slab user left there; a dirty `have`
@@ -2571,7 +2654,9 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c,
     if (!c->provisional)
         tbt_carrier_unannounce(sess, c->index);
     c->state = TBT_CAR_STALLED;
-    if (!c->lost_counted)
+    /* A provisional carrier never held a slot: its death is not a path loss
+     * of the session and must not add to carrier_lost. */
+    if (!c->provisional && !c->lost_counted)
     {
         c->lost_counted = true;
         atomic64_inc(&sess->carrier_lost);
@@ -2625,7 +2710,7 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c,
         tbt_tx_path_lost(sess, c->index);
     /* A join_dup storm is a retirement that has not landed; retry slowly and
      * fail the stream cleanly after a bounded number of rounds. */
-    if (sess->join_retries < U8_MAX)
+    if (!c->provisional && sess->join_retries < U8_MAX)
         sess->join_retries++;
     /* Containment: a tunnel reset must be a subset of a TCP failure. One dead
      * path is a repath, so it never resets a stream while any other carrier
@@ -3096,8 +3181,21 @@ static bool tbt_dial_take(struct tbt_session *sess)
     {
         u64 tokens = (u64)sess->dial_tokens + add;
 
-        sess->dial_tokens = tokens > rate ? rate : (u32)tokens;
-        sess->dial_refill_ns = now;
+        if (tokens >= rate)
+        {
+            sess->dial_tokens = rate;
+            sess->dial_refill_ns = now;
+        }
+        else
+        {
+            /* Keep the sub-token time in the refill clock: resetting it to
+             * `now` threw away the fraction on every partial refill, so a
+             * 50 ms poll could starve a bucket that never accumulates one
+             * whole token per poll. Only reachable with tokens < rate, so
+             * add < rate and the multiply cannot overflow. */
+            sess->dial_tokens = (u32)tokens;
+            sess->dial_refill_ns += add * NSEC_PER_SEC / rate;
+        }
     }
     ok = sess->dial_tokens != 0;
     if (ok)
@@ -3225,7 +3323,12 @@ static void tbt_replace_body(struct tbt_session *sess)
             continue;
         }
         /* A dead primary is covered by an idle spare first: that is the whole
-         * point of M, and it costs no new dial and no new 5-tuple. */
+         * point of M, and it costs no new dial and no new 5-tuple. The spare
+         * keeps its own slot j and stays active only while slot i is being
+         * replaced; tbt_car_poll_one() returns it to the spare pool once every
+         * primary is up again. Retiring the primary here without also
+         * replacing it left car[i] NULL, so the next pass dialled an (N+1)th
+         * connection and the session lost its last idle spare. */
         if (i < sess->n_pri)
         {
             int j;
@@ -3240,16 +3343,10 @@ static void tbt_replace_body(struct tbt_session *sess)
                 sp->active = true;
                 sp->state = TBT_CAR_UP;
                 sess->spare_activated++;
-                rcu_assign_pointer(sess->car[i], NULL);
-                list_add_tail(&c->node, &dead_now);
-                retired++;
-                c = NULL;
                 break;
             }
         }
         spin_unlock(&sess->lock);
-        if (!c)
-            continue;
         if (near)
         {
             if (!tbt_dial_take(sess))
@@ -3621,8 +3718,9 @@ static bool tbt_car_set_cc(struct socket *s, struct tbt_session *sess)
  * -EINPROGRESS, one carrier replacing itself every second while the far
  * logged `awaiting HELLO`. A second call re-enters SS_CONNECTING and waits
  * another window; -EALREADY is the same "still in progress" answer. */
-static int tbt_connect_bounded(struct tbt_session *sess, struct socket *s,
-                               const struct sockaddr *addr, int addrlen)
+static int tbt_connect_bounded(struct tbt_session *sess, struct tbt_carrier *c,
+                               struct socket *s, const struct sockaddr *addr,
+                               int addrlen)
 {
     unsigned long deadline = jiffies + msecs_to_jiffies(TBT_CONNECT_BUDGET_MS);
 
@@ -3630,6 +3728,12 @@ static int tbt_connect_bounded(struct tbt_session *sess, struct socket *s,
     {
         int err = kernel_connect(s, (tbt_sockaddr *)addr, addrlen, 0);
 
+        /* A teardown or a carrier retirement cancels the wait between the
+         * kernel's one-second windows instead of spending the whole 4 s
+         * budget on a socket nobody wants any more. */
+        if (READ_ONCE(sess->closing) ||
+            (c && atomic_read(&c->stopping)))
+            return -ECANCELED;
         if (!err || err == -EISCONN)
             return 0;
         if (err != -EINPROGRESS && err != -EALREADY)
@@ -3740,7 +3844,8 @@ static void tbt_car_connect_work(struct work_struct *w)
         u64 t0 = ktime_get_ns();
         u64 elapsed;
 
-        err = tbt_connect_bounded(sess, s, (const struct sockaddr *)&peer_ss, peer_len);
+        err = tbt_connect_bounded(sess, c, s,
+                                  (const struct sockaddr *)&peer_ss, peer_len);
         elapsed = ktime_get_ns() - t0;
         TBT_DIAG("tunnel=%llu carrier=%u gen=%u connect ret=%d elapsed_ms=%llu sk_state=%u",
                  (unsigned long long)t->cfg.id, c->index, c->gen, err,
@@ -3758,7 +3863,12 @@ static void tbt_car_connect_work(struct work_struct *w)
         goto release;
 
     tcp_sk(s->sk)->nonagle = TCP_NAGLE_OFF;
-    if (tbt_car_set_cc(s, sess))
+    /* The pre-connect tbt_car_set_cc() above already ran; repeating it after
+     * the handshake resets BBR's freshly initialised state. Only re-request
+     * when the socket actually carries another algorithm. */
+    if (strcmp(tbt_car_cc_actual(s->sk), tbt_carrier_cc) != 0)
+        tbt_car_set_cc(s, sess);
+    if (strcmp(tbt_car_cc_actual(s->sk), tbt_carrier_cc) == 0)
         atomic64_inc(&sess->car_bbr_ok);
     else
         atomic64_inc(&sess->car_bbr_fail);
@@ -3827,6 +3937,10 @@ fail:
         tbt_port_free(c->local_port);
         c->local_port = 0;
     }
+    /* A canceled dial (teardown or retirement) is not a connect failure and
+     * has no slot left to retry. */
+    if (err == -ECANCELED)
+        return;
     atomic64_inc(&sess->connect_fail);
     c->retry_at_ns = ktime_get_ns() + 200 * NSEC_PER_MSEC;
     /* The poll retries every 200 ms per slot: at 256 carriers an unratelimited
@@ -4142,7 +4256,7 @@ static void tbt_target_body(struct tbt_stream *st)
     struct socket *s;
     int err;
 
-    if (READ_ONCE(st->state) == TBT_ST_DEAD)
+    if (READ_ONCE(sess->closing) || READ_ONCE(st->state) == TBT_ST_DEAD)
         return;
     err = sock_create_kern(t->net, t->cfg.target.family, SOCK_STREAM, IPPROTO_TCP, &s);
     if (err)
@@ -4150,7 +4264,17 @@ static void tbt_target_body(struct tbt_stream *st)
     /* Same bound as a carrier dial: session teardown cancels w_target, and
      * the default connect timeout is the full SYN retry schedule. */
     s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
-    err = tbt_connect_bounded(sess, s, (const struct sockaddr *)&ss, alen);
+    err = tbt_connect_bounded(sess, NULL, s, (const struct sockaddr *)&ss,
+                              alen);
+    /* The target stream or the whole session left while the handshake was in
+     * progress: close the socket without asking tbt_stream_kill() to fail a
+     * stream that is already dead. */
+    if (err == -ECANCELED || READ_ONCE(st->state) == TBT_ST_DEAD)
+    {
+        tbt_sock_abort_on_close(s);
+        sock_release(s);
+        return;
+    }
     if (err)
     {
         sock_release(s);
@@ -4165,7 +4289,7 @@ static void tbt_target_body(struct tbt_stream *st)
          * concurrent stream kill sees a target with no sk and leaks it. */
         tbt_sock_abort_on_close(s);
         sock_release(s);
-        if (err == -EALREADY)
+        if (err == -EALREADY || err == -ECANCELED)
             return;
         goto fail;
     }

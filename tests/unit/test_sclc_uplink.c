@@ -1450,6 +1450,63 @@ static void test_reject(void)
     ok(u == NULL, "reject: bad mapping", "accepted");
 }
 
+static void test_gf16_deg1_extra_parity_core(void)
+{
+    sc_params p;
+    gf16_code *c;
+    char err[96];
+    uint64_t *planes;
+    uint8_t *erased;
+    gf16_dec_stat st;
+    int n, n_data, i;
+
+    memset(&p, 0, sizeof(p));
+    p.block = TBT_FEC_SCLC_BLOCK_UP;
+    p.L = TBT_FEC_SCLC_L_UP;
+    p.rate_num = 1;
+    p.rate_den = 4;
+    p.term = SC_TERM_ACC;
+    p.extra_dc = 5;
+    p.seed = 42;
+    c = gf16_build(&p, 42 ^ 0xD1B54A32D192ED03ULL, err, sizeof(err));
+    ok(c != NULL, "deg1-core: 8/24 gf16_build", err);
+    if (!c)
+        return;
+    n = gf16_n(c);
+    n_data = gf16_n_data(c);
+    planes = calloc((size_t)n * 4, sizeof(uint64_t));
+    erased = calloc((size_t)n, 1);
+    ok(planes && erased, "deg1-core: alloc", "");
+    if (!planes || !erased)
+        goto out;
+
+    for (i = 0; i < n_data; i++) {
+        planes[(size_t)i * 4 + 0] = 0x1111111111111111ULL * (uint64_t)(i + 1);
+        planes[(size_t)i * 4 + 1] = 0x2222222222222222ULL * (uint64_t)(i + 3);
+        planes[(size_t)i * 4 + 2] = 0x4444444444444444ULL * (uint64_t)(i + 5);
+        planes[(size_t)i * 4 + 3] = 0x8888888888888888ULL * (uint64_t)(i + 7);
+    }
+    gf16_encode_planes(c, 64, planes);
+    /* Erase 80 data variables + 400 extra degree-1 parity variables: total
+     * unknowns >> max_core=256, yet the stripped stopping-set core fits
+     * cleanly inside max_core and recovers 100% of data. */
+    for (i = 0; i < 80; i++) {
+        erased[i] = 1;
+        memset(planes + (size_t)i * 4, 0, 4 * sizeof(uint64_t));
+    }
+    for (i = n_data + 256; i < n_data + 256 + 400 && i < n; i++) {
+        erased[i] = 1;
+        memset(planes + (size_t)i * 4, 0, 4 * sizeof(uint64_t));
+    }
+    st = gf16_decode64(c, planes, erased, 1, 256);
+    ok_int((int)st.unresolved, 0, "deg1-core: resolves with >256 total erasures");
+    ok_int((int)st.core_skipped, 0, "deg1-core: stripped core does not exceed max_core");
+out:
+    free(planes);
+    free(erased);
+    gf16_free(c);
+}
+
 int main(void)
 {
     test_shapes();
@@ -1468,6 +1525,7 @@ int main(void)
     test_gf16_full_queue();
     test_queue_full_scan();
     test_reject();
+    test_gf16_deg1_extra_parity_core();
 
     printf("%s: %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks,
            failures);

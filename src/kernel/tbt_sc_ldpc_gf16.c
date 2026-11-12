@@ -166,6 +166,16 @@ struct gf16_code {
     int *irow;      /* n_chk */
     int *ipiv;      /* n */
 
+    /* Degree-1 stripping scratch for the dense core solve.  The extra
+     * checks of the low-rate SC_TERM_ACC graph own a degree-1 parity
+     * variable, so an erasure pattern that stops the peel would otherwise
+     * drag hundreds of useless one-edge columns into the dense core. */
+    uint8_t *act_ck;     /* n_chk: check still has an erased neighbour */
+    uint16_t *v_act_deg; /* n: distinct active checks touching an erased v */
+    uint16_t *elim_v;    /* n: peeled variables, in elimination order */
+    uint16_t *elim_ck;   /* n: check that solved each peeled variable */
+    uint16_t *elim_q;    /* n: peel work queue */
+
     size_t mem_bytes;
 };
 
@@ -204,6 +214,11 @@ void gf16_free(gf16_code *c)
     sclc_free(c->iuv);
     sclc_free(c->irow);
     sclc_free(c->ipiv);
+    sclc_free(c->act_ck);
+    sclc_free(c->v_act_deg);
+    sclc_free(c->elim_v);
+    sclc_free(c->elim_ck);
+    sclc_free(c->elim_q);
     sclc_free(c);
 }
 
@@ -254,6 +269,11 @@ int gf16_ensure_decode(gf16_code *c)
     c->iuv = zalloc((size_t)c->n, sizeof(int));
     c->irow = zalloc((size_t)c->n_chk, sizeof(int));
     c->ipiv = zalloc((size_t)c->n, sizeof(int));
+    c->act_ck = zalloc((size_t)c->n_chk, 1);
+    c->v_act_deg = zalloc((size_t)c->n, sizeof(uint16_t));
+    c->elim_v = zalloc((size_t)c->n, sizeof(uint16_t));
+    c->elim_ck = zalloc((size_t)c->n, sizeof(uint16_t));
+    c->elim_q = zalloc((size_t)c->n, sizeof(uint16_t));
     if (!c->val
 #ifndef __KERNEL__
         || !c->cx || !c->queue || !c->bcx ||
@@ -261,7 +281,8 @@ int gf16_ensure_decode(gf16_code *c)
 #endif
         || !c->lcx || !c->lcnt ||
         !c->lq || !c->lunk || !c->cmat || !c->icol || !c->iuv ||
-        !c->irow || !c->ipiv) {
+        !c->irow || !c->ipiv || !c->act_ck || !c->v_act_deg ||
+        !c->elim_v || !c->elim_ck || !c->elim_q) {
         sclc_free(c->val);
 #ifndef __KERNEL__
         sclc_free(c->cx);
@@ -280,6 +301,11 @@ int gf16_ensure_decode(gf16_code *c)
         sclc_free(c->iuv);
         sclc_free(c->irow);
         sclc_free(c->ipiv);
+        sclc_free(c->act_ck);
+        sclc_free(c->v_act_deg);
+        sclc_free(c->elim_v);
+        sclc_free(c->elim_ck);
+        sclc_free(c->elim_q);
         c->val = NULL;
 #ifndef __KERNEL__
         c->cx = NULL;
@@ -298,6 +324,11 @@ int gf16_ensure_decode(gf16_code *c)
         c->iuv = NULL;
         c->irow = NULL;
         c->ipiv = NULL;
+        c->act_ck = NULL;
+        c->v_act_deg = NULL;
+        c->elim_v = NULL;
+        c->elim_ck = NULL;
+        c->elim_q = NULL;
         return -1;
     }
 #ifndef __KERNEL__
@@ -471,7 +502,8 @@ gf16_code *gf16_build(const sc_params *p, uint64_t coef_seed, char *err,
           (size_t)c->n_chk * 4 * sizeof(uint64_t) +
           (size_t)c->n_chk * 2 * sizeof(uint16_t) +
           c->n + GF16_CORE_BUDGET +
-          ((size_t)c->n * 3 + (size_t)c->n_chk) * sizeof(int);
+          ((size_t)c->n * 3 + (size_t)c->n_chk) * sizeof(int) +
+          (size_t)c->n_chk + (size_t)c->n * 8;
 #ifndef __KERNEL__
     mem += (size_t)c->n_chk * sizeof(uint16_t) +
            (size_t)c->n_chk * sizeof(uint16_t) +
@@ -542,6 +574,97 @@ int gf16_verify(const gf16_code *c, const uint8_t *code)
             return ck + 1;
     }
     return 0;
+}
+
+/*
+ * Number of distinct active checks that still contain erased variable v.
+ * The check ids are deduplicated because a parallel edge is still one
+ * active check, not two; dv_max is at most a handful of entries, so the
+ * quadratic scan costs nothing next to the dense solve.
+ */
+static int gf16_active_deg(const gf16_code *c, const uint8_t *act, int v)
+{
+    int d = c->vdeg[v];
+    int cnt = 0;
+    int k, j;
+
+    for (k = 0; k < d; k++) {
+        int ck = c->vadj[(size_t)v * c->dv_max + k];
+
+        if (!act[ck])
+            continue;
+        for (j = 0; j < k; j++)
+            if (c->vadj[(size_t)v * c->dv_max + j] == ck)
+                break;
+        if (j == k)
+            cnt++;
+    }
+    return cnt;
+}
+
+/*
+ * Strip degree-1 erased variables out of the dense core.
+ *
+ * An erased variable in exactly one still-active check is solved by that
+ * check's equation once its other neighbours are known, and because it
+ * appears in no other active row, removing the row drops no constraint on
+ * the remaining system.  The (variable, check) pairs are recorded in
+ * elimination order and solved back to front after the dense core.  This
+ * is what keeps the hundreds of degree-1 extra parity variables of the
+ * low-rate uplink graph from filling max_core with one-edge columns.
+ */
+static int gf16_strip_deg1(gf16_code *c, uint8_t *act)
+{
+    int n = c->n;
+    uint16_t *vdeg = c->v_act_deg;
+    uint16_t *q = c->elim_q;
+    int qh = 0, qt = 0, nelim = 0;
+    int v, ck, k, j;
+
+    for (v = 0; v < n; v++) {
+        vdeg[v] = 0;
+        if (!c->lunk[v])
+            continue;
+        vdeg[v] = (uint16_t)gf16_active_deg(c, act, v);
+        if (vdeg[v] == 1)
+            q[qt++] = (uint16_t)v;
+    }
+    while (qh < qt) {
+        v = q[qh++];
+        if (!c->lunk[v] || vdeg[v] != 1)
+            continue;
+        ck = -1;
+        for (k = 0; k < c->vdeg[v]; k++) {
+            int c2 = c->vadj[(size_t)v * c->dv_max + k];
+
+            if (act[c2]) {
+                ck = c2;
+                break;
+            }
+        }
+        if (ck < 0)
+            continue;
+        c->elim_v[nelim] = (uint16_t)v;
+        c->elim_ck[nelim] = (uint16_t)ck;
+        nelim++;
+        act[ck] = 0;
+        for (k = 0; k < c->cdeg[ck]; k++) {
+            int w = c->cadj[(size_t)ck * c->dc_max + k];
+
+            if (!c->lunk[w])
+                continue;
+            /* Recompute once per neighbour even if the row repeats it. */
+            for (j = 0; j < k; j++)
+                if (c->cadj[(size_t)ck * c->dc_max + j] == w)
+                    break;
+            if (j < k)
+                continue;
+            vdeg[w] = (uint16_t)gf16_active_deg(c, act, w);
+            if (vdeg[w] == 1)
+                q[qt++] = (uint16_t)w;
+        }
+    }
+    return nelim;
 }
 
 #ifndef __KERNEL__
@@ -639,11 +762,12 @@ static void gf16_core_solve(gf16_code *c, uint8_t *out, int target_data_only,
     int n = c->n, nchk = c->n_chk;
     int *col = NULL, *uv = NULL, *rows = NULL, *pivot = NULL;
     uint8_t *mat = NULL, *bin = NULL;
-    int nu = 0, nr = 0;
+    uint8_t *act = c->act_ck;
+    int nu = 0, nr = 0, nelim = 0;
     int ck, k, v, i;
     int rank = 0, g2 = 0;
-    size_t stride;
-    int rc = 0;
+    int solved = 1;
+    size_t stride = 0;
 
     if (max_core <= 0)
         return;
@@ -652,27 +776,39 @@ static void gf16_core_solve(gf16_code *c, uint8_t *out, int target_data_only,
     rows = sclc_zalloc((size_t)nchk * sizeof(int));
     if (!col || !uv || !rows)
         goto done;
+
+    /* The scalar peel keeps unknowns in val[]; mirror them into lunk[] so
+     * the degree-1 stripper and the back-substitution share the 64-lane
+     * form. */
+    for (v = 0; v < n; v++)
+        c->lunk[v] = (uint8_t)(c->val[v] == 0xFF);
+    for (ck = 0; ck < nchk; ck++)
+        act[ck] = (uint8_t)((c->cx[ck] >> 8) != 0);
+    nelim = gf16_strip_deg1(c, act);
+
     for (v = 0; v < n; v++)
         col[v] = -1;
 
     for (ck = 0; ck < nchk; ck++) {
-        if ((c->cx[ck] >> 8) == 0)
+        if (!act[ck])
             continue;
         rows[nr++] = ck;
         for (k = 0; k < c->cdeg[ck]; k++) {
             v = c->cadj[(size_t)ck * c->dc_max + k];
-            if (c->val[v] == 0xFF && col[v] < 0) {
+            if (c->lunk[v] && col[v] < 0) {
                 col[v] = nu;
                 uv[nu++] = v;
             }
         }
     }
-    if (nu == 0)
+    if (nu == 0 && nelim == 0)
         goto done;
 
     st->core_calls++;
     if (nu > st->core_max_vars)
         st->core_max_vars = nu;
+    if (nu == 0)
+        goto backsub;
     if (nu > max_core || nr <= 0) {
         st->core_skipped++;
         goto done;
@@ -709,7 +845,7 @@ static void gf16_core_solve(gf16_code *c, uint8_t *out, int target_data_only,
         ck = rows[i];
         for (k = 0; k < c->cdeg[ck]; k++) {
             v = c->cadj[(size_t)ck * c->dc_max + k];
-            if (c->val[v] == 0xFF) {
+            if (c->lunk[v]) {
                 int cc = col[v];
                 row[cc] ^= c->ccoef[(size_t)ck * c->dc_max + k];
                 brow[cc] ^= 1; /* GF(2) incidence, parallel edges cancel */
@@ -820,14 +956,67 @@ static void gf16_core_solve(gf16_code *c, uint8_t *out, int target_data_only,
         }
     }
 
-    for (i = 0; i < nu; i++)
-        c->val[uv[pivot[i]]] = mat[(size_t)i * stride + nu];
+    for (i = 0; i < nu; i++) {
+        v = uv[pivot[i]];
+        c->val[v] = mat[(size_t)i * stride + nu];
+        c->lunk[v] = 0;
+    }
+
+backsub:
+    /*
+     * Solve the peeled degree-1 variables from the rows that were removed
+     * from the dense core, newest elimination first.  Every other unknown
+     * in such a row is either a later elimination (already solved by this
+     * reverse walk) or a core variable (solved above), so the row is
+     * complete; a row that still sees an unknown, or whose coefficient of
+     * the peeled variable cancels to zero, leaves the variable unresolved.
+     */
+    for (i = nelim - 1; i >= 0; i--) {
+        uint8_t h = 0, s = 0;
+        int bad = 0;
+
+        v = c->elim_v[i];
+        ck = c->elim_ck[i];
+        if (!c->lunk[v])
+            continue;
+        for (k = 0; k < c->cdeg[ck]; k++) {
+            int w = c->cadj[(size_t)ck * c->dc_max + k];
+            uint8_t coef = c->ccoef[(size_t)ck * c->dc_max + k];
+
+            if (w == v) {
+                h ^= coef;
+                continue;
+            }
+            if (c->lunk[w]) {
+                bad = 1;
+                break;
+            }
+            s ^= gf_mul(coef, c->val[w]);
+        }
+        if (bad || h == 0) {
+            solved = 0;
+            continue;
+        }
+        c->val[v] = gf_mul(s, gf_inv_tab[h]);
+        c->lunk[v] = 0;
+    }
+    if (!solved) {
+        st->core_failed++;
+        goto done;
+    }
 
     for (v = 0; v < n; v++)
         out[v] = (c->val[v] == 0xFF) ? 0 : c->val[v];
     if (gf16_verify(c, out) != 0) {
-        for (i = 0; i < nu; i++)
+        for (i = 0; i < nu; i++) {
             c->val[uv[i]] = 0xFF;
+            c->lunk[uv[i]] = 1;
+        }
+        for (i = 0; i < nelim; i++) {
+            v = c->elim_v[i];
+            c->val[v] = 0xFF;
+            c->lunk[v] = 1;
+        }
         st->core_failed++;
         st->core_bad++;
         goto done;
@@ -839,8 +1028,15 @@ static void gf16_core_solve(gf16_code *c, uint8_t *out, int target_data_only,
             if (c->val[v] == 0xFF)
                 unres++;
         if (unres) {
-            for (i = 0; i < nu; i++)
+            for (i = 0; i < nu; i++) {
                 c->val[uv[i]] = 0xFF;
+                c->lunk[uv[i]] = 1;
+            }
+            for (i = 0; i < nelim; i++) {
+                v = c->elim_v[i];
+                c->val[v] = 0xFF;
+                c->lunk[v] = 1;
+            }
             st->core_failed++;
             st->core_bad++;
         } else {
@@ -849,7 +1045,6 @@ static void gf16_core_solve(gf16_code *c, uint8_t *out, int target_data_only,
     }
 
 done:
-    (void)rc;
     sclc_free(col);
     sclc_free(uv);
     sclc_free(rows);
@@ -1122,25 +1317,35 @@ static int gf16_certify_planes(gf16_code *c, uint64_t *planes)
  * matrix and the erasure pattern, so one elimination serves all 64.  The
  * right-hand side is carried as four planes per row; a row operation
  * multiplies one plane set and XORs it, never a scalar per lane.
+ *
+ * Degree-1 erased variables are peeled off the core first, solved by
+ * back-substitution afterwards; only the remaining stopping-set variables
+ * enter the dense matrix.  Returns 1 when the elimination and the
+ * back-substitution resolved every core variable, 0 otherwise.  The caller
+ * certifies the batch once; this function does not go through lane 0.
  */
-static void gf16_core_solve64(gf16_code *c, uint64_t *planes, int max_core,
-                              gf16_dec_stat *st)
+static int gf16_core_solve64(gf16_code *c, uint64_t *planes, int max_core,
+                             gf16_dec_stat *st)
 {
     int n = c->n, nchk = c->n_chk;
     int *col = c->icol, *uv = c->iuv, *rows = c->irow, *pivot = c->ipiv;
-    uint8_t *mat = c->cmat;
+    uint8_t *mat = c->cmat, *act = c->act_ck;
     uint64_t *rhs = c->lcx; /* row i's right-hand side lives at lcx[rows[i]] */
-    int nu = 0, nr = 0;
+    int nu = 0, nr = 0, nelim = 0;
     int ck, k, v, i;
     int rank = 0;
-    size_t stride;
+    int solved = 1;
+    size_t stride = 0;
 
     if (max_core <= 0 || !mat || !rhs)
-        return;
+        return 0;
+    for (ck = 0; ck < nchk; ck++)
+        act[ck] = (uint8_t)(c->lcnt[ck] != 0);
+    nelim = gf16_strip_deg1(c, act);
     for (v = 0; v < n; v++)
         col[v] = -1;
     for (ck = 0; ck < nchk; ck++) {
-        if (!c->lcnt[ck])
+        if (!act[ck])
             continue;
         rows[nr++] = ck;
         for (k = 0; k < c->cdeg[ck]; k++) {
@@ -1151,24 +1356,26 @@ static void gf16_core_solve64(gf16_code *c, uint64_t *planes, int max_core,
             }
         }
     }
-    if (!nu)
-        return;
+    if (nu == 0 && nelim == 0)
+        return 0;
     st->core_calls++;
     if (nu > st->core_max_vars)
         st->core_max_vars = nu;
+    if (nu == 0)
+        goto backsub;
     if (nu > max_core || nr <= 0) {
         st->core_skipped++;
-        return;
+        return 0;
     }
     if (nr < nu) {
         st->core_failed++;
         st->core_under++;
-        return;
+        return 0;
     }
     stride = (size_t)nu + 1;
     if ((long long)nr * (long long)stride > (long long)GF16_CORE_BUDGET) {
         st->core_skipped++;
-        return;
+        return 0;
     }
 
     memset(mat, 0, (size_t)nr * stride);
@@ -1251,7 +1458,7 @@ static void gf16_core_solve64(gf16_code *c, uint64_t *planes, int max_core,
     if (rank < nu) {
         st->core_failed++;
         st->core_rankdef++;
-        return;
+        return 0;
     }
     /* Inconsistent rows below the last pivot invalidate the solve. */
     for (i = rank; i < nr; i++) {
@@ -1269,7 +1476,7 @@ static void gf16_core_solve64(gf16_code *c, uint64_t *planes, int max_core,
                      rhs[(size_t)rows[i] * 4 + 3])) {
             st->core_failed++;
             st->core_bad++;
-            return;
+            return 0;
         }
     }
 
@@ -1279,26 +1486,57 @@ static void gf16_core_solve64(gf16_code *c, uint64_t *planes, int max_core,
                4 * sizeof(uint64_t));
         c->lunk[v] = 0;
     }
-    /* One lane verifies the shared solve; every lane uses the same
-     * coefficients and the same mask. */
-    for (v = 0; v < n; v++) {
-        if (c->lunk[v]) {
-            c->val[v] = 0xFF;
-        } else {
-            const uint64_t *x = planes + (size_t)v * 4;
 
-            c->val[v] = (uint8_t)((x[0] & 1u) | ((x[1] & 1u) << 1) |
-                                  ((x[2] & 1u) << 2) | ((x[3] & 1u) << 3));
+backsub:
+    /*
+     * Solve the peeled degree-1 variables from the rows that were removed
+     * from the dense core, newest elimination first.  Every other unknown
+     * in such a row is either a later elimination (already solved by this
+     * reverse walk) or a core variable (solved above), so the row is
+     * complete; a row that still sees an unknown, or whose coefficient of
+     * the peeled variable cancels to zero, leaves the variable unresolved.
+     */
+    for (i = nelim - 1; i >= 0; i--) {
+        uint64_t s[4] = {0, 0, 0, 0};
+        uint64_t t[4];
+        uint8_t h = 0;
+        int bad = 0;
+
+        v = c->elim_v[i];
+        ck = c->elim_ck[i];
+        if (!c->lunk[v])
+            continue;
+        for (k = 0; k < c->cdeg[ck]; k++) {
+            int w = c->cadj[(size_t)ck * c->dc_max + k];
+            uint8_t coef = c->ccoef[(size_t)ck * c->dc_max + k];
+
+            if (w == v) {
+                h ^= coef;
+                continue;
+            }
+            if (c->lunk[w]) {
+                bad = 1;
+                break;
+            }
+            gf16_mul_planes(c, t, planes + (size_t)w * 4, coef);
+            s[0] ^= t[0];
+            s[1] ^= t[1];
+            s[2] ^= t[2];
+            s[3] ^= t[3];
         }
+        if (bad || h == 0) {
+            solved = 0;
+            continue;
+        }
+        gf16_mul_planes(c, t, s, gf_inv_tab[h]);
+        memcpy(planes + (size_t)v * 4, t, 4 * sizeof(uint64_t));
+        c->lunk[v] = 0;
     }
-    if (gf16_verify(c, c->val) != 0) {
-        for (i = 0; i < nu; i++)
-            c->lunk[uv[i]] = 1;
+    if (!solved) {
         st->core_failed++;
-        st->core_bad++;
-        return;
+        return 0;
     }
-    st->core_solved++;
+    return 1;
 }
 
 gf16_dec_stat gf16_decode64(gf16_code *c, uint64_t *planes,
@@ -1312,6 +1550,7 @@ gf16_dec_stat gf16_decode64(gf16_code *c, uint64_t *planes,
     uint8_t *unk;
     int qh = 0, qt = 0;
     int v, ck, k;
+    int core_ok = 0;
     long visits = 0;
 
     memset(&st, 0, sizeof(st));
@@ -1420,7 +1659,7 @@ gf16_dec_stat gf16_decode64(gf16_code *c, uint64_t *planes,
                 break;
             }
         if (any)
-            gf16_core_solve64(c, planes, max_core, &st);
+            core_ok = gf16_core_solve64(c, planes, max_core, &st);
     }
 
     {
@@ -1433,12 +1672,27 @@ gf16_dec_stat gf16_decode64(gf16_code *c, uint64_t *planes,
                 all = 0;
                 break;
             }
-        /* Report success only after a residual check over every lane, and
+        /*
+         * Report success only after one residual check over every lane, and
          * compare every received or resolved parity symbol with the value
-         * the recovered data implies.  The core solve's own verify covers
-         * lane 0 only; this covers all 64. */
-        if (all && !gf16_certify_planes(c, planes))
-            memset(unk, 1, (size_t)n);
+         * the recovered data implies.  After a dense core solve lcnt is
+         * still nonzero, so gf16_certify_planes() runs the finish walk in
+         * all 64 lanes; the core solve no longer verifies lane 0 itself.
+         * The core statistics follow the certification outcome, not the
+         * elimination alone.
+         */
+        if (all) {
+            if (gf16_certify_planes(c, planes)) {
+                if (core_ok)
+                    st.core_solved++;
+            } else {
+                if (core_ok) {
+                    st.core_failed++;
+                    st.core_bad++;
+                }
+                memset(unk, 1, (size_t)n);
+            }
+        }
 
         for (v = 0; v < n; v++) {
             uint64_t *o = planes + (size_t)v * 4;

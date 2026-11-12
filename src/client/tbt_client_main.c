@@ -26,6 +26,7 @@
 #include "tbt_client_args.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -107,6 +108,27 @@ int main(int argc, char **argv)
                     argv[bad_arg]);
             return 1;
         }
+        /* A file may hold the bare key list, like the command line. Give it
+         * the same missing-directive prefix the inline path adds. */
+        if (line[0] == '\0')
+        {
+            fprintf(stderr, "tbt_client: %s: no tunnel directive\n",
+                    argv[2]);
+            return 1;
+        }
+        if (strncmp(line, "tunnel ", 7) && strncmp(line, "tunnel\t", 7))
+        {
+            size_t n = strlen(line);
+
+            if (n + 10 > sizeof(line))
+            {
+                fprintf(stderr, "tbt_client: %s: tunnel line too long\n",
+                        argv[2]);
+                return 1;
+            }
+            memmove(line + 9, line, n + 1);
+            memcpy(line, "tunnel 1 ", 9);
+        }
     }
     else
     {
@@ -122,7 +144,7 @@ int main(int argc, char **argv)
     ec.drop_ppm = us.drop_ppm;
     ec.run_ms = us.run_ms;
     ec.local_queue_bytes = us.local_queue_bytes;
-    ec.verbose = (int)us.verbose;
+    ec.verbose = us.verbose > (u32)INT_MAX ? INT_MAX : (int)us.verbose;
 
     /* The documented default lives in this front end; the module parser
      * still insists on an explicit role. */

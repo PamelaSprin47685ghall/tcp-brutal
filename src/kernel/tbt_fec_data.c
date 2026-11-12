@@ -262,6 +262,16 @@ static struct tbt_fec_grouped *tbt_fec_codec_build(
  * four such runs, each of which re-arms with no delay while fresh bits
  * remain; the cap bounds the worker hold time, not the delivery latency. */
 #define TBT_FEC_DRAIN_PASS_MAX 64
+/* A run of full shares from one block goes to the stream socket as one
+ * frame. 16 shares is 16 KiB at S=1024: large enough that one share per
+ * allocation is no longer the cost, small enough that a full delivery queue
+ * still bounds the frame a reorder tree has to hold. */
+#define TBT_FEC_DELIVER_COALESCE_MAX 16
+/* Once a carrier that only misses the "light" notsent line is recorded as
+ * the fallback, examine at most this many further carriers for a better
+ * one. Without the bound a cruising BBR bottleneck sends the scan over all
+ * 256 carriers on every record. */
+#define TBT_FEC_DISPATCH_PROBE_MAX 16
 /* A carrier whose socket has refused a DATA record for this long is slow:
  * later scans try it after every healthy carrier, and one admission clears
  * the mark. A slow socket keeps its own TCP retransmissions; the flag
@@ -465,6 +475,29 @@ static struct tbt_fec_out *tbt_fec_out_fifo_peek(struct tbt_session *sess)
 static void tbt_fec_out_fifo_pop(struct tbt_session *sess)
 {
     smp_store_release(&sess->fec_fifo_head, sess->fec_fifo_head + 1);
+}
+
+/* Peek the record `idx` slots past the head. The drain work is the only
+ * consumer, so the records it has already inspected stay live; a producer
+ * extends the tail and never rewrites a published slot. */
+static struct tbt_fec_out *tbt_fec_out_fifo_peek_at(struct tbt_session *sess,
+                                                    u32 idx)
+{
+    u32 head = sess->fec_fifo_head + idx;
+    u32 tail = smp_load_acquire(&sess->fec_fifo_tail);
+
+    if (idx >= tail - sess->fec_fifo_head)
+        return NULL;
+    return smp_load_acquire(
+        &sess->fec_fifo[head & (TBT_FEC_OUTQ_FIFO_SIZE - 1)]);
+}
+
+/* Release `cnt` head slots at once. The records themselves are freed by the
+ * caller after this, so a batch of one carrier write leaves the FIFO with a
+ * single release store. */
+static void tbt_fec_out_fifo_pop_n(struct tbt_session *sess, u32 cnt)
+{
+    smp_store_release(&sess->fec_fifo_head, sess->fec_fifo_head + cnt);
 }
 
 void tbt_fec_out_kick(struct tbt_session *sess)
@@ -1068,29 +1101,51 @@ static void tbt_fec_out_slow_note(struct tbt_carrier *c, bool room)
         WRITE_ONCE(c->slow, true);
 }
 
-/* Offer one DATA record to the carriers in async_rot order and write it on
- * the first socket whose send space holds it. A refusal costs no wait: the
- * scan moves to the next carrier, and a refusal after the wspace check is
- * the same skip. Round 0 leaves out carriers already known slow; round 1
- * gives them a recovery chance, and room clears the mark. The cursor
- * advances only after a successful write, so a healthy carrier keeps taking
- * records while a slow one is passed over.
+/* Offer a batch of DATA records to the carriers in async_rot order and write
+ * it on the first socket whose send space holds the whole batch. A refusal
+ * costs no wait: the scan moves to the next carrier, and a refusal after the
+ * wspace check is the same skip. Round 0 leaves out carriers already known
+ * slow; round 1 gives them a recovery chance, and room clears the mark. The
+ * cursor advances only after a successful write, so a healthy carrier keeps
+ * taking records while a slow one is passed over.
  *
- * Returns 0 when the record reached a carrier and -EAGAIN when every socket
- * was full (the caller keeps the record at the FIFO head), or another error
- * from the first carrier that failed for a non-capacity reason. */
+ * A carrier is recorded as the fallback only while its TCP send backlog is
+ * at most TBT_FEC_DISPATCH_FALLBACK_NOTSENT. Without that bound a
+ * backlogged carrier took every record and the queue behind it became the
+ * head-of-line block the FIFO exists to avoid. Once a fallback exists, at
+ * most TBT_FEC_DISPATCH_PROBE_MAX further carriers are examined for a light
+ * one; a cruising BBR bottleneck is otherwise re-scanned 256 times per
+ * record.
+ *
+ * Returns 0 when the batch reached a carrier and -EAGAIN when every socket
+ * was full or over its backlog bound (the caller keeps the records at the
+ * FIFO head), or another error from the first carrier that failed for a
+ * non-capacity reason. */
 static int tbt_fec_out_dispatch(struct tbt_session *sess,
-                                struct tbt_fec_out *o)
+                                struct tbt_fec_out *const *recs, u16 cnt)
 {
-    u16 start = (u16)(atomic_read(&sess->async_rot) % sess->n_car);
+    const u8 *data[TBT_FEC_BATCH_MAX];
+    u16 lens[TBT_FEC_BATCH_MAX];
+    u32 total = 0;
+    u16 start;
     u16 fallback = 0xffff;
+    u16 probes = 0;
     bool skipped_slow = false;
     int round;
+    u16 i;
 
+    if (!cnt || cnt > TBT_FEC_BATCH_MAX)
+        return -EINVAL;
+    for (i = 0; i < cnt; i++)
+    {
+        data[i] = recs[i]->data;
+        lens[i] = recs[i]->len;
+        total += lens[i];
+    }
+    start = (u16)(atomic_read(&sess->async_rot) % sess->n_car);
     for (round = 0; round < 2; round++)
     {
         u16 idx = start;
-        u16 i;
 
         if (round && !skipped_slow)
             break;
@@ -1100,6 +1155,12 @@ static int tbt_fec_out_dispatch(struct tbt_session *sess,
             struct sock *sk;
             int err;
 
+            /* Bound the scan after the first usable fallback: a light
+             * carrier found within the next 16 is worth the switch, a
+             * farther one is not worth 256 probes on every record. */
+            if (fallback != 0xffff &&
+                probes++ >= TBT_FEC_DISPATCH_PROBE_MAX)
+                goto use_fallback;
             c = tbt_carrier_get(sess, (u8)idx);
             if (!c)
             {
@@ -1138,7 +1199,7 @@ static int tbt_fec_out_dispatch(struct tbt_session *sess,
                     idx = 0;
                 continue;
             }
-            if (sk_stream_wspace(sk) < (int)o->len)
+            if (sk_stream_wspace(sk) < (int)total)
             {
                 tbt_carrier_sk_put(sk);
                 tbt_fec_out_slow_note(c, false);
@@ -1153,8 +1214,12 @@ static int tbt_fec_out_dispatch(struct tbt_session *sess,
 
                 if (notsent > TBT_FEC_DISPATCH_LIGHT_NOTSENT)
                 {
-                    if (fallback == 0xffff)
+                    if (fallback == 0xffff &&
+                        notsent <= TBT_FEC_DISPATCH_FALLBACK_NOTSENT)
+                    {
                         fallback = idx;
+                        probes = 0;
+                    }
                     tbt_carrier_sk_put(sk);
                     tbt_carrier_put(c);
                     if (++idx == sess->n_car)
@@ -1164,7 +1229,7 @@ static int tbt_fec_out_dispatch(struct tbt_session *sess,
             }
             tbt_carrier_sk_put(sk);
             tbt_fec_out_slow_note(c, true);
-            err = tbt_carrier_send_fec(c, o->data, o->len);
+            err = tbt_carrier_send_fec_batch(c, data, lens, cnt, NULL);
             if (err == -EAGAIN)
                 tbt_fec_out_slow_note(c, false);
             tbt_carrier_put(c);
@@ -1183,8 +1248,11 @@ static int tbt_fec_out_dispatch(struct tbt_session *sess,
             return err;
         }
     }
-    /* No light carrier: use the first one with socket space, without any
-     * notsent test. Rejecting here is what made BBR app-limited. */
+use_fallback:
+    /* No light carrier: use the first one with socket space whose send
+     * backlog is below the fallback bound. Rejecting here is what made BBR
+     * app-limited; taking a carrier past the bound is what made the FIFO
+     * head-of-line blocked. */
     if (fallback != 0xffff)
     {
         struct tbt_carrier *c = tbt_carrier_get(sess, (u8)fallback);
@@ -1200,7 +1268,7 @@ static int tbt_fec_out_dispatch(struct tbt_session *sess,
             return -EAGAIN;
         }
         sk = tbt_carrier_sk_get(c);
-        if (!sk || sk_stream_wspace(sk) < (int)o->len)
+        if (!sk || sk_stream_wspace(sk) < (int)total)
         {
             if (sk)
                 tbt_carrier_sk_put(sk);
@@ -1220,7 +1288,7 @@ static int tbt_fec_out_dispatch(struct tbt_session *sess,
         }
         tbt_carrier_sk_put(sk);
         tbt_fec_out_slow_note(c, true);
-        err = tbt_carrier_send_fec(c, o->data, o->len);
+        err = tbt_carrier_send_fec_batch(c, data, lens, cnt, NULL);
         if (err == -EAGAIN)
             tbt_fec_out_slow_note(c, false);
         tbt_carrier_put(c);
@@ -1237,16 +1305,102 @@ static int tbt_fec_out_dispatch(struct tbt_session *sess,
     return -EAGAIN;
 }
 
-/* Drain the session FIFO. A record is offered to every carrier from
- * async_rot; a full socket is skipped without waiting and the scan moves on.
- * No carrier owns a queue, so a slow socket cannot hold a record behind it:
- * when every socket is full the record stays at the FIFO head and the work
- * retries in 2 ms. A run writes at most TBT_FEC_DRAIN_PASS_MAX records, then
- * re-arms at once while the FIFO has more. */
+/* Refill the session token bucket and report how long until it can pay
+ * `bytes`, without deducting anything. The caller charges only after the
+ * carrier accepted the batch (tbt_fec_out_pace_charge), exactly like the ARQ
+ * pump: a record that stays at the FIFO head behind a full socket must not
+ * pay for a write that never happened.
+ *
+ * The ARQ pump owns this bucket (DESIGN.md §5.3) and seeds it under
+ * pump_lock. A FEC session's DATA never passes through that pump, so the
+ * drain work is a second producer: a plain read-modify-write is enough
+ * because the fields are single aligned u64 words and a lost update costs a
+ * few bytes of pacing accuracy, never a stuck bucket. The burst is the same
+ * one the pump uses (two chunks per carrier), so enabling tunnel_rate does
+ * not slice FEC throughput into per-record waits. */
+static u32 tbt_fec_out_pace_wait(struct tbt_session *sess, u32 bytes)
+{
+    u32 rate = sess->tunnel->cfg.tunnel_rate;
+    u64 burst = (u64)2 * sess->n_car * TBT_CHUNK_MAX;
+    u64 tokens, last, now, wait_ms;
+
+    if (!rate)
+        return 0;
+    now = ktime_get_ns();
+    tokens = READ_ONCE(sess->tokens);
+    last = READ_ONCE(sess->last_refill_ns);
+    if (!last)
+    {
+        tokens = burst;
+        last = now;
+    }
+    else if (now > last)
+    {
+        u64 dt = now - last;
+
+        if (tokens >= burst ||
+            dt > (burst - tokens) * NSEC_PER_SEC / rate)
+        {
+            tokens = burst;
+            last = now;
+        }
+        else
+        {
+            u64 add = (u64)rate * dt / NSEC_PER_SEC;
+
+            tokens += add;
+            if (tokens > burst)
+                tokens = burst;
+            /* Keep the sub-token remainder in last_refill_ns: a low
+             * tunnel_rate refills less than one token per work pass, and
+             * restarting the window every pass would lose it forever. */
+            if (add)
+                last += add * (u64)NSEC_PER_SEC / rate;
+        }
+    }
+    else if (now < last)
+    {
+        /* A timestamp from another CPU can read slightly ahead; restart the
+         * window rather than stalling the bucket. */
+        last = now;
+    }
+    WRITE_ONCE(sess->tokens, tokens);
+    WRITE_ONCE(sess->last_refill_ns, last);
+    if (tokens >= bytes)
+        return 0;
+    /* The bucket is empty for this batch; name the first millisecond at
+     * which it can pay, so the work does not spin. */
+    wait_ms = ((u64)bytes - tokens) * 1000 + rate - 1;
+    wait_ms /= rate;
+    if (wait_ms < 1)
+        wait_ms = 1;
+    if (wait_ms > 1000)
+        wait_ms = 1000;
+    return (u32)wait_ms;
+}
+
+/* Deduct one accepted batch. The clamp keeps a concurrent ARQ deduction from
+ * wrapping the unsigned bucket. */
+static void tbt_fec_out_pace_charge(struct tbt_session *sess, u32 bytes)
+{
+    u64 tokens = READ_ONCE(sess->tokens);
+
+    WRITE_ONCE(sess->tokens, tokens > bytes ? tokens - bytes : 0);
+}
+
+/* Drain the session FIFO. Up to TBT_FEC_BATCH_MAX consecutive live DATA
+ * records are offered to the carriers from async_rot as one write; a full
+ * socket is skipped without waiting and the scan moves on. No carrier owns a
+ * queue, so a slow socket cannot hold a record behind it: when every socket
+ * is full the records stay at the FIFO head and the work retries in 2 ms. A
+ * run writes at most TBT_FEC_DRAIN_PASS_MAX batches, then re-arms at once
+ * while the FIFO has more. */
 static void tbt_fec_out_drain_work(struct work_struct *w)
 {
     struct tbt_session *sess =
         container_of(to_delayed_work(w), struct tbt_session, fec_drain_work);
+    struct tbt_fec_out *recs[TBT_FEC_BATCH_MAX];
+    struct tbt_fec_out *force_drop = NULL;
     u16 served = 0;
 
     if (!sess->fec || !sess->fec_fifo || !sess->n_car ||
@@ -1255,6 +1409,9 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
     while (served < TBT_FEC_DRAIN_PASS_MAX)
     {
         struct tbt_fec_out *o = tbt_fec_out_fifo_peek(sess);
+        u16 cnt = 0, k;
+        u32 bytes = 0;
+        u32 wait_ms;
         int err;
 
         if (!o)
@@ -1264,6 +1421,7 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
          * consumer that can drop it safely. */
         if (o->flow && !tbt_fec_flow_live(READ_ONCE(o->flow->state)))
         {
+            force_drop = NULL;
             tbt_fec_out_fifo_pop(sess);
             spin_lock(&sess->fec_out_lock);
             tbt_fec_out_free(sess, o);
@@ -1275,13 +1433,19 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
          * record that merely used another carrier. The sender reports
          * success and frees the record; only the codec can recover it. */
         {
+            bool memo = o == force_drop;
             u32 drop = READ_ONCE(sess->fec_drop_ppm[o->carrier]);
 
-            if (drop && get_random_u32() % TBT_DROP_PPM_MAX < drop)
+            /* force_drop carries the decision the batch lookahead already
+             * made for this record. Re-rolling here would drop it with
+             * twice the configured probability, which silently doubled the
+             * injected loss of every record behind a batch head. */
+            force_drop = NULL;
+            if (memo || (drop && get_random_u32() % TBT_DROP_PPM_MAX < drop))
             {
                 pr_warn_once("tbtun: dropping FEC records: debug_loss=1 and drop_ppm=%u\n",
                              drop);
-                sess->dropped_by_ppm++;
+                atomic64_inc(&sess->dropped_by_ppm);
                 tbt_fec_out_fifo_pop(sess);
                 spin_lock(&sess->fec_out_lock);
                 tbt_fec_out_free(sess, o);
@@ -1289,7 +1453,59 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
                 continue;
             }
         }
-        err = tbt_fec_out_dispatch(sess, o);
+        /* Batch the head with the consecutive records that may follow it.
+         * A dead flow or a record the injector selects ends the batch and
+         * is dropped at the head of the next iteration, so records leave
+         * the FIFO in order. */
+        recs[0] = o;
+        cnt = 1;
+        bytes = o->len;
+        if (sess->tunnel && sess->tunnel->cfg.tunnel_rate)
+        {
+            /* Size the pacing charge before the injector runs: a rejected
+             * write must not consume random numbers (it would roll the same
+             * record again on every paced retry). This upper bound is the
+             * live run without drop decisions; the actual batch below can
+             * only be smaller. */
+            for (k = 1; k < TBT_FEC_BATCH_MAX; k++)
+            {
+                struct tbt_fec_out *r = tbt_fec_out_fifo_peek_at(sess, k);
+
+                if (!r)
+                    break;
+                if (r->flow &&
+                    !tbt_fec_flow_live(READ_ONCE(r->flow->state)))
+                    break;
+                bytes += r->len;
+            }
+            wait_ms = tbt_fec_out_pace_wait(sess, bytes);
+            if (wait_ms)
+            {
+                mod_delayed_work(TBT_WQ, &sess->fec_drain_work,
+                                 msecs_to_jiffies(wait_ms));
+                return;
+            }
+            bytes = o->len;
+        }
+        for (k = 1; k < TBT_FEC_BATCH_MAX; k++)
+        {
+            struct tbt_fec_out *r = tbt_fec_out_fifo_peek_at(sess, k);
+            u32 drop;
+
+            if (!r)
+                break;
+            if (r->flow && !tbt_fec_flow_live(READ_ONCE(r->flow->state)))
+                break;
+            drop = READ_ONCE(sess->fec_drop_ppm[r->carrier]);
+            if (drop && get_random_u32() % TBT_DROP_PPM_MAX < drop)
+            {
+                force_drop = r;
+                break;
+            }
+            recs[cnt++] = r;
+            bytes += r->len;
+        }
+        err = tbt_fec_out_dispatch(sess, recs, cnt);
         if (err == -EAGAIN)
         {
             /* Every socket is full: zero wait was paid, and the session
@@ -1298,9 +1514,10 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
                              msecs_to_jiffies(2));
             return;
         }
-        tbt_fec_out_fifo_pop(sess);
+        tbt_fec_out_fifo_pop_n(sess, cnt);
         spin_lock(&sess->fec_out_lock);
-        tbt_fec_out_free(sess, o);
+        for (k = 0; k < cnt; k++)
+            tbt_fec_out_free(sess, recs[k]);
         spin_unlock(&sess->fec_out_lock);
         if (err)
         {
@@ -1310,7 +1527,9 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
             return;
         }
         atomic64_inc(&sess->fec_flush_pass);
-        served++;
+        if (sess->tunnel && sess->tunnel->cfg.tunnel_rate)
+            tbt_fec_out_pace_charge(sess, bytes);
+        served += cnt;
     }
     if (served)
         /* Close the producer/consumer race: a push that saw the FIFO
@@ -2685,6 +2904,12 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
      * close budget, so an older backlog must not refill the queue. */
     WRITE_ONCE(tx->closing, READ_ONCE(st->close_since_ns) != 0);
     tbt_fec_tx_stall_diag(sess, tx, st);
+    /* Shrink the replay hot pool once per pump call, not once per pass (up
+     * to 64 passes): the shrink walks and reallocates the ring, so running
+     * it inside the loop turned a low-memory pump into a shrink storm that
+     * could never make progress. */
+    if (tbt_mem_avail_kb() < TBT_FEC_MEM_PAUSE_KB && tx->replay)
+        tbt_fec_replay_shrink(tx->replay, true, 0, &tx->replay_lock);
     for (;;)
     {
         u32 got, k, hard, max_unacked;
@@ -2722,8 +2947,6 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
             max_unacked = 8;
         if (max_unacked > hard)
             max_unacked = hard;
-        if (mem < TBT_FEC_MEM_PAUSE_KB && tx->replay)
-            tbt_fec_replay_shrink(tx->replay, true, 0, &tx->replay_lock);
         /* Hard memory floor: open no new block while at least two blocks are
          * still unacknowledged. This never stops inside a block, because a
          * partial block is invisible to the receiver's ACK; the retry is
@@ -2737,29 +2960,14 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
         if (unacked >= max_unacked && tx->fill == 0 &&
             !tbt_fec_tx_block_dirty(tx))
         {
-            u32 ring_bytes = (u32)(READ_ONCE(tx->head) -
-                                   READ_ONCE(tx->tail));
-
-            /* The replay ring is at its soft cap, but the source ring may
-             * still hold the bytes the close needs to drain. Breaking here
-             * before ring_get left a full ring untouched forever. If the
-             * packet window is open, read and send one block; the hard
-             * refusal in tbt_fec_out_push() still bounds memory. */
-            if (ring_bytes &&
-                !tbt_fec_credit_waiting(READ_ONCE(tx->peer_pkts),
-                                        READ_ONCE(tx->seq),
-                                        READ_ONCE(tx->credit),
-                                        READ_ONCE(tx->groups),
-                                        READ_ONCE(tx->n),
-                                        READ_ONCE(tx->m)))
-            {
-                atomic64_inc(&sess->fec_unacked_ring_drain);
-            }
-            else
-            {
-                tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
-                break;
-            }
+            /* The replay ring is at its unacked cap. The cap exists to bound
+             * the vmalloc window; the old ring-drain bypass ignored it
+             * whenever the credit gate was open, so the 20/12/8 tiers were
+             * never enforced and memory kept growing. The ACK that frees a
+             * block re-runs the pump, and a close still gets its FIN through
+             * the control path. */
+            tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
+            break;
         }
         if (tbt_fec_tx_outq_high(sess))
         {
@@ -4270,6 +4478,18 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess,
         u64 total_pkts = READ_ONCE(rx->total_pkts);
 
         blocked = false;
+        /* Backpressure: the stream's ready queue is full, so moving another
+         * share into it would only allocate (GFP_ATOMIC) for bytes the
+         * application cannot reach. Stop here with every cursor frozen;
+         * zeroing progress_ns keeps the 30 s stall reset from firing while
+         * the application, not the wire, is the reason delivery is behind.
+         * tbt_drain_body() wakes TBT_SW_FEC_RX once the queue drains below
+         * TBT_RX_READY_LOW. */
+        if (READ_ONCE(st->rx_queued) >= TBT_RX_RING_MAX)
+        {
+            rx->progress_ns = 0;
+            break;
+        }
         /* Teardown: stop handing bytes to a stream that is being destroyed.
          * The ACK below still covers what was delivered before the flag. */
         if (READ_ONCE(rx->stopping))
@@ -4500,8 +4720,59 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess,
              * one slot would read past this block's buffer. */
             if (len > rx->s)
                 len = rx->s;
-            err = tbt_rx_fec_deliver(st, off,
-                                     b->data + (size_t)p * rx->s, len);
+            {
+                u16 cnt = 1;
+
+                /* Consecutive full shares of this block are contiguous in
+                 * its buffer, so a run of them is one frame: one allocation
+                 * and one stream insert instead of up to 16. Only full
+                 * shares coalesce; a short share states its own length and
+                 * must keep its slot exact. */
+                if (p < real && len == rx->s)
+                {
+                    while (cnt < TBT_FEC_DELIVER_COALESCE_MAX &&
+                           cur + cnt < limit)
+                    {
+                        u64 nrel = (cur + cnt) - seq0;
+                        u16 np = (u16)(nrel % bn);
+                        u16 nlen;
+
+                        if ((u16)(nrel / bn) != g || np >= real)
+                            break;
+                        nlen = tbt_fec_rx_share_len(b->dlen[np],
+                                                    b->short_len, np, real,
+                                                    rx->s);
+                        if (nlen != rx->s)
+                            break;
+                        cnt++;
+                    }
+                }
+                err = tbt_rx_fec_deliver(st, off,
+                                         b->data + (size_t)p * rx->s,
+                                         (u16)(cnt * rx->s));
+                if (cnt > 1 && err)
+                {
+                    /* A batch only fails as a whole: -ENOMEM queued no
+                     * bytes, and a duplicate or hole is ambiguous across the
+                     * batch. Retry the head share alone; besides realigning
+                     * off exactly, the 1 KiB allocation is the fallback for
+                     * a 16 KiB frame the atomic allocator refused. */
+                    cnt = 1;
+                    err = tbt_rx_fec_deliver(st, off,
+                                             b->data + (size_t)p * rx->s,
+                                             len);
+                }
+                if (!err)
+                {
+                    off += (u16)(cnt * rx->s);
+                    spin_lock_bh(&rx->lock);
+                    rx->deliver_bytes = off; /* per-packet commit */
+                    rx->next_deliver = cur + cnt;
+                    spin_unlock_bh(&rx->lock);
+                    delivered = true;
+                    continue;
+                }
+            }
             if (err == -ENOMEM)
             {
                 /* Commit only the successful prefix and keep the cursor.
@@ -5562,9 +5833,16 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
     {
         b->wake_first_ok = (u8)(rc == 0 && b->ready);
         b->wake_sampled = 1;
-        sample_e = b->wake_real > b->wake_ndata
-                       ? (u16)(b->wake_real - b->wake_ndata)
-                       : 0;
+        /* A first attempt that completed the block saw no erasure: E is the
+         * loss the codec had to repair, not the deficit at the wake line.
+         * Reporting the wake deficit made a clean link look lossy (0 % loss
+         * and a successful first attempt still reported E > 0), so the
+         * controller never left COLD. */
+        sample_e = b->wake_first_ok
+                       ? 0
+                       : (b->wake_real > b->wake_ndata
+                              ? (u16)(b->wake_real - b->wake_ndata)
+                              : 0);
         sample_s = (u16)(b->wake_ndata + b->wake_nparity - b->wake_real);
         sample_real = b->wake_real;
         sample_first = b->wake_first_ok != 0;
@@ -5639,15 +5917,21 @@ static void tbt_fec_rx_codec_publish_locked(struct tbt_fec_rx *rx,
 {
     struct tbt_fec_codec_entry *pin;
     bool ready = false;
+    bool publish_shape;
     u16 shares;
 
     if (!e || !e->ready || !e->codec)
         return;
     /* An out-of-order old block must not drag rx->n/m (and the FBK
-     * n_current/m_current) back to its retired shape. Only a block at or
-     * beyond the delivery frontier may publish the session view. */
+     * n_current/m_current) back to its retired shape. */
     if (block_id < READ_ONCE(rx->next_super))
         return;
+    /* Only the block at the delivery frontier may publish the session view:
+     * an already-decoded block ahead of it would move rx->n/m (and the FBK
+     * n_current/m_current) to the future shape while the frontier still
+     * delivers the old one, so the peer's split and the delivered bytes
+     * disagree. A receiver with no codec yet has no shape to protect. */
+    publish_shape = block_id == READ_ONCE(rx->next_super) || !rx->codec_entry;
     shares = (u16)(e->key.n + e->key.m);
     pin = tbt_fec_codec_cache_get(rx->codec_cache, &e->key, &ready);
     if (pin && ready && pin != rx->codec_entry)
@@ -5660,15 +5944,18 @@ static void tbt_fec_rx_codec_publish_locked(struct tbt_fec_rx *rx,
     }
     else if (pin)
         tbt_fec_codec_cache_put(pin);
-    rx->n = e->key.n;
-    rx->m = e->key.m;
-    rx->shape.n = e->key.n;
-    rx->shape.m = e->key.m;
-    rx->shape.codec_variant = 2;
-    rx->shape.L = e->key.L;
-    rx->shape.block = e->key.block;
-    rx->shape.rate_ppm =
-        (u32)((((u64)e->key.n * 1000000u) + shares - 1u) / shares);
+    if (publish_shape)
+    {
+        rx->n = e->key.n;
+        rx->m = e->key.m;
+        rx->shape.n = e->key.n;
+        rx->shape.m = e->key.m;
+        rx->shape.codec_variant = 2;
+        rx->shape.L = e->key.L;
+        rx->shape.block = e->key.block;
+        rx->shape.rate_ppm =
+            (u32)((((u64)e->key.n * 1000000u) + shares - 1u) / shares);
+    }
     /* The switch is effective once a block of the new shape is attached.
      * The target pin is no longer needed; dropping it here keeps one cache
      * slot free for the next target change. Blocks keep their own entry
@@ -5958,11 +6245,15 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess,
 
         if (!c)
             continue;
-        if (tbt_fec_adapt_carrier_alive(atomic_read(&c->up),
-                                        atomic_read(&c->stopping),
-                                        atomic_read(&c->connected), now,
-                                        READ_ONCE(c->last_rx_ns),
-                                        READ_ONCE(c->rtt_us)))
+        /* A one-way FEC flow receives only PAD keepalives on an idle
+         * carrier. The 4 s default horizon would call that carrier dead
+         * between keepalives and freeze the controller, so the keepalive
+         * interval (plus 2 s slack) extends the horizon when configured. */
+        if (tbt_fec_adapt_carrier_alive_ka(
+                atomic_read(&c->up), atomic_read(&c->stopping),
+                atomic_read(&c->connected), now,
+                READ_ONCE(c->last_rx_ns), READ_ONCE(c->rtt_us),
+                sess->tunnel ? sess->tunnel->cfg.keepalive_ms : 0))
         {
             tbt_fec_adapt_bitmap_set(alive_bm, i);
             alive++;
@@ -6118,7 +6409,19 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess,
                             tbt_fec_codec_cache_put(old);
                     }
                     else if (e)
-                        tbt_fec_codec_cache_put(e);
+                    {
+                        /* The codec is still building. Keep the cache
+                         * reference as the pending target: dropping it here
+                         * left the request with no owner, so the finished
+                         * build never promoted rx->m_target and the peer
+                         * kept a shape the receiver had already asked to
+                         * change. */
+                        struct tbt_fec_codec_entry *old = rx->target_entry;
+
+                        rx->target_entry = e;
+                        if (old)
+                            tbt_fec_codec_cache_put(old);
+                    }
                 }
             }
             if (rx->build_q_n)
@@ -7344,7 +7647,11 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
         {
             atomic64_inc(&sess->fec_replay_miss_alloc);
             atomic64_inc(&sess->fec_replay_miss);
-            return -ENOMEM;
+            /* A dropped NACK is a missed repair the receiver retries; it is
+             * not a carrier-framing failure. -ENOMEM here killed the carrier
+             * (and with it every share in flight on it) on a transient
+             * allocation failure. */
+            return 0;
         }
         memset(marker_done, 0, sizeof(marker_done));
         {
@@ -9362,6 +9669,9 @@ int tbt_fec_data_init(struct tbt_session *sess)
     /* The estimator fold uses TBT_FEC_ADAPT_GROUPS entries on the stack; the
      * SC-LDPC codec's own group limit must not outgrow that scratch. */
     BUILD_BUG_ON(TBT_FEC_ADAPT_GROUPS < TBT_SCLC_MAX_GROUPS);
+    /* One coalesced delivery is handed to tbt_rx_fec_deliver() as a u16
+     * length, so the run bound times the wire slot must fit. */
+    BUILD_BUG_ON(TBT_FEC_DELIVER_COALESCE_MAX * TBT_FEC_S > U16_MAX);
 
     if (!n || !m || (u16)n + (u16)m > TBT_FEC_MAX_SHARES)
     {

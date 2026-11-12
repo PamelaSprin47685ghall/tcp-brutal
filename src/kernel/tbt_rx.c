@@ -436,13 +436,14 @@ int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len)
         st->rx_queued += len;
         st->rx_next = off + len;
         tbt_rx_pull_locked(st);
-        /* FEC delivery must apply the same delivery-queue pause as the ARQ
-         * path (tbt_rx_flush()). Without it nothing ever sets st->paused in
-         * a FEC session, so the carrier readers in tbt_car_rx_body() never
-         * stop; a slow application would let rx_q grow without bound under
-         * GFP_ATOMIC allocations while the FEC ACK keeps granting credit. */
-        if (st->rx_queued >= TBT_RX_RING_MAX)
-            WRITE_ONCE(st->paused, true);
+        /* Never set st->paused here. In a FEC session every carrier reader
+         * checks st->paused and stops reading, which also stops the reverse
+         * ACKs, NACKs and RSTs on those same connections: the sender can
+         * never learn that the queue is full and the tunnel self-deadlocks.
+         * A full ready queue parks the FEC delivery in
+         * tbt_fec_deliver_ready() instead, and tbt_drain_body() arms
+         * TBT_SW_FEC_RX when the application has drained below
+         * TBT_RX_READY_LOW. */
         queued = true;
     }
     else
@@ -741,47 +742,67 @@ struct tbt_hello_gen
     bool psk;        /* the tag proves the configured crypto_key= */
 };
 
-/* Crypto fields of a FEC HELLO. The session lock serializes the one-time key
- * adoption, the generation rotation and the rx-context init: several carriers
- * may present HELLO at the same time. body_xor() is read-only after init, so
- * the data paths do not take this lock.
+/* Crypto fields of a FEC HELLO, split out without touching session state.
+ * `hello_key` is body-owned key material: the caller must wipe this struct
+ * with tbt_memzero_explicit() once the locked transition has consumed it. */
+struct tbt_hello_crypto
+{
+    bool enabled;
+    u8 key_id;
+    u8 peer_nonce[TBT_CRYPTO_NONCE_LEN];
+    u8 hello_key[TBT_CRYPTO_KEY_LEN];
+};
+
+/* Nothing here mutates the session: the parse validates the crypto header and
+ * copies its fields. Keeping it outside sess->lock leaves the critical
+ * section that follows with only the state transition and its checks.
  *
  * `why` names the check that refused the HELLO. Every failure here is -EPROTO,
  * and a wrong key rule is indistinguishable from a wrong key on the wire
  * without it. */
-static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
-                               size_t len, u8 path_id,
-                               const struct tbt_hello_gen *g,
-                               const char **why)
+static int tbt_rx_hello_crypto_parse(struct tbt_session *sess, const u8 *body,
+                                     size_t len, struct tbt_hello_crypto *hc,
+                                     const char **why)
 {
-    bool enabled = false;
-    u8 key_id = TBT_CRYPTO_KEY_ID_NONE;
-    u8 peer_nonce[TBT_CRYPTO_NONCE_LEN];
-    u8 hello_key[TBT_CRYPTO_KEY_LEN];
-    u8 key[TBT_CRYPTO_KEY_LEN];
-    bool reincarnated = false;
-    int err = 0;
-
+    memset(hc, 0, sizeof(*hc));
+    hc->key_id = TBT_CRYPTO_KEY_ID_NONE;
     TBT_DIAG("hello crypto parse tunnel=%llu body_len=%zu",
              (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
              len);
-    if (tbt_crypto_hello_parse(body, len, &enabled, &key_id, peer_nonce,
-                               hello_key))
+    if (tbt_crypto_hello_parse(body, len, &hc->enabled, &hc->key_id,
+                               hc->peer_nonce, hc->hello_key))
     {
         *why = "crypto hello parse";
         pr_warn_ratelimited("tbtun: tunnel %llu: HELLO crypto parse failed: -EPROTO\n",
                             (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0));
-        tbt_memzero_explicit(hello_key, sizeof(hello_key));
-        tbt_memzero_explicit(key, sizeof(key));
+        tbt_memzero_explicit(hc->hello_key, sizeof(hc->hello_key));
         return -EPROTO;
     }
     TBT_DIAG("hello crypto parsed tunnel=%llu enabled=%d key_id=%u have_key=%d key_peer=%d",
              (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
-             enabled, key_id, READ_ONCE(sess->crypto_have_key),
+             hc->enabled, hc->key_id, READ_ONCE(sess->crypto_have_key),
              READ_ONCE(sess->crypto_key_peer));
+    return 0;
+}
 
-    spin_lock(&sess->lock);
-    if (enabled != sess->crypto)
+/* Crypto state transition of one FEC HELLO. The caller holds sess->lock and
+ * keeps it across the far gate's phase one and phase two: a carrier that
+ * committed crypto_epoch before the anchor/nonce commit would make every
+ * sibling's precheck see a new epoch against the old session identity and
+ * reject it ("source epoch"/"session nonce" storms with 256 carriers). The
+ * lock also serializes the one-time key adoption, the generation rotation and
+ * the rx-context init when several carriers present HELLO at once.
+ * body_xor() is read-only after init, so the data paths stay lockless. */
+static int tbt_rx_hello_crypto_locked(struct tbt_session *sess,
+                                      const struct tbt_hello_crypto *hc,
+                                      const u8 *body, size_t len, u8 path_id,
+                                      const struct tbt_hello_gen *g,
+                                      bool *reincarnated, const char **why)
+{
+    u8 key[TBT_CRYPTO_KEY_LEN];
+    int err = 0;
+
+    if (hc->enabled != sess->crypto)
     {
         *why = "crypto enabled mismatch";
         err = -EPROTO;
@@ -803,7 +824,7 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
         err = -EPROTO;
         goto out;
     }
-    if (!enabled)
+    if (!hc->enabled)
     {
         /* The generation high-water is session identity, not cipher state:
          * it must advance with crypto=off too, or crypto_epoch_set stays
@@ -825,7 +846,8 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
      * resolve_key with -EPROTO and left the session with a single carrier
      * (measured: probe N, 315 HELLO rejections in 4 s). */
     if (tbt_crypto_resolve_key(sess->crypto_have_key && !sess->crypto_key_peer,
-                               sess->crypto_key, enabled, key_id, hello_key, key))
+                               sess->crypto_key, hc->enabled, hc->key_id,
+                               hc->hello_key, key))
     {
         *why = "crypto key resolve";
         err = -EPROTO;
@@ -860,7 +882,8 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
          * proved the PSK and named a strictly later generation may install
          * it: a replayed HELLO carries an older epoch, a stranger has no
          * tag, and neither can reset a keystream. */
-        if (memcmp(sess->crypto_rx_nonce, peer_nonce, sizeof(peer_nonce)) == 0)
+        if (memcmp(sess->crypto_rx_nonce, hc->peer_nonce,
+                   sizeof(hc->peer_nonce)) == 0)
         {
             /* v11 mints a fresh epoch for every HELLO, so the authenticated
              * session-identity high-water must advance here too. Otherwise a
@@ -883,8 +906,9 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
             err = -EPROTO;
             goto out;
         }
-        memcpy(sess->crypto_rx_nonce, peer_nonce, sizeof(peer_nonce));
-        if (tbt_crypto_init(&sess->crypto_ctx.rx, key, peer_nonce, 0))
+        memcpy(sess->crypto_rx_nonce, hc->peer_nonce,
+               sizeof(hc->peer_nonce));
+        if (tbt_crypto_init(&sess->crypto_ctx.rx, key, hc->peer_nonce, 0))
         {
             *why = "crypto rx init";
             err = -EPROTO;
@@ -918,12 +942,12 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
         sess->crypto_epoch = g->epoch;
         sess->crypto_epoch_set = true;
         atomic64_inc(&sess->crypto_reincarnations);
-        reincarnated = true;
+        *reincarnated = true;
         goto out;
     }
 
-    memcpy(sess->crypto_rx_nonce, peer_nonce, sizeof(peer_nonce));
-    if (tbt_crypto_init(&sess->crypto_ctx.rx, key, peer_nonce, 0))
+    memcpy(sess->crypto_rx_nonce, hc->peer_nonce, sizeof(hc->peer_nonce));
+    if (tbt_crypto_init(&sess->crypto_ctx.rx, key, hc->peer_nonce, 0))
     {
         *why = "crypto rx init";
         err = -EPROTO;
@@ -934,24 +958,7 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
     smp_store_release(&sess->crypto_ready, true);
 
 out:
-    spin_unlock(&sess->lock);
-    /* The new incarnation's first OPEN may already be queued behind this
-     * HELLO on another carrier. Retire the old incarnation's tombstones
-     * before returning, so none of them can refuse it. */
-    if (reincarnated && sess->tunnel->cfg.role == TBT_ROLE_FAR)
-        tbt_session_reincarnate(sess);
-    tbt_memzero_explicit(hello_key, sizeof(hello_key));
     tbt_memzero_explicit(key, sizeof(key));
-    if (err)
-        pr_warn_ratelimited("tbtun: tunnel %llu: HELLO crypto resolve failed: %s (%d)\n",
-                            (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
-                            *why, err);
-    else
-        TBT_DIAG("hello crypto ready tunnel=%llu key_peer=%d tx_ready=%d rx_ready=%d",
-                 (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
-                 READ_ONCE(sess->crypto_key_peer),
-                 READ_ONCE(sess->crypto_tx_ready),
-                 READ_ONCE(sess->crypto_ready));
     return err;
 }
 
@@ -969,11 +976,12 @@ static int tbt_hello_bad(struct tbt_carrier *c, const char *why)
 
 /* The far side's HELLO gate: the source anchor, the session nonce and the
  * nonce authority rule. Called twice for one HELLO -- as a read-only precheck
- * before tbt_rx_hello_crypto(), and as the commit after it -- with sess->lock
- * held both times. Several carriers can pass the precheck together, so the
- * second call repeats every check against whatever the winner committed;
- * only then does it adopt an unset nonce, fix the anchor and record the peer
- * generation. Each refusal is counted exactly once, here.
+ * before tbt_rx_hello_crypto_locked(), and as the commit after it -- both
+ * inside one sess->lock hold, so no sibling carrier can observe the epoch
+ * moved before the anchor/nonce commit. The second call repeats every check
+ * against whatever the transition committed; only then does it adopt an unset
+ * nonce, fix the anchor and record the peer generation. Each refusal is
+ * counted exactly once, here.
  *
  * A HELLO that proved the configured PSK is the session owner: it may rename
  * the session nonce on a later generation, and it may move the anchor to a
@@ -1021,12 +1029,13 @@ static int tbt_hello_far_gate(struct tbt_session *sess, struct tbt_carrier *c,
             *why = "source address";
             return -EPROTO;
         }
-        /* Phase one only: this check runs before tbt_rx_hello_crypto(), so
-         * no state has moved yet. Phase two (commit) runs after the crypto
-         * step adopted this HELLO's nonce/epoch, where equality is expected
-         * for the very HELLO that performed the rotation; re-testing here
-         * would reject every legitimate restarted peer that changed source.
-         * A replay never reaches phase two: phase one rejects it. */
+        /* Phase one only: this check runs before
+         * tbt_rx_hello_crypto_locked(), so no state has moved yet. Phase two
+         * (commit) runs after the crypto step adopted this HELLO's
+         * nonce/epoch, where equality is expected for the very HELLO that
+         * performed the rotation; re-testing here would reject every
+         * legitimate restarted peer that changed source. A replay never
+         * reaches phase two: phase one rejects it. */
         if (!commit &&
             (!g->psk || !sess->crypto_epoch_set ||
              g->epoch <= sess->crypto_epoch))
@@ -1086,21 +1095,32 @@ static int tbt_hello_far_gate(struct tbt_session *sess, struct tbt_carrier *c,
 
 /* Validate HELLO, adopt or check the nonce, and join the far side's slot.
  *
- * Two phases keep a refused HELLO from leaving state behind. The stateless
- * checks (path id, source anchor, session nonce, nonce authority) run before
- * tbt_rx_hello_crypto(), so a wrong nonce can neither adopt the peer's key
- * nor poison the RX context. Every mutation -- the session nonce, the anchor,
- * peer_gen, peer_hello and join_retries -- happens only after the crypto step
- * accepted the HELLO. The commit repeats the anchor and nonce checks under
- * sess->lock because another carrier may have fixed them in between. */
+ * A refused HELLO must not leave state behind. The stateless checks (path id,
+ * source anchor, session nonce, nonce authority) run before anything mutates,
+ * and the crypto transition only runs after the admission gate accepted the
+ * source. Every session-identity mutation -- the session nonce and the anchor
+ * -- happens in the same critical section as the check that guards it; the
+ * per-carrier fields (peer_gen, peer_hello) are set only after that check.
+ *
+ * For a far HELLO the whole sequence runs under one sess->lock hold:
+ * phase-one admission (tbt_hello_far_gate(commit=false)), the crypto
+ * transition (tbt_rx_hello_crypto_locked()) and the phase-two commit
+ * (tbt_hello_far_gate(commit=true)). Dropping the lock in between let a
+ * carrier that committed crypto_epoch first make every sibling's precheck see
+ * the new epoch against the old anchor/nonce and reject it. The join runs
+ * after the unlock because it may cancel stream work;
+ * tbt_session_reincarnate() runs first so the new incarnation's OPEN cannot be
+ * refused by the old tombstones. */
 int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
 {
     struct tbt_session *sess = c->sess;
     struct tbt_tunnel *t = sess->tunnel;
     bool far = t->cfg.role == TBT_ROLE_FAR;
     u8 want_role = far ? TBT_ROLE_NEAR : TBT_ROLE_FAR;
+    struct tbt_hello_crypto hc;
     struct tbt_addr src;
     struct tbt_hello_gen hg;
+    bool reincarnated = false;
     u8 gen = 0;
 
     if (!tbt_hello_admit(sess->fec, h->body_len, body, want_role))
@@ -1149,12 +1169,12 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
     if (tbt_le16(body + 18) != TBT_PAYLOAD_MAX || tbt_le16(body + 20) != TBT_CHUNK_MAX)
         return tbt_hello_bad(c, "payload/chunk ceiling");
 
-    /* Phase one: admission. Nothing here writes session or carrier state. */
+    /* Validate the path id and source address before taking sess->lock:
+     * tbt_carrier_sk_get()/tbt_sk_peer_addr() take the carrier's sk_lock, and
+     * neither runs inside a spinlock. */
     if (far)
     {
         struct sock *csk = tbt_carrier_sk_get(c);
-        const char *why = NULL;
-        int gerr;
 
         if (h->path_id >= sess->n_car || !csk)
         {
@@ -1164,11 +1184,6 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
         }
         tbt_sk_peer_addr(csk, &src);
         tbt_carrier_sk_put(csk);
-        spin_lock(&sess->lock);
-        gerr = tbt_hello_far_gate(sess, c, body, &hg, &src, gen, false, &why);
-        spin_unlock(&sess->lock);
-        if (gerr)
-            return tbt_hello_bad(c, why);
     }
     else
     {
@@ -1178,43 +1193,88 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
             return tbt_hello_bad(c, "path id");
     }
 
+    /* The field extraction stays outside sess->lock; the transition it feeds
+     * runs inside the same hold as the far gate. */
     if (sess->fec)
     {
-        const char *why = "crypto fields";
-        int cerr = tbt_rx_hello_crypto(sess, body, h->body_len, h->path_id,
-                                       &hg, &why);
+        const char *why = NULL;
 
-        if (cerr)
+        if (tbt_rx_hello_crypto_parse(sess, body, h->body_len, &hc, &why))
             return tbt_hello_bad(c, why);
     }
 
-    /* Phase two: commit. Every check that guards a one-time write is repeated
-     * under the lock the write itself takes. */
     if (far)
     {
         const char *why = NULL;
-        int gerr;
-        int err;
+        int gerr, cerr = 0;
 
+        /* One critical section: admission, transition, commit. A carrier
+         * that committed the epoch before its siblings' admission checks
+         * would make them compare the new epoch against the old anchor and
+         * session nonce. */
         spin_lock(&sess->lock);
-        gerr = tbt_hello_far_gate(sess, c, body, &hg, &src, gen, true, &why);
+        gerr = tbt_hello_far_gate(sess, c, body, &hg, &src, gen, false,
+                                  &why);
+        if (!gerr && sess->fec)
+            cerr = tbt_rx_hello_crypto_locked(sess, &hc, body, h->body_len,
+                                              h->path_id, &hg, &reincarnated,
+                                              &why);
+        if (!gerr && !cerr)
+            gerr = tbt_hello_far_gate(sess, c, body, &hg, &src, gen, true,
+                                      &why);
         spin_unlock(&sess->lock);
-        if (gerr)
+        /* The new incarnation's first OPEN may already be queued behind this
+         * HELLO on another carrier. Retire the old incarnation's tombstones
+         * before the join can hand the slot to it. */
+        if (reincarnated)
+            tbt_session_reincarnate(sess);
+        if (sess->fec)
+            tbt_memzero_explicit(&hc, sizeof(hc));
+        if (cerr)
+            pr_warn_ratelimited("tbtun: tunnel %llu: HELLO crypto resolve failed: %s (%d)\n",
+                                (unsigned long long)t->cfg.id, why, cerr);
+        else if (!gerr)
+            TBT_DIAG("hello crypto ready tunnel=%llu key_peer=%d tx_ready=%d rx_ready=%d",
+                     (unsigned long long)t->cfg.id,
+                     READ_ONCE(sess->crypto_key_peer),
+                     READ_ONCE(sess->crypto_tx_ready),
+                     READ_ONCE(sess->crypto_ready));
+        if (gerr || cerr)
             return tbt_hello_bad(c, why);
         /* The join reads this epoch under sess->lock; only a PSK-proved
          * HELLO may raise the path high-water. */
         c->hello_epoch = hg.epoch;
-        err = tbt_session_join(sess, c, h->path_id, hg.psk);
-        if (err)
-            return err;
+        return tbt_session_join(sess, c, h->path_id, hg.psk);
     }
-    else
+
+    if (sess->fec)
     {
-        WRITE_ONCE(c->peer_gen, gen);
-        WRITE_ONCE(c->peer_hello, true);
-        /* The far joined this generation: the join_dup storm is over. */
-        sess->join_retries = 0;
+        const char *why = NULL;
+        int cerr;
+
+        spin_lock(&sess->lock);
+        cerr = tbt_rx_hello_crypto_locked(sess, &hc, body, h->body_len,
+                                          h->path_id, &hg, &reincarnated,
+                                          &why);
+        spin_unlock(&sess->lock);
+        tbt_memzero_explicit(&hc, sizeof(hc));
+        if (cerr)
+        {
+            pr_warn_ratelimited("tbtun: tunnel %llu: HELLO crypto resolve failed: %s (%d)\n",
+                                (unsigned long long)t->cfg.id, why, cerr);
+            return tbt_hello_bad(c, why);
+        }
+        TBT_DIAG("hello crypto ready tunnel=%llu key_peer=%d tx_ready=%d rx_ready=%d",
+                 (unsigned long long)t->cfg.id,
+                 READ_ONCE(sess->crypto_key_peer),
+                 READ_ONCE(sess->crypto_tx_ready),
+                 READ_ONCE(sess->crypto_ready));
     }
+
+    WRITE_ONCE(c->peer_gen, gen);
+    WRITE_ONCE(c->peer_hello, true);
+    /* The far joined this generation: the join_dup storm is over. */
+    sess->join_retries = 0;
     return 0;
 }
 
@@ -1266,7 +1326,7 @@ static int tbt_http_bad(struct tbt_carrier *c, const char *why, int err)
         if (debug >= 3 && p && p->have)
             print_hex_dump(KERN_INFO, "tbtun http rx: ", DUMP_PREFIX_OFFSET,
                            16, 1, p->buf, min_t(size_t, p->have, 64), false);
-        else if (debug >= 3 && c->http_have)
+        else if (debug >= 3 && c->http_hdr && c->http_have)
             print_hex_dump(KERN_INFO, "tbtun http hdr: ", DUMP_PREFIX_OFFSET,
                            16, 1, c->http_hdr, min_t(size_t, c->http_have, 64),
                            false);
@@ -1352,6 +1412,23 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
             avail = p->have - pos;
             if (!avail)
                 break;
+            /* The header block buffer is released as soon as the header has
+             * been consumed (below), which keeps 256 idle carriers from
+             * holding 1 MiB between messages. Reallocate it for the next
+             * message of the same HTTP connection. GFP_ATOMIC: tools/lint.sh
+             * (check_no_gfp_rx) forbids the blocking allocator in this file,
+             * and a failed header allocation is transient: keep the bytes
+             * buffered and let the next poll retry rather than poisoning the
+             * carrier. */
+            if (!c->http_hdr)
+            {
+                c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX, GFP_ATOMIC);
+                if (!c->http_hdr)
+                {
+                    ret = -EAGAIN;
+                    break;
+                }
+            }
             take = min_t(size_t, avail, TBT_HTTP_HDR_MAX - c->http_have);
             if (!take)
             {
@@ -1444,6 +1521,11 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
             }
             c->http_have = 0;
             c->http_hdr_done = true;
+            /* The extra bytes were copied back into p->buf above; nothing
+             * reads the header block again until the next message needs a
+             * new one. */
+            kfree(c->http_hdr);
+            c->http_hdr = NULL;
             continue;
         }
         while (p->have > pos)

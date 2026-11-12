@@ -67,7 +67,26 @@
      TBT_FEC_FBK_F_SWITCH_DONE | TBT_FEC_FBK_F_ROLLBACK)
 #define TBT_APP_RBUF 65536
 #define TBT_OUT_CAP (64u * 1024 * 1024)
+/* Application backlog bounds for the RX pull. Pulling a block out of the
+ * reorder ring hands it to flow_out_append(); with a slow reader the out
+ * buffer kept every delivered block and only stopped at TBT_OUT_CAP, which
+ * the sender had already reached by advancing its stop-and-wait grant 66
+ * times to 64 MiB. Above the high mark the reorder ring is left alone so
+ * rx_ack_frontier freezes and the one-block fallback grant stops the peer;
+ * below the low mark the drain path resumes delivery. */
+#define TBT_OUT_HIGH (16u * 1024 * 1024)
+#define TBT_OUT_LOW (4u * 1024 * 1024)
+/* Small per-flow cache of block buffer slabs. A block's group planes are
+ * 256 KiB together and were calloc/free'd once per block; keeping the last
+ * few slabs removes that churn from the steady state. */
+#define TBT_RX_POOL_SLABS 4
 #define TBT_CTL_PENDING 64
+/* One received NACK may name more shares than a single burst should replay;
+ * the module caps a reply at TBT_FEC_NACK_REQ_MAX. tbtun.h is kernel-only,
+ * so the same constant is restated here for the userspace engine. */
+#ifndef TBT_FEC_NACK_REQ_MAX
+#define TBT_FEC_NACK_REQ_MAX 256u
+#endif
 #define TBT_HDR_STAGE_MAX TBT_HTTP_HDR_MAX
 #define TBT_OPEN_DELAY_NS (50ull * 1000 * 1000)
 /* 0.7.x TBT_SW_FEC_TICK semantics: a partial packet is flushed after the
@@ -143,6 +162,7 @@ struct carrier
     u64 retry_at_ns;
     u64 last_rx_ns;
     u64 last_tx_ns;
+    uint32_t epoll_events; /* last mask installed, to skip redundant MODs */
     struct tbt_http_rx rx;
     u8 rbuf[TBT_CAR_RBUF];
     size_t rlen;
@@ -166,6 +186,7 @@ struct replay_block
     u16 n, m, groups;
     u8 *recs; /* groups * (n + m) * TBT_FEC_REC_MAX */
     u16 *lens;
+    u64 *last_sent_ns; /* groups * (n + m): NACK replay hold per share */
 };
 
 struct rx_group
@@ -193,6 +214,9 @@ struct rx_codec_entry
 {
     bool used;
     u16 n, m;
+    u16 block, L, groups;
+    u8 variant;
+    u64 seed;
     u64 last_ns;
     struct tbt_fec_grouped *codec;
 };
@@ -228,6 +252,7 @@ struct flow
     bool tx_finished;
     u64 tx_activity_ns; /* last byte fed into the current FEC block */
     bool dead;
+    bool tx_codec_owned; /* f->tx_codec is per-flow, not engine-shared */
     bool target_connecting;
     u64 created_ns;
     u64 tx_ready_at_ns;
@@ -293,6 +318,13 @@ struct flow
     u32 rx_credit_shares; /* units: shares, one block is groups*(n+m) */
     u64 rx_credit_bad;
     u16 rx_used;
+    /* Buffers handed back by rx_block_release() and reused by the next
+     * block instead of calloc/free. Only flows built by flow_alloc() pool:
+     * unit tests construct a bare flow and free rx_group buf themselves. */
+    bool rx_pool_ok;
+    bool in_rx_check; /* flow_out_flush -> flow_rx_check recursion guard */
+    u8 *rx_pool[TBT_RX_POOL_SLABS];
+    size_t rx_pool_len[TBT_RX_POOL_SLABS];
     u64 rx_deliver_bytes;
     u64 peer_fin_end;
     bool peer_fin_end_set;
@@ -316,6 +348,7 @@ struct flow
     size_t out_len;
     size_t out_off;
     size_t out_cap;
+    uint32_t app_events; /* last mask installed, to skip redundant MODs */
     u8 rbuf[TBT_APP_RBUF];
 };
 
@@ -338,6 +371,7 @@ struct engine
     u16 n_car;
     struct carrier *car[TBT_CAR_MAX];
     u16 up_count;
+    u16 ctl_rot; /* round-robin cursor for ctl_carrier() */
     struct flow *flow[TBT_FLOW_MAX];
     struct carrier *car_list; /* every carrier, joined or not */
     u32 car_live;
@@ -415,6 +449,14 @@ struct engine
      * path's mean alone understates how long a replay can take. */
     u32 rtt_us;
     u64 rtt_sample_ns;
+    u64 last_tick_ns; /* main loop gate: full engine_tick() is 5 ms paced */
+
+    /* Codecs are shape/seed-identical across the flows of one engine. Build
+     * each graph once instead of once per accepted stream. */
+    struct tbt_fec_grouped *tx_codec_shared;
+    bool codec_shared;
+    u64 rx_codec_clock;
+    struct rx_codec_entry rx_codec_shared[TBT_RX_CODECS];
 
     struct pending_ctl pending[TBT_CTL_PENDING];
     int npending;
@@ -653,12 +695,22 @@ static int addr_to_ss(const struct tbt_addr *a, u16 port_be,
 static void set_carrier_sockopts(int fd)
 {
     int one = 1;
-    int buf = 838861;
     int lowat = 131072;
 
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
-    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &buf, sizeof(buf));
-    setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &buf, sizeof(buf));
+    /* Do not pin SO_SNDBUF/SO_RCVBUF here: a fixed window disables the
+     * kernel's TCP autotuning on the carrier, which is the only path that
+     * owns the WAN queue. The far accepted socket advertises its window
+     * from engine_listen()'s SO_RCVBUF instead, before listen() fixes the
+     * window scale. BBR is best-effort: a kernel without it keeps cubic. */
+#ifdef TCP_CONGESTION
+    {
+        const char cc[] = "bbr";
+
+        (void)setsockopt(fd, IPPROTO_TCP, TCP_CONGESTION, cc,
+                         sizeof(cc) - 1);
+    }
+#endif
 #ifdef TCP_NOTSENT_LOWAT
     setsockopt(fd, IPPROTO_TCP, TCP_NOTSENT_LOWAT, &lowat, sizeof(lowat));
 #endif
@@ -733,6 +785,17 @@ static void ep_del(struct engine *e, int fd)
         (void)epoll_ctl(e->epfd, EPOLL_CTL_DEL, fd, NULL);
 }
 
+/* Install a carrier's interest mask only when it changed. The flush path
+ * runs for every queued record and used to issue an EPOLL_CTL_MOD on each
+ * transition, including the common all-drained -> drained case. */
+static void carrier_ep_set(struct carrier *c, uint32_t events)
+{
+    if (c->epoll_events == events || c->fd < 0)
+        return;
+    if (!ep_mod(c->e, c->fd, events, &c->ep))
+        c->epoll_events = events;
+}
+
 /* ------------------------------------------------------------------ *
  * Carrier writes and the deterministic carrier map
  * ------------------------------------------------------------------ */
@@ -751,8 +814,7 @@ static int carrier_flush(struct carrier *c)
         }
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
         {
-            (void)ep_mod(c->e, c->fd,
-                         EPOLLIN | EPOLLOUT | EPOLLRDHUP, &c->ep);
+            carrier_ep_set(c, EPOLLIN | EPOLLOUT | EPOLLRDHUP);
             return 0;
         }
         if (n < 0 && errno == EINTR)
@@ -761,7 +823,7 @@ static int carrier_flush(struct carrier *c)
         return n < 0 ? -errno : -EPIPE;
     }
     c->woff = c->wlen = 0;
-    (void)ep_mod(c->e, c->fd, EPOLLIN | EPOLLRDHUP, &c->ep);
+    carrier_ep_set(c, EPOLLIN | EPOLLRDHUP);
     return 0;
 }
 
@@ -802,24 +864,41 @@ static struct carrier *carrier_at(struct engine *e, u16 index)
 
 static struct carrier *ctl_carrier(struct engine *e)
 {
-    u16 i;
+    u16 k;
 
     /* Control frames ride a parity carrier (share >= n) when one is up. The
      * kernel accepts a control record on any carrier, so fall back to any up
-     * carrier rather than block the session. */
-    for (i = e->tx_n; i < e->n_car; i++)
+     * carrier rather than block the session. Start both scans at the
+     * rotation cursor and advance it past the chosen slot: every carrier
+     * down at e->ctl_rot would otherwise absorb every control record while
+     * the rest of the pool sat idle. */
+    if (!e->n_car)
+        return NULL;
+    for (k = 0; k < e->n_car; k++)
     {
-        struct carrier *c = e->car[i];
+        u16 i = (u16)((e->ctl_rot + k) % e->n_car);
+        struct carrier *c;
+
+        if (i < e->tx_n)
+            continue;
+        c = e->car[i];
 
         if (c && c->up && !c->dead)
+        {
+            e->ctl_rot = (u16)((i + 1) % e->n_car);
             return c;
+        }
     }
-    for (i = 0; i < e->n_car; i++)
+    for (k = 0; k < e->n_car; k++)
     {
+        u16 i = (u16)((e->ctl_rot + k) % e->n_car);
         struct carrier *c = e->car[i];
 
         if (c && c->up && !c->dead)
+        {
+            e->ctl_rot = (u16)((i + 1) % e->n_car);
             return c;
+        }
     }
     return NULL;
 }
@@ -1230,6 +1309,7 @@ static int carrier_connect(struct engine *e, struct carrier *c)
     err = ep_add(e, fd, EPOLLIN | EPOLLOUT | EPOLLRDHUP, &c->ep);
     if (err)
         return -errno;
+    c->epoll_events = EPOLLIN | EPOLLOUT | EPOLLRDHUP;
     if (connect(fd, (struct sockaddr *)&ss, slen) == 0)
         return carrier_connected(e, c);
     if (errno == EINPROGRESS)
@@ -1360,6 +1440,7 @@ static void carrier_event(struct engine *e, struct carrier *c,
 
 static void flow_free(struct engine *e, struct flow *f);
 static void flow_out_flush(struct flow *f);
+static void flow_rx_check(struct flow *f);
 static void flow_fin_maybe(struct flow *f);
 static void flow_abort(struct flow *f);
 static void flow_tx_finish(struct flow *f);
@@ -1392,16 +1473,25 @@ static void flow_app_poll_set(struct flow *f, uint32_t events)
         {
             ep_del(f->e, f->app_fd);
             f->app_armed = false;
+            f->app_events = 0;
         }
         return;
     }
     if (f->app_armed)
     {
-        (void)ep_mod(f->e, f->app_fd, events, &f->ep);
+        /* flow_tick() recomputes this mask every 5 ms; skip the syscall
+         * when the gate state did not change. */
+        if (f->app_events == events)
+            return;
+        if (!ep_mod(f->e, f->app_fd, events, &f->ep))
+            f->app_events = events;
         return;
     }
     if (!ep_add(f->e, f->app_fd, events, &f->ep))
+    {
         f->app_armed = true;
+        f->app_events = events;
+    }
 }
 
 /* why, when non-NULL, receives -ENOSPC when every slot is taken and
@@ -1442,14 +1532,25 @@ static struct flow *flow_alloc(struct engine *e, u64 sid, int app_fd, bool near,
     f->m = e->tx_m;
     f->groups = e->tx_groups;
     f->tx_shape = e->tx_shape;
-    f->tx_codec = client_sclc_new(&e->tx_shape, TBT_FEC_S, e->tx_seed);
+    /* Every flow of one engine transmits the same shape and seed, and the
+     * codec's encode path holds no per-flow state, so a single graph is
+     * reused. A bare engine (unit tests build one by hand) has no shared
+     * codec and keeps the per-flow construction. */
+    if (e->tx_codec_shared)
+        f->tx_codec = e->tx_codec_shared;
+    else
+    {
+        f->tx_codec = client_sclc_new(&e->tx_shape, TBT_FEC_S, e->tx_seed);
+        f->tx_codec_owned = true;
+    }
+    f->rx_pool_ok = true;
     f->tx_cur = calloc(1, TBT_FEC_S);
     f->tx_plane = calloc((size_t)f->groups * (f->n + f->m), TBT_FEC_S);
     if (!f->tx_codec || !f->tx_cur || !f->tx_plane)
     {
         free(f->tx_cur);
         free(f->tx_plane);
-        if (f->tx_codec)
+        if (f->tx_codec_owned && f->tx_codec)
             tbt_fec_grouped_free(f->tx_codec);
         free(f);
         if (why)
@@ -1486,9 +1587,59 @@ static void replay_reset(struct flow *f)
             continue;
         free(r->recs);
         free(r->lens);
+        free(r->last_sent_ns);
         memset(r, 0, sizeof(*r));
     }
     (void)j;
+}
+
+/* Hand a block slab to the flow's small cache, or free it when the cache is
+ * full. Rx blocks are freed in whole blocks, so up to TBT_RX_POOL_SLABS
+ * slabs survive one delivery round and the next block in the ring reuses
+ * them instead of faulting a fresh 256 KiB plane. A reused slab is zeroed
+ * on checkout: calloc() gave the block's unused shares zeroes, and the
+ * decode expects that. */
+static void rx_slab_put(struct flow *f, u8 *p, size_t len)
+{
+    int i;
+
+    if (!p)
+        return;
+    if (f->rx_pool_ok)
+    {
+        for (i = 0; i < TBT_RX_POOL_SLABS; i++)
+        {
+            if (!f->rx_pool[i])
+            {
+                f->rx_pool[i] = p;
+                f->rx_pool_len[i] = len;
+                return;
+            }
+        }
+    }
+    free(p);
+}
+
+static u8 *rx_slab_get(struct flow *f, size_t len)
+{
+    int i;
+
+    if (f->rx_pool_ok)
+    {
+        for (i = 0; i < TBT_RX_POOL_SLABS; i++)
+        {
+            u8 *p;
+
+            if (!f->rx_pool[i] || f->rx_pool_len[i] < len)
+                continue;
+            p = f->rx_pool[i];
+            f->rx_pool[i] = NULL;
+            f->rx_pool_len[i] = 0;
+            memset(p, 0, len);
+            return p;
+        }
+    }
+    return calloc(1, len);
 }
 
 static void flow_free(struct engine *e, struct flow *f)
@@ -1521,14 +1672,17 @@ static void flow_free(struct engine *e, struct flow *f)
         if (!b->used)
             continue;
         for (g = 0; g < b->groups; g++)
-            free(b->g[g].buf);
+            rx_slab_put(f, b->g[g].buf,
+                        (size_t)(b->g[g].n + b->g[g].m) * TBT_FEC_S);
         free(b->g);
         memset(b, 0, sizeof(*b));
     }
+    for (i = 0; i < TBT_RX_POOL_SLABS; i++)
+        free(f->rx_pool[i]);
     replay_reset(f);
     free(f->tx_cur);
     free(f->tx_plane);
-    if (f->tx_codec)
+    if (f->tx_codec_owned && f->tx_codec)
         tbt_fec_grouped_free(f->tx_codec);
     for (i = 0; i < TBT_RX_CODECS; i++)
     {
@@ -1552,20 +1706,41 @@ static int replay_store(struct flow *f, u64 block_id, u16 group, u16 share,
     total = (u32)f->groups * (f->n + f->m);
     if (!r->used || r->id != block_id)
     {
-        if (!r->recs)
+        if (!r->recs || !r->lens || !r->last_sent_ns)
         {
+            u8 *nr;
+            u16 *nl;
+            u64 *ns;
+
 #ifdef TBT_CLIENT_TEST_HOOKS
             if (f->e->fail_replay_alloc)
                 return -ENOMEM;
 #endif
-            r->recs = calloc(total, TBT_FEC_REC_MAX);
-            r->lens = calloc(total, sizeof(*r->lens));
-            if (!r->recs || !r->lens)
+            /* All three arrays are one block's replay state. A failure on
+             * any of them must leave the slot fully empty: a ring entry
+             * with recs set and lens missing made handle_nack() read
+             * through a NULL pointer on the next replay. */
+            nr = calloc(total, TBT_FEC_REC_MAX);
+            nl = calloc(total, sizeof(*nl));
+            ns = calloc(total, sizeof(*ns));
+            if (!nr || !nl || !ns)
+            {
+                free(nr);
+                free(nl);
+                free(ns);
                 return -ENOMEM;
+            }
+            free(r->recs);
+            free(r->lens);
+            free(r->last_sent_ns);
+            r->recs = nr;
+            r->lens = nl;
+            r->last_sent_ns = ns;
         }
         else
         {
             memset(r->lens, 0, total * sizeof(*r->lens));
+            memset(r->last_sent_ns, 0, total * sizeof(*r->last_sent_ns));
         }
         r->used = true;
         r->id = block_id;
@@ -1730,12 +1905,20 @@ static int flow_send_marker(struct flow *f, u16 group)
     return ctl_send(e, carrier_at(e, carrier), rec, rlen);
 }
 
-static void flow_tx_advance(struct flow *f)
+/* Close the share/group cursor after a DATA share. The parity of a full
+ * group is sent here; a replay-allocation or encode failure must reach the
+ * caller, because advancing past it would drop the parity from the block's
+ * replay entry and leave the peer unable to repair the group. */
+static int flow_tx_advance(struct flow *f)
 {
+    int err;
+
     f->tx_share++;
     if (f->tx_share < f->n)
-        return;
-    (void)flow_send_parity(f, f->tx_group, f->n, 0);
+        return 0;
+    err = flow_send_parity(f, f->tx_group, f->n, 0);
+    if (err)
+        return err;
     f->tx_share = 0;
     f->tx_group++;
     if (f->tx_group >= f->groups)
@@ -1748,6 +1931,7 @@ static void flow_tx_advance(struct flow *f)
         memset(f->tx_plane, 0,
                (size_t)f->groups * (f->n + f->m) * TBT_FEC_S);
     }
+    return 0;
 }
 
 static int flow_tx_feed(struct flow *f, const u8 *data, size_t len)
@@ -1774,7 +1958,8 @@ static int flow_tx_feed(struct flow *f, const u8 *data, size_t len)
         if (flow_send_data(f, f->tx_group, f->tx_share, TBT_FEC_S, false))
             return -EIO;
         f->tx_cur_len = 0;
-        flow_tx_advance(f);
+        if (flow_tx_advance(f))
+            return -EIO;
     }
     return 0;
 }
@@ -1916,7 +2101,13 @@ static u32 flow_rx_credit_update(struct flow *f)
         u64 backlog_blocks = block_bytes ? backlog / block_bytes : 0;
         u64 grant_blocks = credit / block;
 
-        if (backlog_blocks)
+        if (backlog >= TBT_OUT_HIGH)
+            /* Keep the one-block floor while flow_rx_check() is paused: the
+             * kernel ignores a 0 grant as fec_ack_bad and keeps its old 64-block
+             * credit, whereas a 1-block grant shrinks the sender's window to 1
+             * block and the frozen rx_ack_frontier prevents any advance. */
+            credit = block;
+        else if (backlog_blocks)
         {
             if (backlog_blocks >= grant_blocks - 1)
                 credit = block;
@@ -1925,7 +2116,8 @@ static u32 flow_rx_credit_update(struct flow *f)
         }
     }
 
-    if (!block || credit < block || credit > cap ||
+    /* A zero grant is the intentional window-closed state above. */
+    if (!block || (credit && credit < block) || credit > cap ||
         credit > (u64)0xffffffffu)
         f->rx_credit_bad++;
     f->rx_credit_shares = (u32)credit;
@@ -1949,12 +2141,90 @@ static int flow_send_ack(struct flow *f)
     return send_ctl_record(e, f, TBT_FEC_ACK, f->sid, 0, 0, body, sizeof(body));
 }
 
+static struct tbt_fec_grouped *rx_codec_make(const struct flow *f, u16 n,
+                                             u16 m)
+{
+    struct tbt_fec_sclc_shape sh;
+    u16 shares = (u16)(n + m);
+
+    sh = f->rx_shape;
+    sh.n = n;
+    sh.m = m;
+    sh.groups = f->rx_groups;
+    sh.rate_ppm = (u32)(((u64)n * 1000u) / shares);
+    sh.rate_256 = (u16)(((u32)n * 256u) / shares);
+    return client_sclc_new(&sh, TBT_FEC_S, f->rx_seed);
+}
+
+/* Engine-wide RX codec cache. Every flow of one engine receives the same
+ * seed and group count, so a graph keyed by (n, m, seed) is identical for
+ * all of them; the codec's decode call reconstructs all of its per-call
+ * state from the share bitmaps, so sequential flows may share it. This
+ * keeps a new stream from rebuilding the SC-LDPC graph at CFG time. */
+static struct tbt_fec_grouped *rx_codec_shared_get(struct flow *f, u16 n,
+                                                   u16 m)
+{
+    struct engine *e = f->e;
+    int slot = -1;
+    int i;
+
+    for (i = 0; i < TBT_RX_CODECS; i++)
+    {
+        struct rx_codec_entry *entry = &e->rx_codec_shared[i];
+
+        if (entry->used && entry->n == n && entry->m == m &&
+            entry->block == f->rx_shape.block &&
+            entry->L == f->rx_shape.L &&
+            entry->groups == f->rx_groups &&
+            entry->variant == f->rx_shape.variant &&
+            entry->seed == f->rx_seed)
+        {
+            entry->last_ns = ++e->rx_codec_clock;
+            return entry->codec;
+        }
+        if (!entry->used && slot < 0)
+            slot = i;
+    }
+    if (slot < 0)
+    {
+        u64 oldest = ~0ull;
+
+        for (i = 0; i < TBT_RX_CODECS; i++)
+        {
+            if (e->rx_codec_shared[i].last_ns < oldest)
+            {
+                oldest = e->rx_codec_shared[i].last_ns;
+                slot = i;
+            }
+        }
+        tbt_fec_grouped_free(e->rx_codec_shared[slot].codec);
+        memset(&e->rx_codec_shared[slot], 0,
+               sizeof(e->rx_codec_shared[slot]));
+    }
+    {
+        struct tbt_fec_grouped *codec = rx_codec_make(f, n, m);
+
+        if (!codec)
+            return NULL;
+        e->rx_codec_shared[slot].used = true;
+        e->rx_codec_shared[slot].n = n;
+        e->rx_codec_shared[slot].m = m;
+        e->rx_codec_shared[slot].block = f->rx_shape.block;
+        e->rx_codec_shared[slot].L = f->rx_shape.L;
+        e->rx_codec_shared[slot].groups = f->rx_groups;
+        e->rx_codec_shared[slot].variant = f->rx_shape.variant;
+        e->rx_codec_shared[slot].seed = f->rx_seed;
+        e->rx_codec_shared[slot].last_ns = ++e->rx_codec_clock;
+        e->rx_codec_shared[slot].codec = codec;
+        return codec;
+    }
+}
+
 /* A codec for one block's n/m, not the session default. The 0.8 sender may
  * move the split per block, so the cache is keyed by (n, m); block, L and the
  * seed stay fixed for the direction. Four entries cover a transition. */
 static struct tbt_fec_grouped *flow_rx_codec(struct flow *f, u16 n, u16 m)
 {
-    struct tbt_fec_sclc_shape sh;
     struct tbt_fec_grouped *codec;
     u16 shares = (u16)(n + m);
     int slot = -1;
@@ -1962,6 +2232,8 @@ static struct tbt_fec_grouped *flow_rx_codec(struct flow *f, u16 n, u16 m)
 
     if (!f->rx_shape_set || !n || !m || shares != f->rx_shares)
         return NULL;
+    if (f->e->codec_shared)
+        return rx_codec_shared_get(f, n, m);
     for (i = 0; i < TBT_RX_CODECS; i++)
     {
         if (f->rx_codec[i].used && f->rx_codec[i].n == n &&
@@ -1985,18 +2257,17 @@ static struct tbt_fec_grouped *flow_rx_codec(struct flow *f, u16 n, u16 m)
         tbt_fec_grouped_free(f->rx_codec[slot].codec);
         memset(&f->rx_codec[slot], 0, sizeof(f->rx_codec[slot]));
     }
-    sh = f->rx_shape;
-    sh.n = n;
-    sh.m = m;
-    sh.groups = f->rx_groups;
-    sh.rate_ppm = (u32)(((u64)n * 1000u) / shares);
-    sh.rate_256 = (u16)(((u32)n * 256u) / shares);
-    codec = client_sclc_new(&sh, TBT_FEC_S, f->rx_seed);
+    codec = rx_codec_make(f, n, m);
     if (!codec)
         return NULL;
     f->rx_codec[slot].used = true;
     f->rx_codec[slot].n = n;
     f->rx_codec[slot].m = m;
+    f->rx_codec[slot].block = f->rx_shape.block;
+    f->rx_codec[slot].L = f->rx_shape.L;
+    f->rx_codec[slot].groups = f->rx_groups;
+    f->rx_codec[slot].variant = f->rx_shape.variant;
+    f->rx_codec[slot].seed = f->rx_seed;
     f->rx_codec[slot].last_ns = ++f->rx_codec_clock;
     f->rx_codec[slot].codec = codec;
     return codec;
@@ -2078,7 +2349,13 @@ static void rx_block_release(struct flow *f, struct rx_block *b)
     if (f && f->rx_used)
         f->rx_used--;
     for (g = 0; g < b->groups; g++)
-        free(b->g[g].buf);
+    {
+        if (f)
+            rx_slab_put(f, b->g[g].buf,
+                        (size_t)(b->g[g].n + b->g[g].m) * TBT_FEC_S);
+        else
+            free(b->g[g].buf);
+    }
     free(b->g);
     memset(b, 0, sizeof(*b));
 }
@@ -2180,6 +2457,19 @@ static struct rx_block *rx_block_get(struct flow *f,
     return b;
 }
 
+/* Resume ring delivery after the application drained. flow_rx_check()
+ * pauses above TBT_OUT_HIGH and the ACK credit window closes with it; the
+ * first flush that drops the backlog below the low mark is the only wakeup
+ * that refills it. */
+static void flow_rx_resume(struct flow *f)
+{
+    if (!f->rx_shape_set || f->dead)
+        return;
+    if (f->out_len - f->out_off >= TBT_OUT_LOW)
+        return;
+    flow_rx_check(f);
+}
+
 static void flow_out_flush(struct flow *f)
 {
     if (f->app_fd < 0)
@@ -2197,6 +2487,7 @@ static void flow_out_flush(struct flow *f)
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
         {
             flow_app_poll_set(f, flow_app_poll_mask(f, now_ns()));
+            flow_rx_resume(f);
             return;
         }
         if (n < 0 && errno == EINTR)
@@ -2219,6 +2510,7 @@ static void flow_out_flush(struct flow *f)
         f->out_off = f->out_len = 0;
         flow_app_poll_set(f, flow_app_poll_mask(f, now_ns()));
     }
+    flow_rx_resume(f);
     flow_fin_maybe(f);
 }
 
@@ -2310,7 +2602,16 @@ static void rx_group_try(struct flow *f, struct rx_block *b, u16 group)
 
     if (g->decoded || g->marker)
         return;
-    real = g->real_set ? g->real : n;
+    if (g->real_set)
+        real = g->real;
+    else if (f->peer_fin_end_set)
+        /* The peer's FIN names the stream's last wire packet. A block the
+         * last packet cuts short has no parity win_len yet (its carrier may
+         * still be in flight), but the tail is already known from the FIN. */
+        real = tbt_fec_blk_real_len_seq0(0, b->n, true, f->peer_fin_end,
+                                         b->seq0, group, g->ndata > 0);
+    else
+        real = n;
     if (!real || real > n)
         return;
     if (g->ndata >= real)
@@ -2432,6 +2733,13 @@ static void flow_rx_dump_stall(struct flow *f, struct rx_block *b, u64 now)
 
 static void flow_rx_check(struct flow *f)
 {
+    /* flow_out_append() -> flow_out_flush() -> flow_rx_check() would
+     * re-enter this loop while it is iterating the rx[] ring. The drain
+     * path calls back in only to resume delivery, so the outer loop is the
+     * one that should own the walk. */
+    if (f->in_rx_check)
+        return;
+    f->in_rx_check = true;
     for (;;)
     {
         u32 slot = (u32)(f->rx_next_block % TBT_RX_SLOTS);
@@ -2440,8 +2748,19 @@ static void flow_rx_check(struct flow *f)
         u64 blk_pkts = 0;
         bool ready = true;
 
+        /* The local application is the far end of this ring. If its write
+         * backlog sits above the high mark, leave the reorder ring alone:
+         * pulling the head block would deliver it into an out buffer that
+         * is already at the capacity the sender was allowed to fill, and
+         * advancing the ACK frontier would grant the peer another ring's
+         * worth. Freezing the frontier is what turns the withheld grant
+         * into a real stop. flow_out_flush() resumes delivery once the
+         * backlog falls below the low mark. */
+        if (f->app_fd >= 0 && f->out_len > f->out_off &&
+            f->out_len - f->out_off >= TBT_OUT_HIGH)
+            break;
         if (!b->used || b->id != f->rx_next_block)
-            return;
+            break;
         for (group = 0; group < b->groups; group++)
         {
             struct rx_group *g = &b->g[group];
@@ -2453,13 +2772,23 @@ static void flow_rx_check(struct flow *f)
             }
         }
         if (!ready)
-            return;
+            break;
         for (group = 0; group < b->groups; group++)
         {
             struct rx_group *g = &b->g[group];
-            u16 real = g->marker ? 0 : (g->real_set ? g->real : b->n);
+            u16 real;
             u16 s;
 
+            if (g->marker)
+                real = 0;
+            else if (g->real_set)
+                real = g->real;
+            else if (f->peer_fin_end_set)
+                real = tbt_fec_blk_real_len_seq0(0, b->n, true,
+                                                 f->peer_fin_end, b->seq0,
+                                                 group, g->ndata > 0);
+            else
+                real = b->n;
             blk_pkts += real;
             for (s = 0; s < real; s++)
             {
@@ -2471,12 +2800,12 @@ static void flow_rx_check(struct flow *f)
                 if (flow_out_append(f, g->buf + (size_t)s * TBT_FEC_S, len))
                 {
                     flow_abort(f);
-                    return;
+                    goto out;
                 }
                 /* A write error aborted the flow inside flow_out_append();
                  * stop handing it bytes it can never consume. */
                 if (f->dead)
-                    return;
+                    goto out;
                 f->rx_deliver_bytes += len;
             }
         }
@@ -2506,6 +2835,8 @@ static void flow_rx_check(struct flow *f)
         flow_fin_maybe(f);
         (void)flow_send_ack(f);
     }
+out:
+    f->in_rx_check = false;
 }
 
 /* The idle reclaim of a half-open flow must not fire while the receive
@@ -2555,7 +2886,7 @@ static void flow_rx_store(struct flow *f, const struct tbt_fec_hdr *h,
         return;
     if (!g->buf)
     {
-        g->buf = calloc(shares, TBT_FEC_S);
+        g->buf = rx_slab_get(f, (size_t)shares * TBT_FEC_S);
         if (!g->buf)
             return;
     }
@@ -2563,6 +2894,17 @@ static void flow_rx_store(struct flow *f, const struct tbt_fec_hdr *h,
     g->present[share] = 1;
     g->plen[share] = (h->flags & TBT_FEC_FF_PADDED) ? h->win_len
                                                     : h->payload_len;
+    /* The sender marks the final DATA share of the stream's last block.
+     * Its index is the block's real length even when the block is short
+     * and the peer's FIN body has not arrived yet; without it the receive
+     * side waits for a parity win_len that may be lost with its carrier. */
+    if (h->type == TBT_FEC_DATA && (h->flags & TBT_FEC_FF_LAST) &&
+        !g->real_set)
+    {
+        g->real = (u16)(share + 1);
+        g->real_set = true;
+        g->epoch = g->plen[share];
+    }
     flow_rx_progress(f, now_ns());
     if (share < h->n)
         g->ndata++;
@@ -3248,9 +3590,25 @@ static int handle_fec(struct engine *e, struct carrier *c, const u8 *rec,
             return -EPROTO;
         if (!tbt_fec_ack_unpack(payload, &a))
         {
+            /* A hostile or stale ACK must never name a packet this side
+             * has not sent. The highest legitimate frontier is the origin
+             * of the next block: tx_blk_seq0 jumps a whole (n*m) span on
+             * every seal, while tx_seq stops at the last real packet. The
+             * receiver acknowledges block-aligned space, so clamping to
+             * tx_seq alone would discard the ACK of an idle-sealed short
+             * block and, after a run of them, never release a replay slot.
+             * Clamp to whichever of the two is further. */
+            if (a.next_deliver > f->tx_blk_seq0 &&
+                a.next_deliver > f->tx_seq)
+                a.next_deliver = f->tx_blk_seq0 > f->tx_seq ? f->tx_blk_seq0
+                                                            : f->tx_seq;
             if (a.next_deliver > f->tx_ack_next)
                 f->tx_ack_next = a.next_deliver;
-            f->tx_credit_shares = a.credit_packets;
+            /* A reordered old ACK (its frontier is behind the one already
+             * applied) must not roll the grant back, and a zero grant is
+             * the receiver's window-closed signal only from a current ACK. */
+            if (a.next_deliver >= f->tx_ack_next && a.credit_packets > 0)
+                f->tx_credit_shares = a.credit_packets;
         }
         break;
     }
@@ -3352,6 +3710,9 @@ static void handle_nack(struct flow *f, const struct tbt_fec_hdr *h,
     struct engine *e = f->e;
     struct tbt_fec_nack n;
     struct replay_block *r;
+    u64 now = now_ns();
+    u64 hold_ns = tbt_fec_nack_hold_ns(e->rtt_us, 20);
+    u32 replies = 0;
     u16 group, share;
 
     if (tbt_fec_nack_unpack(body, &n))
@@ -3373,12 +3734,22 @@ static void handle_nack(struct flow *f, const struct tbt_fec_hdr *h,
             idx = (u32)group * (r->n + r->m) + share;
             if (!r->lens[idx])
                 continue;
+            /* A NACK arrives for a share whose replay is still crossing
+             * the pool: answering it duplicates the copy and feeds the
+             * replay storm. The module's hold is one carrier RTT floored
+             * at two retry intervals. */
+            if (tbt_fec_replay_dup(now, r->last_sent_ns[idx], hold_ns))
+                continue;
+            if (replies >= TBT_FEC_NACK_REQ_MAX)
+                return;
             carrier = (u16)(group * (r->n + r->m) + share);
             /* A replay is a response to an observed loss, so it bypasses
              * the test-only drop injector. */
             (void)send_share(e, carrier,
                              r->recs + (size_t)idx * TBT_FEC_REC_MAX,
                              r->lens[idx]);
+            r->last_sent_ns[idx] = now;
+            replies++;
         }
     }
 }
@@ -3427,6 +3798,7 @@ static int flow_target_connect(struct flow *f, u16 port)
         return -errno;
     }
     f->app_armed = true;
+    f->app_events = EPOLLOUT | EPOLLRDHUP;
     if (connect(fd, (struct sockaddr *)&ss, slen) == 0)
     {
         f->tx_ready_at_ns = now_ns() + TBT_OPEN_DELAY_NS;
@@ -3467,26 +3839,48 @@ static bool flow_tx_seal_block(struct flow *f, bool finish)
         u16 len = (u16)f->tx_cur_len;
 
         memcpy(plane, f->tx_cur, len);
-        (void)flow_send_data(f, f->tx_group, f->tx_share,
-                             (u16)f->tx_cur_len, finish);
+        /* Keep the partial bytes and the share cursor when the DATA share
+         * cannot be stored or encoded. Advancing here emitted the rest of
+         * the block and a FIN whose replay entry was missing the only copy
+         * of these bytes, so the peer saw a truncated stream. */
+        if (flow_send_data(f, f->tx_group, f->tx_share, len, finish))
+            return false;
         f->tx_cur_len = 0;
         f->tx_share++;
     }
     if (f->tx_share == f->n)
     {
-        (void)flow_send_parity(f, f->tx_group, f->n, f->tx_last_len);
+        if (flow_send_parity(f, f->tx_group, f->n, f->tx_last_len))
+        {
+            /* A parity failure is not retryable once more application data
+             * can enter this group: the next successful parity would cover
+             * a different field than the win_len already announced. End the
+             * stream with an RST instead of sending an inconsistent block. */
+            flow_abort(f);
+            return false;
+        }
         f->tx_share = 0;
         f->tx_group++;
     }
     else if (f->tx_share)
     {
-        (void)flow_send_parity(f, f->tx_group, f->tx_share,
-                               f->tx_last_len);
+        if (flow_send_parity(f, f->tx_group, f->tx_share, f->tx_last_len))
+        {
+            flow_abort(f);
+            return false;
+        }
         f->tx_share = 0;
         f->tx_group++;
     }
     for (g = f->tx_group; g < f->groups; g++)
-        (void)flow_send_marker(f, g);
+        if (flow_send_marker(f, g))
+        {
+            /* Same reasoning for a missing empty-group marker: a later data
+             * share would land in a group this block already declared
+             * empty. */
+            flow_abort(f);
+            return false;
+        }
     f->tx_group = 0;
     f->tx_share = 0;
     f->tx_cur_len = 0;
@@ -3508,8 +3902,13 @@ static void flow_tx_finish(struct flow *f)
     logmsg(f->e, "tbt_client: flow %llu finish cur=%zu group=%u share=%u last=%llu\n",
            (unsigned long long)f->sid, f->tx_cur_len, f->tx_group,
            f->tx_share, (unsigned long long)f->tx_last_len);
-    (void)flow_tx_seal_block(f, true);
-    f->tx_finished = true;
+    /* A DATA share that could not be stored keeps the partial block in
+     * tx_cur/tx_share; leave tx_finished clear so flow_tick() retries.
+     * (A parity/marker failure aborts the flow inside the seal.) A
+     * zero-byte stream has nothing to seal and is finished at once. */
+    if (flow_tx_seal_block(f, true) ||
+        (!f->tx_cur_len && !f->tx_share && !f->tx_group))
+        f->tx_finished = true;
 }
 
 static int flow_tx_ready(struct flow *f, u64 now)
@@ -3566,15 +3965,32 @@ static bool flow_tx_credit_ok(const struct flow *f)
 static size_t flow_tx_read_limit(const struct flow *f)
 {
     u64 window = flow_tx_window(f);
+    u64 next_seq;
     u64 outstanding;
     u64 bytes;
 
     if (!window)
         return 0;
-    outstanding = f->tx_seq > f->tx_ack_next ? f->tx_seq - f->tx_ack_next : 0;
+    /* The next wire packet is the current block's start plus the share
+     * cursor, not tx_seq: an idle seal advances tx_blk_seq0 by a whole
+     * block while tx_seq stops at the last real packet, so a read budget
+     * based on tx_seq thought the window had a full block of headroom and
+     * overran the peer's grant. tx_seq can lead the cursor only while a
+     * packet is being counted (or in a synthetic test), so take whichever
+     * is further. */
+    next_seq = f->tx_blk_seq0 + (u64)f->tx_group * f->n + f->tx_share;
+    if (f->tx_seq > next_seq)
+        next_seq = f->tx_seq;
+    outstanding = next_seq > f->tx_ack_next ? next_seq - f->tx_ack_next : 0;
     if (outstanding >= window)
         return 0;
     bytes = (window - outstanding) * (u64)TBT_FEC_S;
+    /* Bytes already buffered in tx_cur will occupy the next slot, so they
+     * are spent from the same budget. A read loop that ignored them could
+     * overshoot the window by up to S bytes. */
+    if (bytes <= f->tx_cur_len)
+        return 0;
+    bytes -= f->tx_cur_len;
     return bytes < sizeof(f->rbuf) ? (size_t)bytes : sizeof(f->rbuf);
 }
 
@@ -3861,7 +4277,18 @@ static void flow_tick(struct flow *f, u64 now)
     /* A deferred application EOF: finish the partial block and send FIN as
      * soon as the OPEN/CFG gate allows it. */
     if (f->app_eof && !f->tx_finished && flow_tx_ready(f, now))
-        flow_tx_finish(f);
+    {
+        /* A partial packet with no share or group sent yet would open a
+         * brand new block for its first share. With 63 unacked blocks
+         * already in the replay ring, or a one-block peer grant already
+         * spent, that block would evict live replay state. Wait for an ACK
+         * instead of emitting a FIN whose shares nobody can repair. */
+        bool new_block = f->tx_cur_len && !f->tx_share && !f->tx_group;
+
+        if (!new_block ||
+            (flow_tx_block_credit_ok(f) && flow_tx_credit_ok(f)))
+            flow_tx_finish(f);
+    }
     /* A FIN that could not even be parked (the control queue was full) is
      * retried here. Once it is queued, pending_flush() owns it. */
     if (f->app_eof && !f->fin_sent && f->tx_finished &&
@@ -3882,7 +4309,11 @@ static void flow_tick(struct flow *f, u64 now)
     if (f->dead)
         return; /* the flush aborted on a dead app; release on the next tick */
     flow_fin_maybe(f);
-    if (!f->tx_finished && f->tx_activity_ns &&
+    /* An EOF owns the final partial block: its seal is the one that sets
+     * LAST. Letting the idle timer seal it first (while a credit-blocked
+     * finish waits) sent the tail without LAST, so the receiver had to
+     * wait for a parity win_len to learn the real length. */
+    if (!f->tx_finished && !f->app_eof && f->tx_activity_ns &&
         now - f->tx_activity_ns >= TBT_TX_IDLE_SEAL_NS &&
         (f->tx_cur_len || f->tx_share || f->tx_group) &&
         flow_tx_block_credit_ok(f))
@@ -4307,6 +4738,7 @@ static void engine_accept_app(struct engine *e)
             continue;
         }
         f->app_armed = true;
+        f->app_events = EPOLLRDHUP;
         logmsg(e, "tbt_client: flow %llu accepted\n",
                (unsigned long long)f->sid);
     }
@@ -4316,7 +4748,10 @@ static void engine_accept_carrier(struct engine *e)
 {
     for (;;)
     {
-        int fd = accept4(e->listen_fd, NULL, NULL,
+        struct sockaddr_storage ss;
+        socklen_t slen = sizeof(ss);
+        struct tbt_addr src;
+        int fd = accept4(e->listen_fd, (struct sockaddr *)&ss, &slen,
                          SOCK_NONBLOCK | SOCK_CLOEXEC);
         struct carrier *c;
 
@@ -4325,6 +4760,34 @@ static void engine_accept_carrier(struct engine *e)
             if (errno == EINTR)
                 continue;
             return;
+        }
+        /* A far role behind peer= is a public listener: a carrier HELLO
+         * proves nothing until it names the configured near's address.
+         * Rejecting here keeps an unrelated host from consuming a slot
+         * (and the handshake state) before the HELLO check. */
+        memset(&src, 0, sizeof(src));
+        if (ss.ss_family == AF_INET)
+        {
+            const struct sockaddr_in *sin =
+                (const struct sockaddr_in *)&ss;
+
+            src.family = TBT_AF_INET;
+            memcpy(&src.u.v4, &sin->sin_addr, sizeof(src.u.v4));
+        }
+        else if (ss.ss_family == AF_INET6)
+        {
+            const struct sockaddr_in6 *sin6 =
+                (const struct sockaddr_in6 *)&ss;
+
+            src.family = TBT_AF_INET6;
+            memcpy(src.u.v6, &sin6->sin6_addr, sizeof(src.u.v6));
+        }
+        if (tbt_addr_set(&e->cfg.cfg.peer) &&
+            !tbt_addr_eq(&src, &e->cfg.cfg.peer))
+        {
+            logmsg(e, "tbt_client: carrier from an unexpected peer rejected\n");
+            close(fd);
+            continue;
         }
         set_carrier_sockopts(fd);
         c = carrier_new(e, fd, -1, false);
@@ -4337,6 +4800,8 @@ static void engine_accept_carrier(struct engine *e)
         c->connect_at_ns = now_ns();
         if (ep_add(e, fd, EPOLLIN | EPOLLRDHUP, &c->ep))
             carrier_free(e, c);
+        else
+            c->epoll_events = EPOLLIN | EPOLLRDHUP;
     }
 }
 
@@ -4409,11 +4874,30 @@ static void carrier_keepalive(struct engine *e, u64 now)
     }
 }
 
+/* Free far-side carriers that ended since the last epoll batch. A retained
+ * near carrier stays for its retry. This runs after the batch's event
+ * pointers are no longer in use, and also on a data-only loop iteration
+ * that skipped the full tick. */
+static void engine_reap_carriers(struct engine *e)
+{
+    struct carrier *c = e->car_list;
+
+    while (c)
+    {
+        struct carrier *next = c->next;
+
+        if (c->dead && !c->retained)
+            carrier_free(e, c);
+        c = next;
+    }
+}
+
 static void engine_tick(struct engine *e)
 {
     u64 now = now_ns();
     int i;
 
+    e->last_tick_ns = now;
     engine_sample_rtt(e, now);
     pending_flush(e);
     carrier_keepalive(e, now);
@@ -4432,21 +4916,7 @@ static void engine_tick(struct engine *e)
                 carrier_close(e, c);
         }
     }
-    {
-        /* Free far-side carriers that ended since the last batch. A retained
-         * near carrier stays for its retry. Running this here, after the
-         * epoll batch, is what makes the free safe. */
-        struct carrier *c = e->car_list;
-
-        while (c)
-        {
-            struct carrier *next = c->next;
-
-            if (c->dead && !c->retained)
-                carrier_free(e, c);
-            c = next;
-        }
-    }
+    engine_reap_carriers(e);
     if (e->stop_at_ns && now >= e->stop_at_ns)
         e->running = false;
 }
@@ -4486,6 +4956,19 @@ static int engine_listen(struct engine *e)
     if (fd < 0)
         return -errno;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    /* The buffer must be set before listen(): the kernel fixes the window
+     * scale from the receive buffer at that point, and the far carrier
+     * listener must advertise a window that lets SYN-ACKs and the carrier
+     * pool fill. The near listener is the local application queue and
+     * follows the same quarter-of-budget rule as its accepted sockets. */
+    if (e->near)
+        set_app_sockbuf(fd, e->cfg.local_queue_bytes);
+    else
+    {
+        int rbuf = 838861;
+
+        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rbuf, sizeof(rbuf));
+    }
     if (bind(fd, (struct sockaddr *)&ss, slen) || listen(fd, backlog))
     {
         int err = -errno;
@@ -4534,6 +5017,17 @@ static void engine_cleanup(struct engine *e)
         struct carrier *c = e->car_list;
 
         carrier_free(e, c);
+    }
+    if (e->tx_codec_shared)
+    {
+        tbt_fec_grouped_free(e->tx_codec_shared);
+        e->tx_codec_shared = NULL;
+    }
+    for (i = 0; i < TBT_RX_CODECS; i++)
+    {
+        if (e->rx_codec_shared[i].used)
+            tbt_fec_grouped_free(e->rx_codec_shared[i].codec);
+        memset(&e->rx_codec_shared[i], 0, sizeof(e->rx_codec_shared[i]));
     }
     if (e->listen_fd >= 0)
     {
@@ -4710,6 +5204,21 @@ int tbt_engine_run(const struct tbt_engine_cfg *cfg)
     e->timer_ep.p = e;
     ep_add(e, e->timerfd, EPOLLIN, &e->timer_ep);
 
+    /* One graph per engine instead of one per stream. All flows of this
+     * engine transmit the same shape and seed, and their RX shapes come
+     * from the same peer session, so the codec caches key on (n, m, seed)
+     * only. Construction is the expensive part of admitting a stream; the
+     * data plane never allocates. */
+    e->tx_codec_shared = client_sclc_new(&e->tx_shape, TBT_FEC_S, e->tx_seed);
+    if (!e->tx_codec_shared)
+    {
+        fprintf(stderr, "tbt_client: cannot build the TX codec\n");
+        engine_cleanup(e);
+        free(e);
+        return -ENOMEM;
+    }
+    e->codec_shared = true;
+
     err = engine_listen(e);
     if (err)
     {
@@ -4740,6 +5249,7 @@ int tbt_engine_run(const struct tbt_engine_cfg *cfg)
     while (e->running)
     {
         struct epoll_event evs[64];
+        bool timer_fired = false;
         int n = epoll_wait(e->epfd, evs, 64, 5);
         int i;
 
@@ -4777,6 +5287,7 @@ int tbt_engine_run(const struct tbt_engine_cfg *cfg)
                 ssize_t got;
                 int rerr;
 
+                timer_fired = true;
                 do
                     got = read(e->timerfd, &ticks, sizeof(ticks));
                 while (got < 0 && errno == EINTR);
@@ -4797,7 +5308,16 @@ int tbt_engine_run(const struct tbt_engine_cfg *cfg)
                 break;
             }
         }
-        engine_tick(e);
+        /* The per-flow timer work is due at the timerfd cadence. A batch
+         * that carried only socket events must still reap carriers whose
+         * event pointers the batch just retired, but running the whole
+         * tick (RTT probe, 256 keeps, every flow's poll mask) on each
+         * burst wasted the loop's time budget. */
+        if (timer_fired ||
+            now_ns() - e->last_tick_ns >= 5000000ull)
+            engine_tick(e);
+        else
+            engine_reap_carriers(e);
     }
     if (e->cfg.verbose)
     {

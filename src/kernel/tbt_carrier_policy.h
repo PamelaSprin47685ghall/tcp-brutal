@@ -131,11 +131,18 @@ static inline bool tbt_carrier_stall_is_dead(const struct tbt_stall_view *v,
         return false;
     /* Either TCP still owes exactly the packets it owed when the pause
      * began, or its retry count has reached the point where TCP itself
-     * gives up. A wire that moved packets is alive even when no byte was
-     * acknowledged. */
-    if (v->retransmits < TBT_STALL_RETX_MAX &&
-        v->packets_out != v->packets_out_at_stall)
-        return false;
+     * gives up. A wire that pushed more segments (packets_out grew, or
+     * changed before any retransmission) is still moving; once TCP enters
+     * retransmission (retransmits > 0), tcp_retrans_collapse() can shrink
+     * packets_out while snd_una stays frozen, which must not defeat the
+     * dead backstop. */
+    if (v->retransmits < TBT_STALL_RETX_MAX)
+    {
+        if (v->packets_out > v->packets_out_at_stall)
+            return false;
+        if (v->retransmits == 0 && v->packets_out != v->packets_out_at_stall)
+            return false;
+    }
     return v->silent_ns > dead_ns;
 }
 

@@ -300,6 +300,7 @@ struct tbt_portmap
     bool configured;
     u16 lo;
     u16 hi;
+    u16 cursor;
     unsigned long *used;
 };
 
@@ -1434,6 +1435,7 @@ struct tbt_session
      * reference is reserved for that item: a queued instance owns it until its
      * entry returns it, or the arm that could not queue returns it itself. */
     unsigned long sched;
+    unsigned long sched_until[TBT_SW_FEC_CUT + 1];
     struct net *net;
     /* Lock order: tbt_lock -> pump_lock ->
      * {->lock -> tx_lock, fec_out_lock, c->http_lock}; socket lock -> ->lock.
@@ -1638,17 +1640,9 @@ struct tbt_session
      * bytes, so a reader that sees the length has the bytes it covers.
      *
      * http_cap_req holds the request block the near side emitted; it is the
-     * only field /proc renders today. http_cap_resp has no writer yet: nothing
-     * fills it, so its length stays 0. http_cap_chunk holds the first emitted
-     * chunk's size line and record prefix; it is captured, but /proc does not
-     * output it. Both fields stay until a writer or a reader is decided. */
+     * only field /proc renders today. */
     char http_cap_req[TBT_HTTP_REQ_MAX];   /* request block incl. CRLFCRLF */
     u16 http_cap_req_len;
-    char http_cap_resp[TBT_HTTP_HDR_MAX];  /* reserved: no writer yet */
-    u16 http_cap_resp_len;
-    char http_cap_chunk[TBT_HTTP_CAP_CHUNK]; /* size line + record prefix;
-                                              * captured, not rendered */
-    u16 http_cap_chunk_len;
 
     /* Per-direction ack state. tx_ack is the peer's delivered offset of our
      * TX direction; rx_ack is our delivered offset, reported in FBK and in
@@ -1808,12 +1802,13 @@ struct tbt_session
      * carrier that ever wrote; /proc/net/tbtun/peers lists only live slots,
      * so these totals close the difference on the `reconcile` line. */
     atomic64_t retired_tx_bytes, retired_data_frames, retired_retx_data;
-    u64 carrier_bytes, carrier_err, carrier_short; /* pump (tbt_carrier_xmit) */
+    atomic64_t carrier_bytes;
+    u64 carrier_err, carrier_short; /* pump (tbt_carrier_xmit) */
     atomic64_t carrier_ws_calls;
     atomic64_t carrier_nospace_armed; /* FEC/ARQ EAGAIN armed SOCK_NOSPACE */
     u64 pump_hw_armed, pump_hw_disarmed; /* pump only */
     atomic64_t pump_hw_fired;            /* per-carrier pump work */
-    u64 dropped_by_ppm;                  /* pump only */
+    atomic64_t dropped_by_ppm;
     u64 recv_partial_discard;            /* carrier release, serialised */
     /* C3 counters (DESIGN.md §8.7). */
     atomic64_t carrier_lost, carrier_replaced, carrier_retired;
@@ -2046,7 +2041,7 @@ struct tbt_session
     atomic64_t fec_empty_block;       /* markers emitted for empty groups */
     atomic64_t http_parse_err;   /* container framing/header protocol error */
     atomic64_t http_status_err;  /* non-200 or non-chunked/non-keepalive */
-    u64 http_req, http_resp; /* header blocks emitted; pump only */
+    atomic64_t http_req, http_resp; /* header blocks emitted */
     atomic64_t pad_tx, drip_tx;  /* keepalive/drip chunks emitted */
     atomic64_t dup_bytes;       /* duplicate payload bytes created, minus
                                  * copies the pump dropped unwritten */
@@ -2309,6 +2304,7 @@ struct tbt_carrier
     u16 local_port;
     u8 *part;                     /* unwritten tail (TBT_CAR_PART_MAX) */
     u32 part_len, part_off;
+    u32 part_cap;
     u8 index;
     u32 gen;                  /* session-unique; pinned frames carry it */
     struct tbt_parser *parser; /* this carrier's partial record (8 KiB) */

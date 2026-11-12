@@ -19,16 +19,19 @@
  *  - probes above that rate. A pure max_bw / (1 - p) pacer settles at its
  *    starting estimate and can lock at the seed window, because nothing ever
  *    asks for more than the last measurement. The pacer therefore multiplies
- *    the loss-compensated rate by a gain: 2.89x during startup (until the
- *    first loss or one smoothed RTT), then a 1.25x burst for the first eighth
- *    of every RTT cycle and 1.0x for the rest. The gain is tapered by the
- *    measured loss before it is applied, so on a lossy path the probe cannot
- *    multiply the loss compensation itself.
+ *    the loss-compensated rate by a gain: 2.89x during startup (until a loss
+ *    or three consecutive RTTs without 25% bandwidth growth), then an 8-RTT
+ *    steady cycle whose first RTT probes at 1.25x and whose remaining seven
+ *    RTTs cruise at 1.0x. tcp_rate_gen() averages delivery over a full RTT,
+ *    so the probe phase must last a full RTT: a sub-RTT burst inside each
+ *    cycle averages out to 1.03x and barely moves the estimate. The gain is
+ *    tapered by the measured loss before it is applied, so on a lossy path
+ *    the probe cannot multiply the loss compensation itself.
  *
- *  - reports ssthresh and undo_cwnd at or above max(2 * BDP, min_cwnd), so a
- *    random loss cannot cut snd_cwnd below the pipe the pacing uses. Setting
- *    clamp_enable=0 restores the reno answer and reno cwnd growth, so the
- *    same binary can A/B the clamp.
+ *  - reports ssthresh and undo_cwnd at or above max(2 * BDP, min_cwnd), and
+ *    holds snd_cwnd at three BDP while startup paces at 2.89x, so the pacer
+ *    is never window-starved. Setting clamp_enable=0 restores the reno
+ *    answer and reno cwnd growth, so the same binary can A/B the clamp.
  *
  *  - keeps the idle hold honest: while tbt_carrier.c holds an idle carrier,
  *    cwnd_event ignores CA_EVENT_CWND_RESTART and keeps the bandwidth
@@ -82,12 +85,16 @@
 #define TBT_CC_MAGIC 0x74424343u /* "tBCC" */
 
 /* Pacing gains in percent: 100 is exactly the loss-compensated rate. The
- * startup gain is BBR's 2.89x; the steady probe is a 1.25x burst occupying
- * the first eighth of each RTT cycle. No constant is below 100 (1.0x). */
+ * startup gain is BBR's 2.89x; the steady probe is one full RTT at 1.25x in
+ * an 8-RTT cycle followed by seven RTTs at 1.0x. No constant is below 100. */
 #define TBT_CC_GAIN_ONE 100u
 #define TBT_CC_GAIN_STARTUP 289u
 #define TBT_CC_GAIN_PROBE 125u
-#define TBT_CC_PROBE_DUTY 8u
+/* One steady cycle phase per smoothed RTT; phase 0 probes, 1..7 cruise. */
+#define TBT_CC_PROBE_PHASES 8u
+/* Startup ends after this many consecutive RTT rounds in which the windowed
+ * max bandwidth grew by less than 25% (max_bw * 4 < full_bw * 5). */
+#define TBT_CC_FULL_BW_CNT 3u
 
 /* The rate arithmetic multiplies max_bw by 1e6, divides by at least 1e5
  * (p is clamped to 9e5), then multiplies by at most 289. Capping the input
@@ -98,17 +105,20 @@
 /* Pacing probe state machine, kept in the socket's CA private block.
  *
  * STARTUP: from the first paced rate sample until either a loss signal
- * (tbt_cc_ssthresh() or rate_sample.losses) or one smoothed RTT has elapsed,
- * the pacer asks for 2.89x. The RTT bound matters: a seed window that is
- * already close to the path rate never produces a loss, and startup must not
- * overdrive an unvalidated path forever. A loss exits startup immediately, in
- * the same ACK that reports it.
+ * (tbt_cc_ssthresh() or rate_sample.losses) or a bandwidth plateau, the
+ * pacer asks for 2.89x. The plateau test runs once per smoothed RTT: the
+ * windowed max must grow by at least 25% over the round's stored value, or a
+ * counter increments; three consecutive rounds without that growth exit
+ * startup. A time bound alone exits before a cold estimate fills the pipe;
+ * a loss exits startup immediately, in the same ACK that reports it.
  *
- * STEADY: one cycle lasts one smoothed RTT. Its first 1/8 uses 1.25x, the
- * remaining 7/8 use 1.0x, so the average excess is 3.125%. A cycle whose
- * elapsed time has reached one RTT restarts at the current ACK's timestamp:
- * an idle gap cannot accumulate phase, and no state is updated without an
- * ACK, so there is no timer and nothing to spin.
+ * STEADY: an 8-RTT cycle, one phase per smoothed RTT. Phase 0 uses 1.25x for
+ * the whole RTT, phases 1..7 use 1.0x. tcp_rate_gen() averages delivered rate
+ * over a full RTT, so the probe phase must span a full RTT for the rate
+ * sample to see 1.25x at all; a short burst would average out to 3.125%. A
+ * cycle idle for two or more RTTs restarts at phase 0; otherwise the phase
+ * advances. No state is updated without an ACK, so there is no timer and
+ * nothing to spin.
  *
  * Both phases taper the part of the gain above 1.0 by (1 - p): at p = 0 the
  * gains are unchanged, at p = 90% only a tenth of the probe room remains.
@@ -124,20 +134,22 @@ enum
 
 struct tbt_cc_state
 {
+    u64 max_bw_bps;           /* windowed-max delivery rate */
+    u64 full_bw_bps;          /* max_bw at the last >= 25% growth round */
+    u64 win_start_ns;         /* start of the current bandwidth window */
+    u64 full_bw_round_ns;     /* start of the current startup plateau round */
+    u64 pacing_bps;           /* last rate written, to avoid redundant writes */
+    u64 probe_cycle_start_ns; /* start of the current steady probe phase */
     u32 magic;
-    u32 rate_cap_bps; /* tunnel_rate, 0 = the operator left it unset */
-    u32 loss_ppm;     /* pushed by the FEC feedback path */
-    u32 clamp_hits;   /* ssthresh calls the clamp actually raised */
-    u64 max_bw_bps;   /* windowed-max delivery rate */
-    u64 win_start_ns; /* start of the current bandwidth window */
-    u64 pacing_bps;   /* last rate written, to avoid redundant writes */
-    u64 startup_start_ns;     /* first ACK paced with a rate sample */
-    u64 probe_cycle_start_ns; /* start of the current steady probe cycle */
+    u32 rate_cap_bps;         /* tunnel_rate, 0 = the operator left it unset */
+    u32 loss_ppm;             /* pushed by the FEC feedback path */
+    u32 clamp_hits;           /* ssthresh calls the clamp actually raised */
     u32 srtt_us;              /* last usable RTT sample */
     u8 probe_state;           /* TBT_CC_PROBE_STARTUP or TBT_CC_PROBE_STEADY */
+    u8 probe_phase;           /* steady cycle phase, 0..TBT_CC_PROBE_PHASES-1 */
+    u8 full_bw_cnt;           /* RTT rounds without 25% bandwidth growth */
     bool startup_lost;        /* a loss signal ended (or would end) startup */
     bool hold;                /* the carrier's idle hold owns the window */
-    u8 pad[1];
 };
 
 /* clamp_enable=0 is the A/B control: reno ssthresh/undo and reno growth, so a
@@ -228,46 +240,79 @@ static u32 tbt_cc_taper_gain(u32 gain, u32 p)
 }
 
 /* Pacing gain for this ACK, in percent. This is the whole state machine: it
- * advances the startup and cycle timestamps and returns; it has no loop and
- * every step is bounded by the constants above. A `now` that is not ahead of
- * the stored timestamp (impossible for ktime, handled defensively) simply
- * restarts the phase at `now` instead of underflowing the subtraction. */
+ * advances the startup plateau window and the steady cycle, then returns; it
+ * has no loop and every step is bounded by the constants above. A `now` that
+ * is not ahead of the stored timestamp (impossible for ktime, handled
+ * defensively) simply restarts the phase at `now` instead of underflowing the
+ * subtraction. */
 static u32 tbt_cc_pace_gain(struct tbt_cc_state *st, u64 now, u32 p)
 {
     u32 srtt_us = READ_ONCE(st->srtt_us) ?: TBT_CC_MIN_RTT_US;
     u64 rtt_ns, start;
-    u32 gain;
+    u8 phase;
 
     srtt_us = clamp_t(u32, srtt_us, TBT_CC_MIN_RTT_US, TBT_CC_MAX_RTT_US);
     rtt_ns = (u64)srtt_us * NSEC_PER_USEC;
 
     if (READ_ONCE(st->probe_state) == TBT_CC_PROBE_STARTUP)
     {
-        start = READ_ONCE(st->startup_start_ns);
-        if (!start)
+        if (!READ_ONCE(st->startup_lost))
         {
-            start = now;
-            WRITE_ONCE(st->startup_start_ns, start);
+            u64 round = READ_ONCE(st->full_bw_round_ns);
+
+            /* One plateau round per smoothed RTT. */
+            if (!round || now < round || now - round >= rtt_ns)
+            {
+                u64 cur = min_t(u64, READ_ONCE(st->max_bw_bps),
+                                TBT_CC_BW_CEIL_BPS);
+                u64 full = min_t(u64, READ_ONCE(st->full_bw_bps),
+                                 TBT_CC_BW_CEIL_BPS);
+                u8 cnt = READ_ONCE(st->full_bw_cnt);
+
+                WRITE_ONCE(st->full_bw_round_ns, now);
+                if (cur * 4 >= full * 5)
+                {
+                    /* The path answered with at least 25% more rate. */
+                    WRITE_ONCE(st->full_bw_bps, cur);
+                    WRITE_ONCE(st->full_bw_cnt, 0);
+                }
+                else if (cnt < TBT_CC_FULL_BW_CNT)
+                {
+                    WRITE_ONCE(st->full_bw_cnt, (u8)(cnt + 1));
+                }
+            }
+            if (READ_ONCE(st->full_bw_cnt) < TBT_CC_FULL_BW_CNT)
+                return tbt_cc_taper_gain(TBT_CC_GAIN_STARTUP, p);
         }
-        if (!READ_ONCE(st->startup_lost) && now >= start &&
-            now - start < rtt_ns)
-            return tbt_cc_taper_gain(TBT_CC_GAIN_STARTUP, p);
-        /* First loss, or one smoothed RTT of startup: enter steady and start
-         * a cycle at now, so the 1.25x burst is the step between the 2.89x
-         * startup and the 1.0x cruise. */
+        /* A loss, or three RTT rounds without 25% growth: the path has
+         * answered. Enter steady on phase 0 so the step down from 2.89x
+         * lands on the full-RTT 1.25x probe. */
         WRITE_ONCE(st->probe_state, TBT_CC_PROBE_STEADY);
+        WRITE_ONCE(st->probe_phase, 0);
         WRITE_ONCE(st->probe_cycle_start_ns, now);
     }
 
     start = READ_ONCE(st->probe_cycle_start_ns);
-    if (!start || now < start || now - start >= rtt_ns)
+    phase = READ_ONCE(st->probe_phase);
+    if (!start || now < start)
     {
+        phase = 0;
         start = now;
-        WRITE_ONCE(st->probe_cycle_start_ns, start);
     }
-    gain = (now - start < rtt_ns / TBT_CC_PROBE_DUTY) ? TBT_CC_GAIN_PROBE
-                                                      : TBT_CC_GAIN_ONE;
-    return tbt_cc_taper_gain(gain, p);
+    else if (now - start >= rtt_ns)
+    {
+        /* One full RTT per phase, so tcp_rate_gen() measures the whole
+         * 1.25x probe rate. An idle gap of two RTTs or more begins a new
+         * cycle; otherwise the phase advances. */
+        phase = now - start >= 2 * rtt_ns
+                    ? 0
+                    : (u8)((phase + 1) & (TBT_CC_PROBE_PHASES - 1));
+        start = now;
+    }
+    WRITE_ONCE(st->probe_phase, phase);
+    WRITE_ONCE(st->probe_cycle_start_ns, start);
+    return tbt_cc_taper_gain(phase == 0 ? TBT_CC_GAIN_PROBE : TBT_CC_GAIN_ONE,
+                             p);
 }
 
 /* Record one delivery-rate sample in the tumbling ten-RTT window. A sample
@@ -337,29 +382,40 @@ static void tbt_cc_pace(struct sock *sk, struct tbt_cc_state *st)
     smp_store_release(&sk->sk_pacing_status, SK_PACING_NEEDED);
 }
 
+/* The pipe in packets, from the same windowed maximum the pacer uses. The
+ * bandwidth is capped here to keep the multiply inside u64; the stored
+ * max_bw_bps itself is not capped. */
+static u64 tbt_cc_bdp_pkts(const struct tcp_sock *tp,
+                           const struct tbt_cc_state *st)
+{
+    u32 mss = READ_ONCE(tp->mss_cache) ?: 1;
+    u32 srtt = READ_ONCE(st->srtt_us) ?: TBT_CC_MIN_RTT_US;
+    u64 bw = min_t(u64, READ_ONCE(st->max_bw_bps), TBT_CC_BW_CEIL_BPS);
+
+    return div64_u64(bw * (u64)srtt, (u64)USEC_PER_SEC * mss);
+}
+
 /* max(2 * BDP, min_cwnd), in packets. BDP uses the same windowed maximum the
  * pacer uses, so one random loss cannot shrink the floor: the estimate only
  * falls when a whole ten-RTT window has been slower. */
 static u32 tbt_cc_floor_pkts(const struct tcp_sock *tp,
                              const struct tbt_cc_state *st)
 {
-    u32 mss = READ_ONCE(tp->mss_cache) ?: 1;
-    u32 srtt = READ_ONCE(st->srtt_us) ?: TBT_CC_MIN_RTT_US;
     u32 min_cwnd = READ_ONCE(tbt_cc_min_cwnd) ?: 1;
-    u64 bdp_pkts;
-    u64 floor;
+    u64 floor = 2 * tbt_cc_bdp_pkts(tp, st);
 
-    bdp_pkts = div64_u64(READ_ONCE(st->max_bw_bps) * (u64)srtt,
-                         (u64)USEC_PER_SEC * mss);
-    floor = 2 * bdp_pkts;
     if (floor < min_cwnd)
         floor = min_cwnd;
     return floor > U32_MAX ? U32_MAX : (u32)floor;
 }
 
-/* Grow the window. With the clamp on, the pacing rate is the rate control and
- * snd_cwnd only has to stay at the model floor; with it off, grow like reno
- * so the A/B run really sees a loss-based algorithm. */
+/* Grow the window. With the clamp on, the pacing rate is the rate control.
+ * During startup the window is held at max(3 * BDP, cur + acked): the 2.89x
+ * pacer needs room to fill the pipe while max_bw is still catching up, and
+ * cur + acked keeps the window growing smoothly before the first sample
+ * sizes the BDP. At steady state only the model floor, max(2 * BDP,
+ * min_cwnd), is enforced. With the clamp off, grow like reno so the A/B run
+ * really sees a loss-based algorithm. */
 static void tbt_cc_cwnd(struct sock *sk, struct tcp_sock *tp,
                         struct tbt_cc_state *st, u32 acked)
 {
@@ -377,6 +433,22 @@ static void tbt_cc_cwnd(struct sock *sk, struct tcp_sock *tp,
         else
             inc = max_t(u32, acked / cur, 1);
         tcp_snd_cwnd_set(tp, cap ? min(cur + inc, cap) : cur + inc);
+        return;
+    }
+    if (READ_ONCE(st->probe_state) == TBT_CC_PROBE_STARTUP)
+    {
+        u32 min_cwnd = READ_ONCE(tbt_cc_min_cwnd) ?: 1;
+        u64 want = max_t(u64, 3 * tbt_cc_bdp_pkts(tp, st),
+                         (u64)cur + acked);
+
+        if (want < min_cwnd)
+            want = min_cwnd;
+        if (cap && want > cap)
+            want = cap;
+        if (want > U32_MAX)
+            want = U32_MAX;
+        if ((u32)want > cur)
+            tcp_snd_cwnd_set(tp, (u32)want);
         return;
     }
     {
@@ -518,11 +590,15 @@ static void tbt_cc_cwnd_event(struct sock *sk, enum tcp_ca_event ev)
     WRITE_ONCE(st->win_start_ns, 0);
     WRITE_ONCE(st->max_bw_bps, 0);
     /* The measurement is gone with the window, so the next samples probe
-     * like a fresh path: startup high gain until one RTT or a loss. The idle
-     * hold is excluded above, exactly like the bandwidth window. */
+     * like a fresh path: startup high gain until three RTT rounds without
+     * 25% growth or a loss. The idle hold is excluded above, exactly like
+     * the bandwidth window. */
+    WRITE_ONCE(st->full_bw_bps, 0);
+    WRITE_ONCE(st->full_bw_round_ns, 0);
+    WRITE_ONCE(st->full_bw_cnt, 0);
     WRITE_ONCE(st->probe_state, TBT_CC_PROBE_STARTUP);
     WRITE_ONCE(st->startup_lost, false);
-    WRITE_ONCE(st->startup_start_ns, 0);
+    WRITE_ONCE(st->probe_phase, 0);
     WRITE_ONCE(st->probe_cycle_start_ns, 0);
 }
 

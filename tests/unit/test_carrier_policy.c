@@ -530,6 +530,20 @@ static void test_moved_una_blocks_death(void)
     ok(!w.stalled, "una: progress clears the pause");
 }
 
+static void test_retrans_collapse_still_dies(void)
+{
+    u64 bound = tbt_carrier_stall_bound_ns(STALL_NS);
+    struct wire w = stalled_wire();
+
+    w.packets_out_at_stall = 8;
+    w.packets_out = 4; /* tcp_retrans_collapse shrank packets_out */
+    w.retransmits = 3;
+    run_wire(&w, 1250 * NS_PER_MS, w.stall_since_ns + bound + 100 * NS_PER_MS,
+             0, bound);
+    ok(w.dead,
+       "collapse: shrinking packets_out under retransmissions does not block stall_dead");
+}
+
 int main(void)
 {
     test_exhausted_never_dials();
@@ -545,6 +559,7 @@ int main(void)
     test_retrans_exhaustion();
     test_window_and_pause_gates();
     test_moved_una_blocks_death();
+    test_retrans_collapse_still_dies();
 
     if (failures)
     {

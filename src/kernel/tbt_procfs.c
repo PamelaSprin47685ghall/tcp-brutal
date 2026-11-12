@@ -817,7 +817,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                        tbt_stat_read(&s->pub_actor_calls),
                        tbt_stat_read(&s->tx_submit_bytes),
                        READ_ONCE(s->stats_tx),
-                       READ_ONCE(s->carrier_bytes),
+                       tbt_stat_read(&s->carrier_bytes),
                        READ_ONCE(s->carrier_err),
                        READ_ONCE(s->carrier_short));
             seq_printf(m, "tunnel %llu rx_work_runs=%llu rx_drain_entries=%llu "
@@ -1340,7 +1340,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "fec_epoch_conflict=%llu "
                               "fec_slot_past_cut=%llu fec_fin_bad=%llu "
                               "fec_ack_bad=%llu fec_tx_share_gap=%llu "
-                              "fec_empty_block=%llu\n",
+                              "fec_empty_block=%llu "
+                              "fec_rx_nobuf=%llu fec_epoch_bad=%llu\n",
                            id,
                            tbt_stat_read(&s->fec_decode_blocks),
                            tbt_stat_read(&s->fec_decode_recovered),
@@ -1361,7 +1362,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_fin_bad),
                            tbt_stat_read(&s->fec_ack_bad),
                            tbt_stat_read(&s->fec_tx_share_gap),
-                           tbt_stat_read(&s->fec_empty_block));
+                           tbt_stat_read(&s->fec_empty_block),
+                           tbt_stat_read(&s->fec_rx_nobuf),
+                           tbt_stat_read(&s->fec_epoch_bad));
                 /* NACK/replay repair, reset causes, and the carrier wait
                  * that precedes backpressure. A user-visible stall can be
                  * checked against these: fec_reset_tcp_failed is the only
@@ -1433,7 +1436,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "fec_repair_last_ns=%llu "
                               "fec_short_parity_saved=%llu "
                               "fec_nack_pad_skip=%llu "
-                              "fec_short_blocks=%llu\n",
+                              "fec_short_blocks=%llu "
+                              "fec_nack_stale_epoch=%llu\n",
                            id,
                            tbt_stat_read(&s->fec_nack_tx),
                            tbt_stat_read(&s->fec_nack_rx),
@@ -1498,7 +1502,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            READ_ONCE(s->fec_repair_last_ns),
                            tbt_stat_read(&s->fec_short_parity_saved),
                            tbt_stat_read(&s->fec_nack_pad_skip),
-                           tbt_stat_read(&s->fec_short_blocks));
+                           tbt_stat_read(&s->fec_short_blocks),
+                           tbt_stat_read(&s->fec_nack_stale_epoch));
                 /* Session FIFO detail: records/bytes still waiting for a
                  * socket, the next carrier cursor, and how many carriers are
                  * marked slow. A healthy session keeps the FIFO empty or
@@ -1566,7 +1571,10 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                                   "state=%s reason=%s "
                                   "m_target=%u q_raw=%u q=%u delta=%u "
                                   "delta_off=%d burst=%u eps=%u sigma=%u backup=%u "
-                                  "ctl_reason=%s frozen=%u\n",
+                                  "ctl_reason=%s frozen=%u "
+                                  "fec_switch_begin=%llu fec_switch_done=%llu "
+                                  "fec_switch_abort=%llu "
+                                  "fec_switch_rollback=%llu\n",
                                id, tbt_read_bool(s->adaptive) ? "on" : "off",
                                READ_ONCE(a->epoch), an, am, ag,
                                READ_ONCE(a->class), READ_ONCE(a->p_ppm),
@@ -1591,7 +1599,11 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                                READ_ONCE(a->backup),
                                tbt_adapt_sclc_reason_name(
                                    READ_ONCE(a->ctl_reason)),
-                               READ_ONCE(a->frozen));
+                               READ_ONCE(a->frozen),
+                               tbt_stat_read(&s->fec_switch_begin),
+                               tbt_stat_read(&s->fec_switch_done),
+                               tbt_stat_read(&s->fec_switch_abort),
+                               tbt_stat_read(&s->fec_switch_rollback));
                 }
                 seq_printf(m, "tunnel %llu c8 profile_mismatch=%llu http_parse_err=%llu "
                               "http_status_err=%llu http_req=%llu http_resp=%llu "
@@ -1599,7 +1611,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            id, tbt_stat_read(&s->profile_mismatch),
                            tbt_stat_read(&s->http_parse_err),
                            tbt_stat_read(&s->http_status_err),
-                           READ_ONCE(s->http_req), READ_ONCE(s->http_resp),
+                           tbt_stat_read(&s->http_req),
+                           tbt_stat_read(&s->http_resp),
                            tbt_stat_read(&s->pad_tx),
                            tbt_stat_read(&s->drip_tx));
                 {

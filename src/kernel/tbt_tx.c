@@ -809,7 +809,9 @@ static void tbt_tx_retain_trim(struct tbt_session *sess, struct tbt_stream *st)
 
             /* A queued copy may still point at a released entry; the pump
              * writes fr->ret->path_mask after the free (UAF). One pass over
-             * tx_q, not one per entry. */
+             * tx_q, not one per entry. The helper sets fr->ret = NULL on
+             * every queued copy of a released entry, so no frame outside
+             * tx_q can reach the freed retain after this lock section. */
             tbt_tx_retain_unlink_queued(sess, st, live, first_live);
         }
         spin_unlock(&sess->tx_lock);

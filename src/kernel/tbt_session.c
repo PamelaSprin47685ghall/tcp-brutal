@@ -865,8 +865,9 @@ out_unlock:
 // guarded by tbt_ports.lock. A tunnel's window is its own portblock= when
 // set, else the global /ports block. Overlapping windows share the bitmap, so
 // they can only compete for capacity; they can never hand out the same live
-// port. Ports are released when the carrier goes away, so a replacement
-// carrier can reuse one immediately.
+// port. Ports are released when the carrier goes away; the rotating cursor
+// resumes after the last port handed out, so the very next dial does not
+// re-pick the source port whose connection just failed.
 
 u16 tbt_port_alloc(const struct tbt_tunnel *t, enum tbt_port_alloc_err *err)
 {
@@ -891,7 +892,8 @@ u16 tbt_port_alloc(const struct tbt_tunnel *t, enum tbt_port_alloc_err *err)
     rc = tbt_portmap_window(t->cfg.portblock_lo, t->cfg.portblock_hi,
                             tbt_ports.lo, tbt_ports.hi, &lo, &hi);
     if (!rc)
-        rc = tbt_portmap_alloc(tbt_ports.used, lo, hi, &port);
+        rc = tbt_portmap_alloc_next(tbt_ports.used, lo, hi,
+                                    &tbt_ports.cursor, &port);
     if (rc == -ENOSPC)
         why = TBT_PORT_ALLOC_EXHAUSTED;
     else if (rc)
@@ -1641,6 +1643,10 @@ void tbt_stream_kill_by_sid(struct tbt_session *sess, u64 sid, u8 reason)
 
 #define TBT_REAP_BATCH 16
 
+/* Defined below with the teardown helpers; the reaper returns a reference a
+ * dropped schedule left on the stream before the hash reference goes away. */
+static void tbt_stream_sched_reclaim(struct tbt_stream *st);
+
 static int tbt_reap_body(struct tbt_session *sess)
 {
     struct tbt_stream *dead[TBT_REAP_BATCH];
@@ -1691,6 +1697,11 @@ out:
          * the kill work itself needs. */
         tbt_fec_flow_detach(dead[i]);
         tbt_stream_release_socket(dead[i]);
+        /* Return a reference stranded by a schedule/cancel race (see
+         * tbt_stream_sched_reclaim()) while the stream is still reachable
+         * here. Leaving it for module teardown made rmmod wait forever on a
+         * stream that had already left sess->streams[]. */
+        tbt_stream_sched_reclaim(dead[i]);
         tbt_stream_put(dead[i]); /* drops the hash reference */
     }
 
@@ -1860,9 +1871,23 @@ bool tbt_session_arm(struct tbt_session *s, enum tbt_sess_work w,
         return false;
     /* The common case: an instance already owns the bit and its reference.
      * Losing this wake only delays the pass; every one of these works is
-     * periodic and self-rearming. */
+     * periodic and self-rearming. The one exception is an urgent wake that
+     * must run sooner than the pending instance (a FEC delivery retry with
+     * delay 0 against a 25 ms cut): shorten the armed timer so the ring is
+     * retried as soon as room appears. sched_until[] records the deadline
+     * each arm asked for, so a long periodic re-arm never postpones a short
+     * one that is already pending. */
     if (test_bit(w, &s->sched))
+    {
+        if (!READ_ONCE(s->closing) && w <= TBT_SW_FEC_CUT &&
+            time_before(jiffies + delay, READ_ONCE(s->sched_until[w])) &&
+            delayed_work_pending(dw))
+        {
+            mod_delayed_work(TBT_WQ, dw, delay);
+            WRITE_ONCE(s->sched_until[w], jiffies + delay);
+        }
         return true;
+    }
     if (!refcount_inc_not_zero(&s->refs))
         return false;
     if (test_and_set_bit(w, &s->sched))
@@ -1882,6 +1907,7 @@ bool tbt_session_arm(struct tbt_session *s, enum tbt_sess_work w,
             tbt_session_put(s);
         return false;
     }
+    WRITE_ONCE(s->sched_until[w], jiffies + delay);
     mod_delayed_work(TBT_WQ, dw, delay);
     return true;
 }
@@ -1915,7 +1941,13 @@ static void tbt_session_arm_reap_now(struct tbt_session *s)
         return;
     }
     if (delayed_work_pending(dw))
+    {
+        /* Keep the deadline record in step with the retimed instance: a
+         * later arm must not shorten this 0 ms wake against the stale
+         * 200 ms deadline and postpone it instead. */
+        WRITE_ONCE(s->sched_until[TBT_SW_REAP], jiffies);
         mod_delayed_work(TBT_WQ, dw, 0);
+    }
 }
 
 /* Cancel one session work item. A pending instance never runs its entry, so
@@ -2025,11 +2057,20 @@ int tbt_session_create(struct tbt_tunnel *t)
              (unsigned long long)t->cfg.id, t->cfg.role, t->cfg.n, t->cfg.m,
              t->cfg.carriers, t->cfg.fec, t->cfg.crypto, t->cfg.profile,
              t->cfg.mode, t->cfg.w);
-    s = kzalloc(sizeof(*s), GFP_KERNEL);
+    /* struct tbt_session is large enough that one kzalloc asks the buddy
+     * allocator for a multi-page contiguous block and fragments the host.
+     * tbt_fec_vzalloc() zeroes through kvzalloc/vzalloc and falls back to
+     * vmalloc when the slab cannot satisfy the size; kvfree() releases either
+     * kind. */
+    s = tbt_fec_vzalloc(sizeof(*s));
     if (!s)
         return -ENOMEM;
     s->net = get_net(t->net);
     s->tunnel = t;
+    /* The session owns this reference until tbt_session_free_now(). A destroy
+     * that times out and leaks the session must not leave s->tunnel dangling:
+     * leaked work items still read it, and the tunnel must outlive them. */
+    refcount_inc(&t->refs);
     s->def_ops = t->def_ops;
     refcount_set(&s->refs, 1);
     init_completion(&s->drained);
@@ -2107,9 +2148,9 @@ int tbt_session_create(struct tbt_tunnel *t)
      * reuse it: tbt_tx_hello() allocates a fresh epoch per carrier, which is
      * necessarily above this session-create value. */
     s->crypto_tx_epoch = tbt_hello_epoch_now();
-    /* HELLO v11: no path has an authenticated epoch yet. kzalloc() already
-     * zeroed the table; the explicit clear keeps the initialization here,
-     * next to the other session-identity state. */
+    /* HELLO v11: no path has an authenticated epoch yet. The zeroing
+     * allocation already cleared the table; the explicit clear keeps the
+     * initialization here, next to the other session-identity state. */
     bitmap_zero(s->peer_hello_epoch_valid, TBT_MAX_CARRIERS_LIMIT);
     bool inherited_key = false;
     if (t->cfg.crypto_key_set)
@@ -2247,7 +2288,11 @@ static void tbt_session_free_now(struct tbt_session *s)
     tbt_crypto_pair_wipe(&s->crypto_ctx);
     tbt_memzero_explicit(s->crypto_key, sizeof(s->crypto_key));
     put_net(s->net);
-    kfree(s);
+    /* The reference taken by tbt_session_create(): this is the session's
+     * last use of its tunnel. */
+    if (s->tunnel)
+        tbt_tunnel_put(s->tunnel);
+    kvfree(s);
 }
 
 /* Recover the reference of a session work whose queue a cancel dropped while
@@ -2277,10 +2322,12 @@ static void tbt_session_sched_reclaim(struct tbt_session *s)
     }
 }
 
-/* The same recovery for the five per-stream work items. Destroy has already
- * stopped every scheduler outside the stream, so no instance can be armed
- * after its cancel flush. Two passes cover a body that schedules a sibling
- * work whose slot in the table was already processed. */
+/* The same recovery for the five per-stream work items. It runs from the
+ * session reaper after the stream has left sess->streams[] and its socket was
+ * released, and from destroy's second pass after every external scheduler was
+ * stopped: in both cases the cancel flush must leave no instance that could
+ * re-arm a sibling. Two passes cover a body that schedules a work whose slot
+ * in the table was already processed. */
 static void tbt_stream_sched_reclaim(struct tbt_stream *st)
 {
     static const unsigned long bits[] = {
@@ -2511,13 +2558,14 @@ void tbt_session_destroy(struct tbt_tunnel *t)
                    (unsigned int)refcount_read(&s->refs), TBT_SESSION_DRAIN_MS,
                    READ_ONCE(s->sched), (unsigned int)s->n_streams,
                    (unsigned int)s->n_active, (unsigned int)s->n_car);
-            /* The tunnel is about to be freed. Leaked holders may still run;
-             * the bodies that check this pointer must see it cleared rather
-             * than dangling. */
-            spin_lock(&s->lock);
-            WRITE_ONCE(s->tunnel, NULL);
-            spin_unlock(&s->lock);
-            /* The tunnel list no longer owns this session, so shutdown
+            /* Leave s->tunnel in place: the session owns its own tunnel
+             * reference (taken in tbt_session_create(), returned in
+             * tbt_session_free_now()), so leaked holders that still read
+             * s->tunnel see a live object even after the caller's put. Nulling
+             * it here would force every concurrent reader to special-case it
+             * and would still race with an in-flight dereference.
+             *
+             * The tunnel list no longer owns this session, so shutdown
              * cannot find it. Keep it for the unload-time wait; its
              * references may still drain, in which case the wait frees it. */
             mutex_lock(&tbt_leaked_lock);

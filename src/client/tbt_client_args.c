@@ -60,7 +60,13 @@ int tbt_client_us_strip(char *line, size_t cap, struct tbt_client_us *us,
          tok = strtok_r(NULL, " \t\r\n", &save))
     {
         size_t n;
-        int r = us_token(tok, us);
+        int r;
+
+        /* An inline comment ends the kernel line. The module grammar has no
+         * `#`, so keeping or rejecting the token would fail the whole line. */
+        if (tok[0] == '#')
+            break;
+        r = us_token(tok, us);
 
         if (r < 0)
         {
@@ -99,118 +105,91 @@ int tbt_client_us_argv(int argc, char **argv, int start,
     return -1;
 }
 
-/* A line that ran past the caller's buffer is drained to its newline, so its
- * tail can never be read as the next line. The visible prefix and the bytes
- * already consumed (c1, and c2 after a CR) decide whether the whole line was
- * blank or a comment, which the reader skips, or data, which is an overlong
- * tunnel line. Returns 0 for blank/comment, 1 for data, or a negative errno
- * on a read failure. */
-static int overlong_line(FILE *f, const char *line, int c1, int c2)
-{
-    int pending[2];
-    bool data = false;
-    bool decided = false;
-    int i;
-
-    for (; *line == ' ' || *line == '\t' || *line == '\r'; line++)
-        ;
-    if (*line)
-    {
-        data = *line != '#';
-        decided = true;
-    }
-    pending[0] = c1;
-    pending[1] = c2;
-    for (i = 0; i < 2 && !decided; i++)
-    {
-        int c = pending[i];
-
-        if (c == EOF || c == ' ' || c == '\t' || c == '\r')
-            continue;
-        data = c != '#';
-        decided = true;
-    }
-    for (;;)
-    {
-        int c = fgetc(f);
-
-        if (c == EOF)
-        {
-            if (!ferror(f))
-                break;
-            return errno ? -errno : -EIO;
-        }
-        if (c == '\n')
-            break;
-        if (!decided && c != ' ' && c != '\t' && c != '\r')
-        {
-            data = c != '#';
-            decided = true;
-        }
-    }
-    return data ? 1 : 0;
-}
-
 int tbt_client_config_read(const char *path, char *line, size_t cap)
 {
     FILE *f;
     int err = -ENODATA;
 
-    /* fgets() needs room for at least the NUL; a cap this small can never
-     * hold a line and would read line[-1] below. */
+    /* A cap this small can never hold a line and would read line[-1]. */
     if (cap < 2)
         return -EINVAL;
     f = fopen(path, "r");
     if (!f)
         return -errno;
-    while (fgets(line, (int)cap, f))
+    for (;;)
     {
+        size_t n = 0;
+        bool overlong = false;
+        bool decided = false;
+        bool data = false;
+        bool pending_cr = false;
+        bool any = false;
         char *p;
-        size_t n;
+        int c;
 
-        n = strlen(line);
-        /* A full buffer without a newline may be an overlong line, not the
-         * last line of the file. Read the terminator to tell them apart: LF,
-         * CRLF (which may straddle the boundary), or EOF after a cap-1 byte
-         * line is legal; any other byte means the line was cut off. */
-        if (n == cap - 1 && line[n - 1] != '\n')
+        /* fgets() cannot see an embedded NUL: it would shorten strlen() past
+         * a cut line and feed the tail as the next line. Read bytes instead,
+         * so the exact byte count decides the cap-1 boundary. A NUL is never
+         * valid in a tunnel directive. */
+        while ((c = fgetc(f)) != EOF)
         {
-            int c = fgetc(f);
-            int c2 = EOF;
-            bool complete;
-
-            if (c == '\r')
-                c2 = fgetc(f);
-            complete = c == '\r' ? (c2 == EOF || c2 == '\n')
-                                 : (c == EOF || c == '\n');
-            if (!complete)
+            any = true;
+            if (c == '\0')
             {
-                int over = overlong_line(f, line, c, c2);
-
-                if (over < 0)
-                {
-                    err = over;
-                    break;
-                }
-                if (over > 0)
-                {
-                    err = -E2BIG;
-                    break;
-                }
-                /* An overlong comment or blank line: its tail is gone and
-                 * the next line is the first real one. */
-                continue;
+                err = -EINVAL;
+                goto out;
             }
-            if ((c == '\r' ? c2 : c) == EOF && ferror(f))
+            if (pending_cr)
+            {
+                pending_cr = false;
+                /* The held CR is the CRLF terminator only before LF or EOF;
+                 * anything else makes it the line's cap-th content byte. */
+                if (c == '\n')
+                    break;
+                overlong = true;
+            }
+            if (c == '\n')
+                break;
+            if (!decided && c != ' ' && c != '\t' && c != '\r')
+            {
+                data = c != '#';
+                decided = true;
+            }
+            if (overlong)
+                continue;
+            if (n < cap - 1)
+                line[n++] = (char)c;
+            else if (c == '\r')
+                pending_cr = true; /* maybe the CR of a boundary CRLF */
+            else
+                overlong = true;
+        }
+        if (c == EOF)
+        {
+            if (ferror(f))
             {
                 err = errno ? -errno : -EIO;
-                break;
+                goto out;
             }
+            if (!any)
+                break;
+        }
+        if (overlong)
+        {
+            /* A long blank or comment line is drained and skipped; only
+             * tunnel data past the buffer bound is an error. */
+            if (data)
+            {
+                err = -E2BIG;
+                goto out;
+            }
+            continue;
         }
         /* Strip the terminator before the blank test, so a CRLF blank line
          * is skipped instead of returned as an empty first line. */
-        while (n && (line[n - 1] == '\n' || line[n - 1] == '\r'))
-            line[--n] = '\0';
+        while (n && line[n - 1] == '\r')
+            n--;
+        line[n] = '\0';
         for (p = line; *p == ' ' || *p == '\t'; p++)
             ;
         if (*p == '\0' || *p == '#')
@@ -221,8 +200,7 @@ int tbt_client_config_read(const char *path, char *line, size_t cap)
         err = 0;
         break;
     }
-    if (err == -ENODATA && ferror(f))
-        err = errno ? -errno : -EIO;
+out:
     fclose(f);
     return err;
 }

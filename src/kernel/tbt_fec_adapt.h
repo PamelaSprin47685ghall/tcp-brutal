@@ -222,6 +222,33 @@ static inline bool tbt_fec_adapt_carrier_alive(bool up, bool stopping,
     return now_ns - last_rx_ns < limit;
 }
 
+/* Keepalive-aware variant for unidirectional traffic: PAD keepalives arrive
+ * every keepalive_ms (default 5000 ms), so the liveness horizon must exceed
+ * one keepalive interval plus RTT slack when keepalive_ms is configured. */
+static inline bool tbt_fec_adapt_carrier_alive_ka(bool up, bool stopping,
+                                                  bool established, u64 now_ns,
+                                                  u64 last_rx_ns, u32 rtt_us,
+                                                  u32 keepalive_ms)
+{
+    u64 stale = (u64)rtt_us * 4000ull;
+    u64 limit = 4000ull * 1000ull * 1000ull;
+
+    if (keepalive_ms)
+    {
+        u64 ka_limit = ((u64)keepalive_ms + 2000ull) * 1000ull * 1000ull;
+
+        if (ka_limit > limit)
+            limit = ka_limit;
+    }
+    if (stale > limit)
+        limit = stale;
+    if (!up || stopping || !established)
+        return false;
+    if (!last_rx_ns || now_ns < last_rx_ns)
+        return false;
+    return now_ns - last_rx_ns < limit;
+}
+
 /* Freeze the controller when fewer than 90% of the carriers are alive or when
  * more than 10% are stalled. A zero population counts as frozen. */
 static inline bool tbt_fec_adapt_carrier_pause(u16 alive, u16 stalled,

@@ -4462,6 +4462,100 @@ static void test_nack_uplink_parity_floor(void)
           "nack floor: ten rows are named, no row past the floor");
 }
 
+static void test_rx_out_high_pauses_frontier(void)
+{
+    int sv[2];
+    u64 prev_frontier;
+
+    clear_engine();
+    set_downlink_shape();
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, sv))
+        abort();
+    f.app_fd = sv[0];
+    f.out_cap = TBT_OUT_CAP;
+    f.out = malloc(f.out_cap);
+    if (!f.out)
+        abort();
+    f.out_len = TBT_OUT_HIGH;
+    f.out_off = 0;
+    prev_frontier = f.rx_ack_frontier;
+
+    full_block(0, 0, 128, 128);
+    CHECK(f.rx_next_block == 0 && f.rx_ack_frontier == prev_frontier,
+          "out_high: flow_rx_check pauses delivery and freezes frontier");
+
+    /* Draining below TBT_OUT_LOW resumes delivery and advances frontier. */
+    f.out_len = TBT_OUT_LOW - 1024;
+    f.out_off = f.out_len;
+    flow_rx_resume(&f);
+    CHECK(f.rx_next_block == 1 && f.rx_ack_frontier == 128,
+          "out_high: draining below TBT_OUT_LOW resumes delivery");
+
+    free(f.out);
+    f.out = NULL;
+    f.out_cap = f.out_len = f.out_off = 0;
+    f.app_fd = -1;
+    close(sv[0]);
+    close(sv[1]);
+}
+
+static void test_tx_read_limit_idle_seal_and_cur_len(void)
+{
+    struct flow *tx = tx_flow_new();
+
+    tx->tx_credit_shares = (u64)tx->groups * (tx->n + tx->m); /* 1 block */
+    /* Simulate block 0 idle-sealed with 1 real share + 63 padding shares,
+     * then 512 bytes already buffered in tx_cur for block 1. */
+    tx->tx_seq = 1;
+    tx->tx_blk_seq0 = (u64)tx->groups * tx->n; /* 64 */
+    tx->tx_block = 1;
+    tx->tx_ack_next = 0;
+    tx->tx_cur_len = 512;
+    /* Window is 1 block (64 packets). next_seq is 64, so 64 packets are already
+     * occupied -> read limit must be 0. */
+    CHECK(flow_tx_read_limit(tx) == 0,
+          "read_limit: idle-sealed block jump counts against credit window");
+
+    /* Grant 2 blocks (window 128). 64 remaining packets minus 512 B buffered
+     * (limited by sizeof(tx->rbuf)). */
+    tx->tx_credit_shares = 2ull * tx->groups * (tx->n + tx->m);
+    tx->tx_ack_next = 0;
+    tx->tx_group = (u16)(tx->groups - 1);
+    tx->tx_share = (u16)(tx->n - 1); /* next_seq = 64 + 7*8 + 7 = 127 */
+    CHECK(flow_tx_read_limit(tx) == TBT_FEC_S - 512,
+          "read_limit: subtracts tx_cur_len from remaining window");
+
+    flow_free(&tx_e, tx);
+}
+
+static void test_rx_ff_last_and_fin_tail_no_parity(void)
+{
+    struct tbt_fec_hdr h;
+
+    clear_engine();
+    /* Send 2 data shares on group 0 with TBT_FEC_FF_LAST on share 1, and NO
+     * parity shares (simulating lost parity on a dead carrier). */
+    send_data(0, 0, 8, 24, 0, 0, TBT_FEC_S, false);
+    memset(&h, 0, sizeof(h));
+    h.type = TBT_FEC_DATA;
+    h.flags = TBT_FEC_FF_PADDED | TBT_FEC_FF_LAST;
+    h.share_index = 1;
+    h.n = 8;
+    h.m = 24;
+    h.block_id = 0;
+    h.seq = 1;
+    h.payload_len = TBT_FEC_S;
+    h.win_len = 321;
+    h.conv = TBT_FEC_CONV;
+    h.sid = f.sid;
+    h.reserved = 0;
+    flow_rx_store(&f, &h, payload);
+    for (int g = 1; g < 8; g++)
+        send_marker(0, 0, 8, 24, (u16)g);
+    CHECK(f.rx_next_block == 1 && f.rx_deliver_bytes == TBT_FEC_S + 321,
+          "ff_last: data share FF_LAST delivers short block without parity");
+}
+
 int main(void)
 {
     signal(SIGPIPE, SIG_IGN);
@@ -4535,6 +4629,9 @@ int main(void)
     test_rx_credit_backpressure();
     test_carrier_queue_compaction();
     test_nack_uplink_parity_floor();
+    test_rx_out_high_pauses_frontier();
+    test_tx_read_limit_idle_seal_and_cur_len();
+    test_rx_ff_last_and_fin_tail_no_parity();
 
     printf("test_client_rx: %d checks, %d failures\n", checks, failures);
     free(f.out);

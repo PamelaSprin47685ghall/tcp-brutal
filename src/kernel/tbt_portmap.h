@@ -34,6 +34,12 @@ int tbt_portmap_window(u16 block_lo, u16 block_hi,
  * caller owns the bitmap and must serialize calls. */
 int tbt_portmap_alloc(unsigned long *used, u16 lo, u16 hi, u16 *port);
 
+/* Allocate a free port in [lo, hi] starting from *cursor and advancing
+ * *cursor past the chosen port. Avoids immediately reusing a recently failed
+ * source port while preserving lowest-first behavior for tbt_portmap_alloc(). */
+int tbt_portmap_alloc_next(unsigned long *used, u16 lo, u16 hi, u16 *cursor,
+                           u16 *port);
+
 /* Release `port`. Port 0, or an already free port, is a no-op. */
 void tbt_portmap_free(unsigned long *used, u16 port);
 

@@ -265,8 +265,10 @@ struct tbt_sclc
     u64 *resolve; /* n: resolved mask for this wave */
     u64 *vbits;   /* n: resolved value for this wave */
     int *stack;   /* n_chk */
+    int *next_stack; /* n_chk: checks activated by the current wave */
     int *touched; /* n */
     u8 *tflag;    /* n */
+    u8 *cflag;    /* n_chk: check already queued for the next wave */
 
     u8 *known;     /* n_shares: data share known */
     u8 *batch_ok;  /* batches: batch decoded */
@@ -704,6 +706,7 @@ static void sclc_decode_init(struct tbt_sclc *c, u8 *const data[],
     memset(c->resolve, 0, (size_t)c->n * sizeof(u64));
     memset(c->vbits, 0, (size_t)c->n * sizeof(u64));
     memset(c->tflag, 0, (size_t)c->n);
+    memset(c->cflag, 0, (size_t)c->n_chk);
 
     for (v = 0; v < c->n; v++)
     {
@@ -723,32 +726,42 @@ static void sclc_decode_init(struct tbt_sclc *c, u8 *const data[],
 }
 
 /*
- * Run the peeling fixed point.  Each wave scans every active check, then
- * publishes the resolved variables once.  This is the prototype's wave
- * schedule: values are identical to the scalar decoder, and one 64-bit
- * operation advances all 64 codewords.
+ * Run the peeling fixed point.  A wave processes the checks that were
+ * active when the previous wave published its values, then publishes the
+ * resolved variables once.  Checks that become active while a value is
+ * published are queued for the next wave, so the decoder never rescans
+ * all n_chk checks on every wave.  This is the prototype's wave schedule:
+ * values are identical to the scalar decoder, and one 64-bit operation
+ * advances all 64 codewords.
  */
 static void sclc_decode_run(struct tbt_sclc *c)
 {
+    int *cur = c->stack;
+    int *nxt = c->next_stack;
+    int nlist = 0;
     int wave;
+    int i;
 
-    for (wave = 0; wave < c->n; wave++)
+    for (i = 0; i < c->n_chk; i++)
     {
-        int nlist = 0;
-        int ntouch = 0;
-        int i;
+        if (!c->act[i])
+            continue;
+        cur[nlist++] = i;
+        c->cflag[i] = 1;
+    }
 
-        for (i = 0; i < c->n_chk; i++)
-            if (c->act[i])
-                c->stack[nlist++] = i;
-        if (!nlist)
-            return;
+    for (wave = 0; wave < c->n && nlist; wave++)
+    {
+        int ntouch = 0;
+        int next_nlist = 0;
 
         for (i = 0; i < nlist; i++)
         {
-            int ck = c->stack[i];
+            int ck = cur[i];
             int e;
 
+            /* Dequeue: a later wave may activate this check again. */
+            c->cflag[ck] = 0;
             for (e = c->coff[ck]; e < c->coff[ck + 1]; e++)
             {
                 int v = c->cadj[e];
@@ -782,11 +795,24 @@ static void sclc_decode_run(struct tbt_sclc *c)
                 cnt_sub(&c->cnt[(size_t)ck * 4], rv);
                 c->xr[ck] ^= vb;
                 c->act[ck] = cnt_one(&c->cnt[(size_t)ck * 4]);
+                if (c->act[ck] && !c->cflag[ck])
+                {
+                    c->cflag[ck] = 1;
+                    nxt[next_nlist++] = ck;
+                }
             }
             c->resolve[v] = 0;
             c->vbits[v] = 0;
             c->tflag[v] = 0;
         }
+
+        {
+            int *t = cur;
+
+            cur = nxt;
+            nxt = t;
+        }
+        nlist = next_nlist;
     }
 }
 
@@ -947,10 +973,13 @@ static int sclc_ensure_decode(struct tbt_sclc *c)
     c->resolve = sclc_alloc((size_t)c->n * sizeof(u64));
     c->vbits = sclc_alloc((size_t)c->n * sizeof(u64));
     c->stack = sclc_alloc((size_t)c->n_chk * sizeof(int));
+    c->next_stack = sclc_alloc((size_t)c->n_chk * sizeof(int));
     c->touched = sclc_alloc((size_t)c->n * sizeof(int));
     c->tflag = sclc_alloc((size_t)c->n);
+    c->cflag = sclc_alloc((size_t)c->n_chk);
     if (!c->unk || !c->val || !c->cnt || !c->xr || !c->act ||
-        !c->resolve || !c->vbits || !c->stack || !c->touched || !c->tflag)
+        !c->resolve || !c->vbits || !c->stack || !c->next_stack ||
+        !c->touched || !c->tflag || !c->cflag)
     {
         sclc_free(c->unk);
         sclc_free(c->val);
@@ -960,8 +989,10 @@ static int sclc_ensure_decode(struct tbt_sclc *c)
         sclc_free(c->resolve);
         sclc_free(c->vbits);
         sclc_free(c->stack);
+        sclc_free(c->next_stack);
         sclc_free(c->touched);
         sclc_free(c->tflag);
+        sclc_free(c->cflag);
         c->unk = NULL;
         c->val = NULL;
         c->cnt = NULL;
@@ -970,8 +1001,10 @@ static int sclc_ensure_decode(struct tbt_sclc *c)
         c->resolve = NULL;
         c->vbits = NULL;
         c->stack = NULL;
+        c->next_stack = NULL;
         c->touched = NULL;
         c->tflag = NULL;
+        c->cflag = NULL;
         return -ENOMEM;
     }
     c->dec_ready = 1;
@@ -994,8 +1027,10 @@ static void sclc_free_ctx(void *ctx)
     sclc_free(c->resolve);
     sclc_free(c->vbits);
     sclc_free(c->stack);
+    sclc_free(c->next_stack);
     sclc_free(c->touched);
     sclc_free(c->tflag);
+    sclc_free(c->cflag);
     sclc_free(c->known);
     sclc_free(c->batch_ok);
     sclc_free(c);

@@ -497,6 +497,62 @@ static void test_cfg_check(void)
           "check: explicit no-op defaults are accepted");
 }
 
+static void test_config_nul_and_inline_comment(void)
+{
+    char line[32];
+    char bad[64];
+    struct tbt_client_us us;
+    int fd;
+
+    /* Short line containing embedded NUL must be rejected with -EINVAL. */
+    snprintf(path, sizeof(path), "%s/tbt-args-nul-XXXXXX",
+             getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp");
+    fd = mkstemp(path);
+    CHECK(fd >= 0, "nul: temp file created");
+    if (fd >= 0)
+    {
+        static const char raw[] = "tunnel 1\0role=near\n";
+
+        CHECK(write(fd, raw, sizeof(raw) - 1) == (ssize_t)(sizeof(raw) - 1),
+              "nul: raw bytes written");
+        close(fd);
+        CHECK(tbt_client_config_read(path, line, sizeof(line)) == -EINVAL,
+              "nul: embedded NUL in short line rejected");
+        unlink(path);
+    }
+
+    /* Overlong line with NUL before cap must not smuggle its tail. */
+    snprintf(path, sizeof(path), "%s/tbt-args-nul2-XXXXXX",
+             getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp");
+    fd = mkstemp(path);
+    CHECK(fd >= 0, "nul2: temp file created");
+    if (fd >= 0)
+    {
+        static const char raw[] =
+            "# comment\0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\ntunnel 1\n";
+
+        CHECK(write(fd, raw, sizeof(raw) - 1) == (ssize_t)(sizeof(raw) - 1),
+              "nul2: raw bytes written");
+        close(fd);
+        CHECK(tbt_client_config_read(path, line, sizeof(line)) == -EINVAL,
+              "nul2: embedded NUL in overlong line rejected");
+        unlink(path);
+    }
+
+    /* Inline # comment stops us_strip() without failing on comment tokens. */
+    {
+        char kline[128];
+
+        snprintf(kline, sizeof(kline),
+                 "tunnel 1 role=near verbose=1 # verbose=bad_in_comment");
+        memset(&us, 0, sizeof(us));
+        CHECK(tbt_client_us_strip(kline, sizeof(kline), &us, bad, sizeof(bad)) == 0,
+              "comment: inline # stops strip cleanly");
+        CHECK(us.verbose == 1 && !strcmp(kline, "tunnel 1 role=near"),
+              "comment: kernel line ends before #");
+    }
+}
+
 int main(void)
 {
     test_config_trailing();
@@ -512,6 +568,7 @@ int main(void)
     test_config_read_error();
     test_config_overlong();
     test_cfg_check();
+    test_config_nul_and_inline_comment();
     printf("test_client_args: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

@@ -289,6 +289,29 @@ static void test_parse_global(void)
        "single-port global directive is refused", NULL);
 }
 
+static void test_alloc_next_rotation(void)
+{
+    u16 cursor = 0;
+    u16 p;
+
+    reset_used();
+    ok(tbt_portmap_alloc_next(used, 40000, 40002, &cursor, &p) == 0 &&
+           p == 40000 && cursor == 40001,
+       "rot: first port starts at lo", NULL);
+    tbt_portmap_free(used, 40000);
+    ok(tbt_portmap_alloc_next(used, 40000, 40002, &cursor, &p) == 0 &&
+           p == 40001 && cursor == 40002,
+       "rot: freed port is skipped in favor of next cursor", NULL);
+    ok(tbt_portmap_alloc_next(used, 40000, 40002, &cursor, &p) == 0 &&
+           p == 40002 && cursor == 40000,
+       "rot: cursor wraps at hi back to lo", NULL);
+    ok(tbt_portmap_alloc_next(used, 40000, 40002, &cursor, &p) == 0 &&
+           p == 40000 && cursor == 40001,
+       "rot: wrapped cursor reuses previously freed port", NULL);
+    ok(tbt_portmap_alloc_next(used, 40000, 40002, &cursor, &p) == -ENOSPC,
+       "rot: full window reports ENOSPC", NULL);
+}
+
 int main(void)
 {
     test_words_and_fits();
@@ -298,6 +321,7 @@ int main(void)
     test_boundaries();
     test_parse_portblock();
     test_parse_global();
+    test_alloc_next_rotation();
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }
