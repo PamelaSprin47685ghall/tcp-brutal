@@ -1,10 +1,11 @@
 #!/bin/sh
-# mkinitramfs.sh - assemble the initramfs that tests/qemu/run.sh boots.
+# mkinitramfs.sh - assemble the initramfs that adversarial/run.sh boots.
 #
-#   tests/qemu/mkinitramfs.sh [--ko PATH] [--out FILE] [--endpoint PATH]
+#   adversarial/qemu/mkinitramfs.sh [--ko PATH] [--out FILE] [--endpoint PATH]
+#                                  [--busybox PATH]
 #
 # The image is a cpio.gz holding:
-#   /init            the test itself (tests/qemu/init)
+#   /init            the test itself (adversarial/init or another --init)
 #   /<module>.ko     the module under test, under its own file name
 #   /bin/tbt_burst   either the static helper (host/tbt_burst) or the busybox
 #                    applet symlink when the helper is absent
@@ -14,19 +15,30 @@
 #                    so a static build is only possible with a musl toolchain)
 #
 # Everything is resolved from unprivileged sources: the guest binaries come from
-# packages downloaded into ~/.cache/tbtun-build (see README.md). Nothing is
-# installed on the host and nothing needs root here.
+# packages downloaded into ~/.cache/tbtun-build or the payload cache its env.sh
+# names (T52, normally ~/.cache/tbtun-build-t52).  Nothing is installed on the
+# host and nothing needs root here.
 #
 # Exit codes: 0 built, 2 a required input is missing (message says which).
 set -eu
 
-root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 cache=${TBTUN_BUILD:-$HOME/.cache/tbtun-build}
+_t52=
+if [ -f "$cache/env.sh" ]; then
+    # The entry cache may hold only env.sh; it points at the payload cache
+    # whose dl/ and busybox/ trees are actually installed.
+    _t52=$(
+        . "$cache/env.sh" > /dev/null 2>&1 || exit 1
+        printf '%s' "${T52:-}"
+    ) || _t52=
+fi
 
-ko=$root/tbtun.ko
+ko=$root/build/kernel/tbtun.ko
 out=
 endpoint=
 init_src=$root/tests/qemu/init
+bb_override=
 binaries=
 assets=
 
@@ -41,8 +53,16 @@ while [ $# -gt 0 ]; do
         shift 2
         ;;
     --asset) assets="$assets $2"; shift 2 ;;
+    --busybox)
+        [ $# -ge 2 ] || {
+            echo "mkinitramfs.sh: --busybox needs a path" >&2
+            exit 2
+        }
+        bb_override=$2
+        shift 2
+        ;;
     -h | --help)
-        sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
         exit 0
         ;;
     *)
@@ -76,16 +96,32 @@ fi
 
 # --- busybox ---------------------------------------------------------------
 # The guest runs on the host's glibc, so system busybox is fine when present;
-# otherwise take the -static package from the mirror into the cache.
+# otherwise use the cached package.  --busybox wins so a caller can boot a
+# specific binary without reshaping the cache layout.
 bb=
-if command -v busybox > /dev/null 2>&1; then
+if [ -n "$bb_override" ]; then
+    [ -x "$bb_override" ] || die "--busybox $bb_override is not executable"
+    bb=$bb_override
+elif command -v busybox > /dev/null 2>&1; then
     bb=$(command -v busybox)
-elif [ -x "$cache/busybox/usr/bin/busybox" ]; then
-    bb=$cache/busybox/usr/bin/busybox
-elif [ -x "$cache/busybox/bin/busybox" ]; then
-    bb=$cache/busybox/bin/busybox
 else
-    die "busybox not found. Install it, or cache the static package:
+    for _d in "$cache" "$_t52" "$HOME/.cache/tbtun-build-t52"; do
+        [ -n "$_d" ] || continue
+        if [ -x "$_d/busybox/usr/bin/busybox" ]; then
+            bb=$_d/busybox/usr/bin/busybox
+            break
+        elif [ -x "$_d/busybox/bin/busybox" ]; then
+            bb=$_d/busybox/bin/busybox
+            break
+        fi
+    done
+fi
+if [ -z "$bb" ]; then
+    die "busybox not found. Pass --busybox PATH, install busybox, or cache the
+static package where this script looks:
+  searched: $cache/busybox/{usr/bin,bin}/busybox
+            ${_t52:-<T52 from $cache/env.sh>}/busybox/{usr/bin,bin}/busybox
+  expected cache: \$TBTUN_BUILD or the T52 named by its env.sh
   mkdir -p $cache/busybox
   curl -Lo /tmp/busybox.pkg \\
     https://mirror.sjtu.edu.cn/manjaro/stable/extra/x86_64/busybox-1.36.1-4-x86_64.pkg.tar.zst
@@ -106,6 +142,7 @@ fi
 # tree and the guest can boot an empty initramfs ("VFS: Cannot open root
 # device").  The adversarial groups are routinely started while another test
 # is running, so this copy never touches the shared stage.
+mkdir -p "$cache/qemu" || die "cannot create $cache/qemu"
 work=$(mktemp -d "$cache/qemu/adv-stage.XXXXXX") || die "cannot create a stage directory"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work"/bin "$work"/proc "$work"/sys "$work"/dev "$work"/tmp
@@ -124,8 +161,11 @@ for applet in sh mount insmod poweroff; do
         die "busybox has no '$applet' applet; the guest cannot boot"
 done
 
-# Keep the module's own name: a probe init looks for its own file.
+# Keep the module's own name, but the adversarial inits insmod a fixed
+# /tbtun.ko: --ko may point at a differently named build, so install that
+# name too.
 cp "$ko" "$work/$(basename "$ko")"
+[ "$(basename "$ko")" = tbtun.ko ] || cp "$ko" "$work/tbtun.ko"
 cp "$init_src" "$work/init"
 chmod +x "$work/init"
 

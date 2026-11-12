@@ -194,6 +194,16 @@ static inline void tbt_fec_adapt_bitmap_clear(
  * dropped P_VALID. Four seconds still names a dead carrier long before the
  * 15 s stall bound; the stalled flag already covers a live-but-not-moving
  * carrier. */
+/* The floor is deliberately independent of cfg.keepalive_ms. PAD is a
+ * sender cadence, not liveness evidence: when only PADs arrive no block has
+ * been folded, so the estimator is already frozen by its idle rule
+ * (TBT_FEC_EST_IDLE_NS / TBT_FEC_ADAPT_SCLC_IDLE_NS). A data-carrying
+ * block or super-block places a share on every carrier, so last_rx refreshes
+ * well inside four seconds. A peer that never emits PAD (the userspace
+ * client) still refreshes the carriers this direction uses with FBK, ACK
+ * and DATA records. Raising the floor to the keepalive cadence would only
+ * delay real dead-carrier detection and would not help keepalive=0, which
+ * disables PAD entirely. */
 static inline bool tbt_fec_adapt_carrier_alive(bool up, bool stopping,
                                                bool established, u64 now_ns,
                                                u64 last_rx_ns, u32 rtt_us)
@@ -205,7 +215,9 @@ static inline bool tbt_fec_adapt_carrier_alive(bool up, bool stopping,
         limit = stale;
     if (!up || stopping || !established)
         return false;
-    if (now_ns < last_rx_ns)
+    /* last_rx_ns == 0 means "never received"; at now_ns == 0 the unsigned
+     * difference is zero and would otherwise make it alive. */
+    if (!last_rx_ns || now_ns < last_rx_ns)
         return false;
     return now_ns - last_rx_ns < limit;
 }
@@ -324,6 +336,11 @@ void tbt_fec_adapt_shape(u8 cls, struct tbt_fec_shape *s);
  * history. */
 void tbt_fec_adapt_init(struct tbt_fec_adapt *a, u8 cls);
 
+/* The controller state machine below is host-test-only: the module links the
+ * estimator and helpers above, but no kernel data-plane caller evaluates a
+ * suggestion (tbt_fec_adapt_sclc.c owns the live adaptive controller). */
+#ifndef __KERNEL__
+
 /* Evaluate one 250 ms tick. The first call in a tick returns a suggestion;
  * later calls return R_NONE until the next tick. A suggestion sets `busy`;
  * the caller must then call tbt_fec_adapt_applied() or
@@ -340,5 +357,7 @@ void tbt_fec_adapt_applied(struct tbt_fec_adapt *a, u64 now_ns);
 /* The suggested switch failed. The class is unchanged; a probe keeps
  * observing, a pending probe start is forgotten. */
 void tbt_fec_adapt_abort(struct tbt_fec_adapt *a);
+
+#endif /* !__KERNEL__ */
 
 #endif /* _TBT_FEC_ADAPT_H */

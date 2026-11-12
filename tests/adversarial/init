@@ -340,31 +340,98 @@ phase_port() {
 phase_slab() {
     echo "== slab growth"
     flush_all
-    _slab() {
-        awk '$1 ~ /^kmalloc/ {s += $2} END {print s + 0}' /proc/slabinfo
+    # This kernel has no dedicated 32k cache; the carrier objects and their
+    # HTTP buffers come from the kmalloc caches (named kmalloc-Nk, or the
+    # kmalloc-rnd-NN-k buckets this config builds).  Count every kmalloc
+    # object and byte instead of naming one cache: a per-connection leak
+    # lands in that total no matter which size class the allocator picked.
+    _slab_objs() {
+        _v=$(awk '$1 ~ /^kmalloc/ {s += $2} END {print s + 0}' /proc/slabinfo 2> /dev/null)
+        case $_v in
+        '' | *[!0-9]*) echo 0 ;;
+        *) echo "$_v" ;;
+        esac
     }
-    _slab32() {
-        awk '$1 ~ /32k$/ {s += $2} END {print s + 0}' /proc/slabinfo
+    _slab_bytes() {
+        _v=$(awk '$1 ~ /^kmalloc/ {s += $2 * $4} END {print s + 0}' /proc/slabinfo 2> /dev/null)
+        case $_v in
+        '' | *[!0-9]*) echo 0 ;;
+        *) echo "$_v" ;;
+        esac
     }
-    _s0=$(_slab)
-    _s32_0=$(_slab32)
+    if [ ! -r /proc/slabinfo ]; then
+        res init.slab_leak SKIP "/proc/slabinfo is not readable; kmalloc growth cannot be measured"
+        res init.slab_after_flush SKIP "/proc/slabinfo is not readable; kmalloc release cannot be measured"
+        flush_all
+        return
+    fi
+    _idle=$(_slab_objs)
+    if [ "${_idle:-0}" -eq 0 ]; then
+        res init.slab_leak SKIP "/proc/slabinfo names no kmalloc caches; kmalloc growth cannot be measured"
+        res init.slab_after_flush SKIP "/proc/slabinfo names no kmalloc caches; kmalloc release cannot be measured"
+        flush_all
+        return
+    fi
     echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR target=127.0.0.1:$TGT n=4 m=0" \
         > "$CFG"
     sleep 1
-    timeout 120 /bin/adv_probe garbage "$CAR" 100
+    # The far session's own allocations are not part of the per-connection
+    # growth: take the baseline after the tunnel is up, and compare the
+    # post-flush count with the idle count from before the tunnel existed.
+    _s0=$(_slab_objs)
+    _b0=$(_slab_bytes)
+    _gout=$(timeout 120 /bin/adv_probe garbage "$CAR" 100 2>&1)
+    _grc=$?
+    printf '%s\n' "$_gout"
+    if [ "$_grc" -ne 0 ] || ! printf '%s\n' "$_gout" | grep -q '^GARBAGE_DONE '; then
+        res init.slab_leak SKIP "the garbage probe did not complete (rc=$_grc); kmalloc growth cannot be measured"
+        res init.slab_after_flush SKIP "the garbage probe did not complete (rc=$_grc); kmalloc release cannot be measured"
+        flush_all
+        return
+    fi
+    _gclosed=$(printf '%s\n' "$_gout" |
+        sed -n 's/^GARBAGE_DONE n=[0-9]* closed=\([0-9][0-9]*\)$/\1/p' | tail -1)
+    case $_gclosed in
+    '' | *[!0-9]*) _gclosed=0 ;;
+    esac
+    if [ "$_gclosed" -lt 50 ]; then
+        res init.slab_leak SKIP "only $_gclosed of 100 garbage connections closed; kmalloc growth cannot be attributed to a per-connection leak"
+        res init.slab_after_flush SKIP "only $_gclosed of 100 garbage connections closed; kmalloc release cannot be measured"
+        flush_all
+        return
+    fi
     sleep 2
-    _s1=$(_slab)
-    _s32_1=$(_slab32)
-    echo "SLAB before=$_s0 32k=$_s32_0 after=$_s1 32k=$_s32_1"
-    if [ $((_s32_1 - _s32_0)) -ge 50 ]; then
-        res init.slab_leak FAIL "100 unauthenticated garbage connections grew the 32k slabs by $((_s32_1 - _s32_0)) objects (~$(((_s32_1 - _s32_0) * 32)) KiB); a carrier object is freed only at session teardown"
+    _s1=$(_slab_objs)
+    _b1=$(_slab_bytes)
+    if [ "$_s1" -eq 0 ]; then
+        res init.slab_leak SKIP "/proc/slabinfo stopped naming kmalloc caches during the measurement"
+        res init.slab_after_flush SKIP "/proc/slabinfo stopped naming kmalloc caches during the measurement"
+        flush_all
+        return
+    fi
+    _grew=$((_s1 - _s0))
+    _grewb=$((_b1 - _b0))
+    echo "SLAB kmalloc_objects before=$_s0 after=$_s1 delta=$_grew bytes_delta=$_grewb"
+    if [ "$_grew" -ge 50 ]; then
+        res init.slab_leak FAIL "100 unauthenticated garbage connections (closed=$_gclosed) grew the kmalloc caches by $_grew objects ($_grewb bytes); a per-connection carrier object is not freed"
     else
-        res init.slab_leak PASS "32k slabs grew by $((_s32_1 - _s32_0)) objects over 100 connections"
+        res init.slab_leak PASS "100 unauthenticated garbage connections (closed=$_gclosed) grew the kmalloc caches by $_grew objects ($_grewb bytes, threshold 50)"
     fi
     flush_all
-    sleep 1
-    _s2=$(_slab32)
-    res init.slab_after_flush PASS "after flush: 32k objects $_s32_0 -> $_s2 (the session teardown is the only free point)"
+    sleep 2
+    _s2=$(_slab_objs)
+    if [ "$_s2" -eq 0 ]; then
+        res init.slab_after_flush SKIP "/proc/slabinfo stopped naming kmalloc caches after the flush"
+        flush_all
+        return
+    fi
+    _d2=$((_s2 - _idle))
+    echo "SLAB kmalloc_objects after_flush=$_s2 idle=$_idle delta=$_d2"
+    if [ "$_d2" -ge 50 ]; then
+        res init.slab_after_flush FAIL "flush left $_d2 kmalloc objects above the pre-test idle baseline ($_idle -> $_s2); session teardown did not release them"
+    else
+        res init.slab_after_flush PASS "flush returned the kmalloc object count to the idle baseline ($_idle -> $_s2, delta $_d2, threshold 50)"
+    fi
 }
 
 phase_final() {
@@ -1037,7 +1104,14 @@ phase_closedrain_timeout() {
     done
     _ct=$(grep -o 'close_timeouts=[0-9]*' /tmp/closedrain_timeout.stats 2> /dev/null | head -1)
     _dt=$(grep -o 'deliver_timeouts=[0-9]*' /tmp/closedrain_timeout.stats 2> /dev/null | sort -u | tr '\n' ',')
-    _act=$(grep -o 'streams_active=[0-9]*' /tmp/closedrain_timeout.stats 2> /dev/null | head -1)
+    # The stats file has one `tunnel <id> streams ...` line per tunnel.  The
+    # near tunnel is id 2; taking the first streams_active= would read the
+    # far tunnel (id 1) and never prove the near released its stream.
+    _act=$(awk '$1 == "tunnel" && $2 == 2 && $3 == "streams" {
+        for (i = 1; i <= NF; i++)
+            if ($i ~ /^streams_active=/) { print $i; exit }
+    }' /tmp/closedrain_timeout.stats 2> /dev/null)
+    [ -n "$_act" ] || _act="streams_active=<no tunnel 2 streams line>"
     kill "$_sp" 2> /dev/null
     wait "$_sp" 2> /dev/null
     case "$_out" in

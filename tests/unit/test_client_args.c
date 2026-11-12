@@ -232,6 +232,95 @@ static void test_inline(void)
     CHECK(parse_ok(line, &cmd), "inline: the line parses");
 }
 
+/* The inline builder adds `tunnel 1 ` only to a line that lacks the
+ * directive, and the prefix must fit the caller's buffer exactly. */
+static void test_inline_cap(void)
+{
+    char line[32];
+    char *argv[2];
+    struct tbt_client_us us;
+
+    memset(&us, 0, sizeof(us));
+    argv[0] = (char *)"tbt_client";
+    argv[1] = (char *)"listen=127.0.0.1:1";
+    CHECK(tbt_client_line_build(2, argv, 1, line, 28, &us) == 0 &&
+              !strcmp(line, "tunnel 1 listen=127.0.0.1:1"),
+          "cap: the added prefix fits exactly");
+    CHECK(tbt_client_line_build(2, argv, 1, line, 27, &us) == -E2BIG,
+          "cap: one byte short for the added prefix is refused");
+
+    argv[1] = (char *)"tunnel\t1 listen=127.0.0.1:1";
+    CHECK(tbt_client_line_build(2, argv, 1, line, sizeof(line), &us) == 0 &&
+              !strcmp(line, "tunnel 1 listen=127.0.0.1:1"),
+          "cap: a tab after tunnel is normalized, not given a second prefix");
+}
+
+/* The documented role default is applied by the front end after the line
+ * exists; the module parser still refuses a line without an explicit role. */
+static void test_role_default(void)
+{
+    char line[TBT_LINE_MAX];
+    char far_line[TBT_LINE_MAX];
+    char small[64];
+    struct tbt_cmd cmd;
+    size_t n;
+
+    snprintf(line, sizeof(line),
+             "tunnel 1 listen=127.0.0.1:19080 peer=127.0.0.1:19081");
+    n = strlen(line);
+    CHECK(tbt_client_role_default(line, sizeof(line)) == 0,
+          "role: default appended");
+    CHECK(!strcmp(line + n, " role=near"),
+          "role: the appended token is role=near");
+    CHECK(parse_ok(line, &cmd) && cmd.cfg.role == TBT_ROLE_NEAR,
+          "role: absent role parses as near");
+
+    snprintf(far_line, sizeof(far_line),
+             "tunnel 1 role=far listen=127.0.0.1:19080 "
+             "target=127.0.0.1:19001");
+    CHECK(tbt_client_role_default(far_line, sizeof(far_line)) == 0,
+          "role: explicit far is accepted");
+    CHECK(!strcmp(far_line, "tunnel 1 role=far listen=127.0.0.1:19080 "
+                            "target=127.0.0.1:19001"),
+          "role: explicit far is not rewritten");
+    CHECK(parse_ok(far_line, &cmd) && cmd.cfg.role == TBT_ROLE_FAR,
+          "role: explicit far survives parsing");
+
+    snprintf(small, sizeof(small), "tunnel 1 listen=127.0.0.1:19080");
+    n = strlen(small);
+    CHECK(tbt_client_role_default(small, n + sizeof(" role=near") - 1) ==
+              -E2BIG,
+          "role: a buffer one byte short is -E2BIG");
+    CHECK(strlen(small) == n, "role: a failed append leaves the line alone");
+    CHECK(tbt_client_role_default(small, n + sizeof(" role=near")) == 0,
+          "role: the exact fit succeeds");
+    CHECK(!strcmp(small + n, " role=near"), "role: the exact fit appends");
+
+    snprintf(line, sizeof(line),
+             "tunnel 1 listen=127.0.0.1:19080 peer=127.0.0.1:19081 "
+             "crypto_key=00role00 role_hint=far");
+    CHECK(tbt_client_role_default(line, sizeof(line)) == 0 &&
+              strstr(line, "crypto_key=00role00 role_hint=far role=near"),
+          "role: 'role' inside another token does not suppress the default");
+
+    snprintf(line, sizeof(line),
+             "\t tunnel 1\trole=far listen=127.0.0.1:19080 "
+             "target=127.0.0.1:19001\r\n");
+    n = strlen(line);
+    CHECK(tbt_client_role_default(line, sizeof(line)) == 0 &&
+              strlen(line) == n,
+          "role: a tab-delimited explicit role is not duplicated");
+    CHECK(parse_ok(line, &cmd) && cmd.cfg.role == TBT_ROLE_FAR,
+          "role: leading whitespace and CRLF still parse");
+
+    snprintf(line, sizeof(line),
+             "tunnel 1 listen=127.0.0.1:19080 peer=127.0.0.1:19081 "
+             "keepalive=2500");
+    CHECK(tbt_client_role_default(line, sizeof(line)) == 0 && parse_ok(line, &cmd) &&
+              cmd.cfg.keepalive_ms == 2500,
+          "role: keepalive= survives the default-role append");
+}
+
 /* A config file with no tunnel line is a clear -ENODATA. */
 static void test_empty_config(void)
 {
@@ -243,6 +332,171 @@ static void test_empty_config(void)
     unlink(path);
 }
 
+/* A CRLF file may use blank lines for spacing; they are not the tunnel line.
+ * The returned line carries no terminator, so the role default and the parser
+ * see the same bytes a command line would. */
+static void test_config_crlf(void)
+{
+    char line[TBT_LINE_MAX];
+    struct tbt_cmd cmd;
+
+    CHECK(write_file("  # comment\r\n\r\n \t\r\n"
+                     "tunnel 1 listen=127.0.0.1:19080 "
+                     "peer=127.0.0.1:19081\r\n") == 0,
+          "crlf: file written");
+    CHECK(tbt_client_config_read(path, line, sizeof(line)) == 0,
+          "crlf: blank CRLF lines are skipped");
+    CHECK(tbt_client_role_default(line, sizeof(line)) == 0,
+          "crlf: the default role fits after a CRLF line");
+    CHECK(parse_ok(line, &cmd) && cmd.cfg.role == TBT_ROLE_NEAR,
+          "crlf: the terminator is stripped before parsing");
+    unlink(path);
+}
+
+/* The reader's cap is a hard buffer bound: cap-1 content bytes plus the
+ * newline fill it exactly, while one more byte is an overlong line. */
+static void test_config_line_limit(void)
+{
+    char line[16];
+
+    CHECK(write_file("123456789012345\n") == 0, "limit: file written");
+    CHECK(tbt_client_config_read(path, line, sizeof(line)) == 0,
+          "limit: cap-1 bytes before a newline fit");
+    CHECK(!strcmp(line, "123456789012345"),
+          "limit: the whole line is returned");
+    unlink(path);
+
+    CHECK(write_file("123456789012345\r\n") == 0, "limit: CRLF file written");
+    CHECK(tbt_client_config_read(path, line, sizeof(line)) == 0 &&
+              !strcmp(line, "123456789012345"),
+          "limit: a CRLF terminator at the boundary fits");
+    unlink(path);
+
+    CHECK(write_file("1234567890123456\n") == 0, "limit: long file written");
+    CHECK(tbt_client_config_read(path, line, sizeof(line)) == -E2BIG,
+          "limit: one byte over the buffer is refused");
+    unlink(path);
+
+    CHECK(tbt_client_config_read("/nonexistent", line, 1) == -EINVAL,
+          "limit: a buffer too small for any line is refused");
+}
+
+/* An unreadable path must report the read error, not the "no tunnel line"
+ * sentinel, or the operator sees the wrong reason. */
+static void test_config_read_error(void)
+{
+    char line[TBT_LINE_MAX];
+
+    CHECK(tbt_client_config_read(".", line, sizeof(line)) == -EISDIR,
+          "read error: a directory reports EISDIR, not -ENODATA");
+}
+
+/* A comment or blank line longer than the buffer must be drained: its tail
+ * must never be mistaken for the tunnel line. Only an overlong data line is
+ * an error. */
+static void test_config_overlong(void)
+{
+    char line[32];
+
+    CHECK(write_file("  # a comment much longer than the buffer\n"
+                     "tunnel 1\n") == 0,
+          "overlong: comment file written");
+    CHECK(tbt_client_config_read(path, line, sizeof(line)) == 0 &&
+              !strcmp(line, "tunnel 1"),
+          "overlong: an overlong comment is discarded");
+    unlink(path);
+
+    CHECK(write_file("                               # late comment\n"
+                     "tunnel 1\n") == 0,
+          "overlong: late-comment file written");
+    CHECK(tbt_client_config_read(path, line, sizeof(line)) == 0 &&
+              !strcmp(line, "tunnel 1"),
+          "overlong: a comment past the buffer boundary is still a comment");
+    unlink(path);
+
+    CHECK(write_file("                                        \n"
+                     "tunnel 1\n") == 0,
+          "overlong: blank file written");
+    CHECK(tbt_client_config_read(path, line, sizeof(line)) == 0 &&
+              !strcmp(line, "tunnel 1"),
+          "overlong: an overlong blank line is discarded");
+    unlink(path);
+
+    CHECK(write_file("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n"
+                     "tunnel 1\n") == 0,
+          "overlong: data file written");
+    CHECK(tbt_client_config_read(path, line, sizeof(line)) == -E2BIG,
+          "overlong: an overlong data line is refused");
+    unlink(path);
+}
+
+/* The userspace engine is an fec=on SC-LDPC endpoint with no port map,
+ * source-address, device, source-port block or rate limiter. The front end
+ * refuses those instead of letting the engine ignore them. */
+static void test_cfg_check(void)
+{
+    char line[TBT_LINE_MAX];
+    struct tbt_cmd cmd;
+    struct tbt_cfg c;
+    const char *why = (const char *)"unset";
+
+    snprintf(line, sizeof(line),
+             "tunnel 1 role=near listen=127.0.0.1:19080 "
+             "peer=127.0.0.1:19081 target=127.0.0.1:19001 n=8 m=24 "
+             "w=64 L=8 fec=on mode=sc-ldpc carriers=256 crypto=on "
+             "adaptive=off");
+    CHECK(parse_ok(line, &cmd), "check: the base line parses");
+    CHECK(tbt_client_cfg_check(&cmd.cfg, &why) == 0 && why == NULL,
+          "check: the supported shape is accepted");
+
+    c = cmd.cfg;
+    c.fec = 0;
+    CHECK(tbt_client_cfg_check(&c, &why) == -1 && why &&
+              strstr(why, "fec=on"),
+          "check: fec=off is refused");
+
+    c = cmd.cfg;
+    c.profile = 3;
+    CHECK(tbt_client_cfg_check(&c, &why) == 0,
+          "check: profile= is left to the engine's framing");
+
+    c = cmd.cfg;
+    c.nmap = 1;
+    CHECK(tbt_client_cfg_check(&c, &why) == -1 && why && strstr(why, "map="),
+          "check: map= is refused");
+
+    c = cmd.cfg;
+    c.nsrc = 1;
+    CHECK(tbt_client_cfg_check(&c, &why) == -1 && why &&
+              strstr(why, "srcaddrs="),
+          "check: srcaddrs= is refused");
+
+    c = cmd.cfg;
+    c.dev_set = true;
+    CHECK(tbt_client_cfg_check(&c, &why) == -1 && why && strstr(why, "dev="),
+          "check: dev= is refused");
+
+    c = cmd.cfg;
+    c.portblock_lo = 40000;
+    c.portblock_hi = 40100;
+    CHECK(tbt_client_cfg_check(&c, &why) == -1 && why &&
+              strstr(why, "portblock="),
+          "check: portblock= is refused");
+
+    c = cmd.cfg;
+    c.tunnel_rate = 1000;
+    CHECK(tbt_client_cfg_check(&c, &why) == -1 && why &&
+              strstr(why, "tunnel_rate="),
+          "check: tunnel_rate= is refused");
+
+    c = cmd.cfg;
+    c.portblock_lo = 0;
+    c.portblock_hi = 0;
+    c.tunnel_rate = 0;
+    CHECK(tbt_client_cfg_check(&c, &why) == 0,
+          "check: explicit no-op defaults are accepted");
+}
+
 int main(void)
 {
     test_config_trailing();
@@ -250,7 +504,14 @@ int main(void)
     test_bad_value();
     test_file_then_argv_precedence();
     test_inline();
+    test_inline_cap();
+    test_role_default();
     test_empty_config();
+    test_config_crlf();
+    test_config_line_limit();
+    test_config_read_error();
+    test_config_overlong();
+    test_cfg_check();
     printf("test_client_args: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

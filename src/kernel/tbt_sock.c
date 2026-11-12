@@ -56,18 +56,26 @@
 #include "tbt_map.h"
 
 static bool tbt_sock_half_close_hold(const struct tbt_stream *st);
+static bool tbt_sock_tx_fin_hold(const struct tbt_stream *st);
 
-/* One bit per stream work item; bit 1 means an instance is queued or running
- * and owns exactly one stream reference.
+/* One bit per stream work item; the bit means an instance is queued or
+ * running and owns exactly one stream reference.
  * The entry point clears the bit first and puts the reference last, so a wake
  * that arrives while the work runs takes a second reference and is served by
  * a second run.
  *
  * The reference is taken before the bit is published, so a canceller that
- * sees the bit always has a reference it may return. cancel_work_sync()
- * disables a work item while it runs, and a queue that races the cancel is
- * dropped silently; the work_pending() check returns that reference here
- * instead of leaving it to an instance that never exists. */
+ * sees the bit always has a reference it may return. The owner is decided by
+ * the bit, never by work_pending(): process_one_work() clears PENDING just
+ * before the entry runs, so a !work_pending() check here can land after the
+ * queue cleared it but before the entry test_and_clear()ed the bit. Putting
+ * then would return the reference of an instance that is about to run with
+ * no reference of its own -- a use-after-free, not a recovered one. Leave
+ * the reference with the bit: the entry returns it, and teardown
+ * (tbt_session.c's stream reclaim, after it flushes every work) returns the
+ * reference of a queue that a concurrent cancel dropped and no entry will
+ * ever consume. A dropped queue before teardown only pins that one stream;
+ * its socket is released and it is unlinked. */
 bool tbt_stream_schedule(struct tbt_stream *st, struct work_struct *w,
                          unsigned long bit)
 {
@@ -84,23 +92,19 @@ bool tbt_stream_schedule(struct tbt_stream *st, struct work_struct *w,
         return true;
     }
     queue_work(TBT_WQ, w);
-    /* queue_work() returns %false both when the work was already pending (a
-     * queued instance owns a reference and will clear the bit) and when a
-     * concurrent cancel disabled the work and the queue was dropped. The
-     * entry clears the bit before it runs, so checking the bit after the
-     * queue separates the two: a dropped queue leaves the bit set with no
-     * pending instance. */
-    if (!work_pending(w) && test_and_clear_bit(bit, &st->attached))
-    {
-        tbt_stream_put(st);
-        return false;
-    }
     return true;
 }
 
 /* Cancel a queued instance and return its reference. Only a pending instance
  * is owned by the canceller; a running one returns its own reference at the
- * end of its entry wrapper, and cancel_work_sync() waits for that. */
+ * end of its entry wrapper, and cancel_work_sync() waits for that.
+ *
+ * Only a cancel that actually claimed a queued instance may return the
+ * reference. A %false return does not prove the reference is reclaimable:
+ * tbt_stream_schedule() may have just set the bit and not yet called
+ * queue_work(), so clearing the bit here would strand that queue with no
+ * reference. A queue that a cancel dropped leaves its bit and reference to
+ * teardown, where no scheduler can run (tbt_session.c's stream reclaim). */
 bool tbt_stream_cancel(struct tbt_stream *st, struct work_struct *w,
                        unsigned long bit)
 {
@@ -145,6 +149,16 @@ static void tbt_pub_capture_body(struct tbt_stream *st)
 
     might_sleep();
     if (!sk)
+        return;
+    /* The near start wires the accepted socket before it claims the stream
+     * OPEN, so a data wake can arrive (and be queued by tbt_pub_ready())
+     * between the wiring and tbt_tx_announce(). Capturing then would submit
+     * DATA before the OPEN is queued; the far side refuses DATA for a sid it
+     * has no stream for, so the first block would be lost. Skip this run and
+     * rely on tbt_stream_start_now()'s schedule after the announce. Every
+     * other capture path runs with the stream already announced (the far
+     * target only attaches after tbt_far_open_seen() announced it). */
+    if (!READ_ONCE(st->tx_open_sent))
         return;
     /* A paused capture is not a reason to skip this wake. The pump clears
      * tx_paused and schedules this work, but that resume can be missed: the
@@ -374,12 +388,19 @@ static void tbt_drain_body(struct tbt_stream *st)
              * resets its application, instead of holding the backlog until
              * its own stall budget (measured: the far held 2.65 MB with
              * tgt_state=7 while the near kept sending). */
-            if (tbt_sock_half_close_hold(st))
+            /* The exception is an application that wrote and then closed: its
+             * FIN is already in the tunnel and the bytes before it are still
+             * unacknowledged. Resetting here truncates that upload at the
+             * far side; hold until the TX direction has been acknowledged
+             * (the close bounds and the peer FIN then own the teardown). */
+            if (tbt_sock_half_close_hold(st) || tbt_sock_tx_fin_hold(st))
             {
-                atomic64_inc(&st->sess->close_hold_fec);
-                pr_info_ratelimited("tbtun: drain EPIPE held sid=%llu rx_fin=%d tx_ack=%llu tx_seq=%llu\n",
+                if (tbt_sock_half_close_hold(st))
+                    atomic64_inc(&st->sess->close_hold_fec);
+                pr_info_ratelimited("tbtun: drain EPIPE held sid=%llu rx_fin=%d tx_fin=%d tx_ack=%llu tx_seq=%llu\n",
                                     (unsigned long long)st->sid,
                                     READ_ONCE(st->rx_fin_done) ? 1 : 0,
+                                    READ_ONCE(st->tx_fin_sent) ? 1 : 0,
                                     (unsigned long long)READ_ONCE(st->tx_ack),
                                     (unsigned long long)READ_ONCE(st->tx_seq));
                 tbt_tx_fec_rearm_if_pending(st->sess, st);
@@ -511,6 +532,28 @@ static bool tbt_sock_half_close_hold(const struct tbt_stream *st)
                                       READ_ONCE(st->tx_seq));
 }
 
+/* The application wrote and then closed its write side (or the target did):
+ * the peer's FIN is here or our FIN is already wanted, but bytes before it
+ * are still unacknowledged. A local reset in this window is a lost downlink,
+ * not a reason to abort the stream: killing it purges tx_q and sends
+ * TBT_F_RST, which truncates the upload the far side has not delivered yet
+ * (measured: a write-then-close got a reset for 1 response byte while the
+ * FEC ring still held the request tail and rx_fin_done was not yet set).
+ *
+ * RCV_SHUTDOWN is set by the kernel as soon as the peer's FIN is ACKed, so
+ * it covers the window before w_read has processed that FIN and set
+ * tx_fin_sent. An abort that never sent a FIN leaves it clear and still
+ * resets as before. */
+static bool tbt_sock_tx_fin_hold(const struct tbt_stream *st)
+{
+    struct sock *sk = READ_ONCE(st->sk);
+
+    if (READ_ONCE(st->tx_ack) >= READ_ONCE(st->tx_seq))
+        return false;
+    return READ_ONCE(st->tx_fin_sent) ||
+           (sk && (READ_ONCE(sk->sk_shutdown) & RCV_SHUTDOWN));
+}
+
 static void tbt_ctrl_body(struct tbt_stream *st)
 {
     struct sock *sk = READ_ONCE(st->sk);
@@ -528,12 +571,14 @@ static void tbt_ctrl_body(struct tbt_stream *st)
                             READ_ONCE(st->rx_fin_seen) ? 1 : 0,
                             (unsigned long long)READ_ONCE(st->rx_next),
                             (unsigned long long)READ_ONCE(st->rx_fin_seq));
-        if (tbt_sock_half_close_hold(st))
+        if (tbt_sock_half_close_hold(st) || tbt_sock_tx_fin_hold(st))
         {
-            atomic64_inc(&st->sess->close_hold_fec);
-            pr_info_ratelimited("tbtun: ctrl err held sid=%llu err=%d rx_fin=%d tx_ack=%llu tx_seq=%llu\n",
+            if (tbt_sock_half_close_hold(st))
+                atomic64_inc(&st->sess->close_hold_fec);
+            pr_info_ratelimited("tbtun: ctrl err held sid=%llu err=%d rx_fin=%d tx_fin=%d tx_ack=%llu tx_seq=%llu\n",
                                 (unsigned long long)st->sid, READ_ONCE(sk->sk_err),
                                 READ_ONCE(st->rx_fin_done) ? 1 : 0,
+                                READ_ONCE(st->tx_fin_sent) ? 1 : 0,
                                 (unsigned long long)READ_ONCE(st->tx_ack),
                                 (unsigned long long)READ_ONCE(st->tx_seq));
             tbt_tx_fec_rearm_if_pending(st->sess, st);
@@ -722,14 +767,16 @@ void tbt_parent_setsockbuf(struct socket *s)
                         sizeof(v));
 }
 
-void tbt_sock_attach(struct tbt_stream *st)
+/* Install the stream callbacks on @sk.  When a killer can run concurrently,
+ * @sk must not be reachable through st->sk yet: tbt_stream_release_socket_now()
+ * closes whatever st->sk names.  tbt_stream_start_now() therefore wires the
+ * accepted socket first and publishes it afterwards. */
+static void tbt_sock_wire(struct tbt_stream *st, struct sock *sk)
 {
-    struct sock *sk = st->sk;
-
     if (!sk)
         return;
-    /* Both the target work item and an OPEN can call this; only the first may
-     * install the callbacks. */
+    /* Both the target work item and a near start can call this; only the
+     * first may install the callbacks. */
     if (test_and_set_bit(TBT_STREAM_F_ATTACHED, &st->attached))
         return;
 
@@ -749,19 +796,47 @@ void tbt_sock_attach(struct tbt_stream *st)
     tbt_stream_schedule(st, &st->w_drain, TBT_STREAM_F_SCHED_DRAIN);
 }
 
+/* Undo tbt_sock_wire() for a socket that never became visible in st->sk.
+ * tbt_sock_detach() cannot serve here: it reads st->sk (still NULL) and skips
+ * the restore, which would leave module callbacks and sk_user_data = st on
+ * the socket the caller is about to close.  Restore first, then cancel, so a
+ * wake cannot queue a replacement instance behind the cancels. */
+static void tbt_sock_unwire(struct tbt_stream *st, struct sock *sk)
+{
+    if (sk && test_and_clear_bit(TBT_STREAM_F_ATTACHED, &st->attached))
+        tbt_sk_ops_restore(sk, &st->sess->def_ops);
+    tbt_stream_cancel(st, &st->w_ctrl, TBT_STREAM_F_SCHED_CTRL);
+    tbt_stream_cancel(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
+    tbt_stream_cancel(st, &st->w_drain, TBT_STREAM_F_SCHED_DRAIN);
+}
+
+void tbt_sock_attach(struct tbt_stream *st)
+{
+    tbt_sock_wire(st, READ_ONCE(st->sk));
+}
+
 void tbt_sock_detach(struct tbt_stream *st)
 {
-    struct sock *sk = READ_ONCE(st->sk);
+    struct sock *sk;
 
-    if (!sk)
+    if (!st)
         return;
-    if (!test_and_clear_bit(TBT_STREAM_F_ATTACHED, &st->attached))
-        return;
+    sk = READ_ONCE(st->sk);
     /* Restore the core callbacks.  Writing our own functions back would leave
      * module text on a socket that can outlive the module (F2). */
-    tbt_sk_ops_restore(sk, &st->sess->def_ops);
+    if (sk && test_and_clear_bit(TBT_STREAM_F_ATTACHED, &st->attached))
+        tbt_sk_ops_restore(sk, &st->sess->def_ops);
 
-    /* Order matters: ctrl can requeue read/drain; read can emit FIN; drain
+    /* Cancel unconditionally, not only when a socket was attached. A far
+     * stream is published by bind_sid before w_target has produced a socket,
+     * and RX can queue w_drain (or a state change can queue w_ctrl) in that
+     * window. If a kill or the reaper then releases the stream while sk is
+     * still NULL, those works must still lose their queue slot and return
+     * their references here; otherwise they run against a stream that has
+     * already left the session. cancel_work_sync() is idempotent: a second
+     * call returns false and returns no reference.
+     *
+     * Order matters: ctrl can requeue read/drain; read can emit FIN; drain
      * can queue w_kill (already cancelled by the caller). */
     tbt_stream_cancel(st, &st->w_ctrl, TBT_STREAM_F_SCHED_CTRL);
     tbt_stream_cancel(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
@@ -835,7 +910,13 @@ static void tbt_stream_release_socket_now(struct tbt_stream *st)
     spin_unlock(&sess->lock);
 
     if (!sk && !target)
+    {
+        /* No socket to detach, but RX may have queued w_read/w_drain (and a
+         * state change w_ctrl) before the far target existed. Cancel them
+         * here: release_socket_now() is the last point that owns them. */
+        tbt_sock_detach(st);
         return;
+    }
 
     /* Detach/restore/cancel while st->sk is still visible to the work items. */
     tbt_sock_detach(st);
@@ -1041,29 +1122,70 @@ static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock,
     {
         if (flow)
             tbt_fec_flow_abort(sess, flow);
+        /* far_sid was published before the stream existed. Do not leave it
+         * naming a sid no stream owns: the non-FEC FIN/RST close gate checks
+         * it before it wakes a queued public connection. */
+        spin_lock(&sess->lock);
+        if (READ_ONCE(sess->far_sid) == sid)
+            WRITE_ONCE(sess->far_sid, 0);
+        spin_unlock(&sess->lock);
         return -ENOMEM;
     }
     if (flow && tbt_fec_flow_attach(st, flow)) /* moves the reference */
     {
         /* The shared mux leg could not be built. The stream never reached
-         * OPEN, so release it before the pending path resets the socket. */
+         * OPEN, so release it before the pending path resets the socket.
+         * Attach did not consume the reference on failure. */
+        tbt_fec_flow_put(flow);
         tbt_stream_kill(st, TBT_ST_DEAD);
         tbt_stream_put(st);
         return -ENOMEM;
     }
-    st->sk = sock->sk;
     /* Slot 0 with target= unset sends 0: the far side's default target, the
      * exact 0.4.0 behavior. Every other slot names its configured port. */
     st->target_port = tbt_map_target_for_slot(&sess->tunnel->cfg, slot);
     st->route_slot = slot;
-    WRITE_ONCE(st->state, TBT_ST_OPEN);
+
+    /* Wire the accepted socket before it is visible through st->sk. A kill
+     * can run on any carrier or softirq path from the instant this stream
+     * entered sess->streams; its w_kill releases whatever st->sk names.
+     * Publishing first leaves a window in which release_socket_now() calls
+     * sock_release() between tbt_sock_attach()'s load of st->sk and its
+     * sk->sk_callback_lock write: a use-after-free on the freed sock. It can
+     * also resurrect OPEN after the killer stored DEAD, leaving a zombie
+     * stream that still owns the application socket while the session has
+     * already released the flow. */
+    tbt_sock_wire(st, sock->sk);
+
+    /* Claim PENDING->OPEN and publish the socket in one sess->lock critical
+     * section. A killer stores DEAD without this lock, but it must take the
+     * same lock in tbt_stream_detach_from_session() before w_kill can reach
+     * release_socket_now(). Therefore either the killer's release observes
+     * the published sk and closes it (after detaching it), or this thread
+     * observes DEAD here while the socket is still invisible to the killer
+     * and rolls back. Publishing and checking atomically rules out both
+     * closing it twice and never closing it. */
+    spin_lock(&sess->lock);
+    if (cmpxchg(&st->state, (u8)TBT_ST_PENDING, (u8)TBT_ST_OPEN) !=
+        (u8)TBT_ST_PENDING)
+    {
+        spin_unlock(&sess->lock);
+        /* A kill won before the socket became visible: w_kill found no sk or
+         * target and returned without closing it. Undo the wiring; the
+         * pending path still owns the socket and restores/resets it. */
+        tbt_sock_unwire(st, sock->sk);
+        tbt_stream_put(st);
+        return -ECANCELED;
+    }
+    WRITE_ONCE(st->sk, sock->sk);
+    spin_unlock(&sess->lock);
 
     /* OPEN goes to every carrier that has sent HELLO; the pump writes it
      * before any DATA because it is inserted at the head of the queue. */
     tbt_tx_announce(sess, st, GFP_KERNEL);
-    tbt_sock_attach(st);
-    /* Data may already be queued from before the accept completed; take it now
-     * rather than waiting for the next packet to arrive. */
+    /* w_read ran once from tbt_sock_wire() while st->sk was still NULL and
+     * returned without capturing. Schedule it again so bytes queued before
+     * the accept are taken even if no further packet arrives. */
     tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
     tbt_fbk_kick(sess, false);
     tbt_stream_put(st);
@@ -1243,15 +1365,19 @@ void tbt_far_open_seen(struct tbt_stream *st, u8 route_slot, u16 target_port)
 {
     struct tbt_session *sess = st->sess;
 
-    struct socket *tg;
-
     /* A later OPEN can arrive while this publisher is between
      * tbt_stream_get_created() and this call. In v7 every live flow is routed
      * by sid and far_sid is only the last/primary compatibility pointer, so a
      * newer OPEN must not kill this stream: both flows are valid. Only a
      * stream another path already marked DEAD is refused. */
     spin_lock(&sess->lock);
-    if (READ_ONCE(st->state) == TBT_ST_DEAD)
+    /* A kill (the all-carriers-dead sweep) writes DEAD without this lock, so
+     * a read-then-write here could resurrect a stream it already killed: the
+     * stream would announce and dial a target after its RST was broadcast.
+     * Claim the PENDING->OPEN transition atomically instead; any other value
+     * means a killer won and this OPEN must do nothing. */
+    if (cmpxchg(&st->state, (u8)TBT_ST_PENDING, (u8)TBT_ST_OPEN) !=
+        (u8)TBT_ST_PENDING)
     {
         spin_unlock(&sess->lock);
         return;
@@ -1260,15 +1386,17 @@ void tbt_far_open_seen(struct tbt_stream *st, u8 route_slot, u16 target_port)
      * this far tunnel's config, so both values are final here. */
     st->route_slot = route_slot;
     st->target_port = target_port;
-    WRITE_ONCE(st->state, TBT_ST_OPEN);
     spin_unlock(&sess->lock);
 
     tbt_tx_announce(sess, st, GFP_ATOMIC);
-    tg = READ_ONCE(st->target);
-    if (tg)
-        tbt_target_attach(st, tg);
-    else
-        tbt_carrier_open_target(st);
+    /* w_target owns attachment: it publishes st->target and then calls
+     * tbt_target_attach() itself, so this call only has to start it. Never
+     * attach here: this runs in carrier RX under lock_sock(carrier), and
+     * tbt_sock_attach() -> tbt_parent_setsockbuf() -> sock_setsockopt()
+     * would take lock_sock() on the stream socket -- a nested
+     * sk_lock-AF_INET acquisition (the same nesting the kill path avoids
+     * by deferring to w_kill). */
+    tbt_carrier_open_target(st);
     /* A new far stream must restart the FBK tick: it is the only driver of
      * tbt_tx_fin() retries and tbt_tx_close_check(). The tick stops when the
      * session had no streams, so without this a new stream inherits a dead

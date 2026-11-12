@@ -296,6 +296,73 @@ static void test_mapping(void)
     ops->free(c);
 }
 
+/*
+ * A peer with another graph seed used to be accepted: the peel resolved
+ * every missing payload bit from its own (wrong) rows and the codec
+ * reported the share complete.  Every received parity row must now be
+ * certified against the recovered payload, so the share stays unknown.
+ * The same applies to a locally corrupted parity byte.
+ */
+static void test_seed_identity(void)
+{
+    struct tbt_fec_ops const *ops = &tbt_fec_ops_sclc;
+    void *tx = ops->new(N, M, 500, 256, SHARE, 0, 0xa11ce);
+    void *rx = ops->new(N, M, 500, 256, SHARE, 0, 0xb0b0b);
+    u8 *data = alloc_shares(N), *parity = alloc_shares(M);
+    u8 **dp = share_ptrs(data, N), **pp = share_ptrs(parity, M);
+    u8 *present = calloc(N + M, 1);
+    u8 *truth = malloc(SHARE);
+    int i, rc;
+
+    if (!tx || !rx || !truth)
+    {
+        check(0, "seed identity new");
+        return;
+    }
+    for (i = 0; i < N; i++)
+        fill_random(data + (size_t)i * SHARE, SHARE);
+    ops->encode(tx, dp, N, pp);
+    memcpy(truth, data + (size_t)5 * SHARE, SHARE);
+
+    memset(present, 1, (size_t)N + M);
+    present[5] = 0;
+    memset(data + (size_t)5 * SHARE, 0x5A, SHARE);
+    rc = ops->decode(rx, dp, pp, present, present + N, N);
+    check(rc <= 0, "foreign seed recovers nothing");
+    check(ops->is_known(rx, 5) == 0, "foreign seed share stays unknown");
+    check(memcmp(truth, data + (size_t)5 * SHARE, SHARE) != 0,
+          "foreign seed buffer is not trusted");
+
+    /* Same codec, but one received parity byte is corrupt. */
+    memset(present, 1, (size_t)N + M);
+    present[5] = 0;
+    memcpy(data + (size_t)5 * SHARE, truth, SHARE);
+    memset(data + (size_t)5 * SHARE, 0x5A, SHARE);
+    parity[0] ^= 0x01;
+    rc = ops->decode(tx, dp, pp, present, present + N, N);
+    check(rc <= 0, "corrupt parity recovers nothing");
+    check(ops->is_known(tx, 5) == 0, "corrupt parity share stays unknown");
+    parity[0] ^= 0x01;
+
+    /* Control: the matching graph still recovers it byte-exactly. */
+    memcpy(data + (size_t)5 * SHARE, truth, SHARE);
+    memset(data + (size_t)5 * SHARE, 0x5A, SHARE);
+    rc = ops->decode(tx, dp, pp, present, present + N, N);
+    check(rc == 1, "matching seed recovers the share");
+    check(ops->is_known(tx, 5) == 1, "matching seed marks it known");
+    check(!memcmp(truth, data + (size_t)5 * SHARE, SHARE),
+          "matching seed recovery is byte-exact");
+
+    free(truth);
+    free(present);
+    free(dp);
+    free(pp);
+    free_shares(data, N);
+    free_shares(parity, M);
+    ops->free(tx);
+    ops->free(rx);
+}
+
 static double erasure_run(struct tbt_fec_ops const *ops, u32 p_ppm,
                           int blocks)
 {
@@ -642,6 +709,7 @@ int main(void)
     test_stopping_set();
     test_advance();
     test_erasures();
+    test_seed_identity();
     bench();
     if (failures)
     {

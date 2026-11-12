@@ -63,8 +63,15 @@ static inline bool tbt_read_bool_at(const void *p)
 #endif
 
 /* Line buffer size. A line of TBT_LINE_MAX - 1 bytes is the longest accepted;
- * TBT_LINE_MAX itself is refused, so the buffer always has room for the NUL. */
-#define TBT_LINE_MAX 1024
+ * TBT_LINE_MAX itself is refused, so the buffer always has room for the NUL.
+ *
+ * The limit covers both directions: a canonical render must fit back through
+ * the write path, or `cat config > backup; cat backup > config` fails on a
+ * config the module accepted. The longest canonical line (maximum id, three
+ * bracketed IPv6 endpoints, seven map entries, eight IPv6 srcaddrs, a 64-hex
+ * crypto_key, dev, nonce and mode=sc-ldpc L) is 1105 bytes, so 1024 was too
+ * small once dev=, crypto_key= and mode=sc-ldpc were added to the grammar. */
+#define TBT_LINE_MAX 1152
 #define TBT_SRC_MAX 8      /* srcaddrs= entries recorded per tunnel */
 
 /* Address families, as the Linux ABI numbers. The module and the host test
@@ -150,15 +157,17 @@ struct tbt_cfg
     u8 role;    /* TBT_ROLE_NEAR | TBT_ROLE_FAR */
     u8 profile; /* 1 http-kal, 2 http-kal-drip, 3 raw; never 0 after parsing */
     u8 fec;     /* 0 off (old ARQ), 1 on; parsed and rendered, no data plane */
-    u8 adaptive; /* fec=on: 1 lets the control law choose n/m, 0 keeps the
-                  * configured pair. Defaults to fec; requires fec=on. The
-                  * configured n/m are the initial shape and the upper hint. */
+    u8 adaptive; /* fec=on: 1 lets the SC-LDPC control law choose n/m, 0
+                  * keeps the configured pair. Only mode=3 has a controller;
+                  * on rlnc/grouped the parser normalizes the effective value
+                  * to 0. Requires fec=on. For mode=3 the configured n/m are
+                  * the initial shape on the shipped rate ladder. */
     u8 mode;    /* 1 rlnc, 2 grouped, 3 sc-ldpc; never 0 after parsing */
-    u16 w;      /* effective window: 1..1024, or 2*n / 256 resolved from w=0 */
-    u16 L;      /* sc-ldpc coupling length; 0 = the variant default. Not a
-                 * wire field: both ends must configure it, and 0.3.0 keeps
-                 * the shape fixed, so the value only has to match within a
-                 * session. */
+    u16 w;      /* effective window/block: 1..1024, or 2*n / 256 / 64 from w=0 */
+    u16 L;      /* sc-ldpc coupling length; 0 = the variant default, and the
+                 * parser clears it when mode != 3. Not a wire field: both
+                 * ends must configure it, and 0.3.0 keeps the shape fixed,
+                 * so the value only has to match within a session. */
     u16 carriers; /* effective slots: a multiple of n+m, or n+m resolved from 0 */
     struct tbt_addr listen;
     __be16 listen_port;
@@ -188,7 +197,7 @@ struct tbt_cfg
     u32 max_inflate_milli; /* 2.000 renders as 2000 */
     u32 hole_budget_ms;   /* hole timeout, 0 = auto (the default) */
     u32 rx_reorder_bytes; /* C3 reorder window, default 67108864 */
-    u32 tx_window_bytes;  /* sender window, default 67108864 */
+    u32 tx_window_bytes;  /* sender window; 0 = auto via BBR (the default) */
     u32 tx_retain_bytes;  /* C3 replay retention, 0 = unlimited */
     u32 carrier_stall_ms; /* C3 stall detector, 0 = auto (the default) */
     struct tbt_addr srcaddrs[TBT_SRC_MAX];

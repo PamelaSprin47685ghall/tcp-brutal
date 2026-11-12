@@ -49,16 +49,35 @@ _Static_assert(TBT_FEC_FBK_RATE_TARGET == 60, "FBK rate target at +60");
 
 #ifndef __KERNEL__
 static long tbt_fec_live_allocs;
+static long tbt_fec_host_fail_after = -1;
 
 long tbt_fec_host_live_allocs(void)
 {
     return tbt_fec_live_allocs;
 }
+
+void tbt_fec_host_alloc_fail_after(long n)
+{
+    tbt_fec_host_fail_after = n;
+}
 #endif
 
 static void *tbt_fec_alloc(size_t len)
 {
-    void *p = tbt_fec_vzalloc(len);
+    void *p;
+
+#ifndef __KERNEL__
+    if (tbt_fec_host_fail_after >= 0)
+    {
+        if (!tbt_fec_host_fail_after)
+        {
+            tbt_fec_host_fail_after = -1; /* fail exactly once */
+            return NULL;
+        }
+        tbt_fec_host_fail_after--;
+    }
+#endif
+    p = tbt_fec_vzalloc(len);
 
 #ifndef __KERNEL__
     if (p)
@@ -94,25 +113,80 @@ u32 tbt_fec_crc32c(u32 seed, const void *data, size_t len)
 
 #else
 
-/* Portable fallback: one reflected Castagnoli lookup per byte. */
-static u32 tbt_crc32c_table[256];
-static int tbt_crc32c_ready;
-
-static void tbt_crc32c_init(void)
-{
-    u32 i;
-
-    for (i = 0; i < 256; i++)
-    {
-        u32 c = i;
-        int k;
-
-        for (k = 0; k < 8; k++)
-            c = (c & 1) ? (c >> 1) ^ 0x82f63b78u : c >> 1;
-        tbt_crc32c_table[i] = c;
-    }
-    tbt_crc32c_ready = 1;
-}
+/* Portable fallback: one reflected Castagnoli lookup per byte.
+ *
+ * The table is compile-time constant. The host half is a library API: a
+ * caller may run it from several threads, and a lazily filled table with a
+ * plain "ready" flag is a C data race (a reader can observe the flag before
+ * the stores that fill the table on a weakly ordered CPU, and two threads
+ * may run the filler at once). A const table has no init state at all, so a
+ * concurrent first call is already safe and the hot path loses a branch. */
+static const u32 tbt_crc32c_table[256] = {
+    0x00000000u, 0xf26b8303u, 0xe13b70f7u, 0x1350f3f4u,
+    0xc79a971fu, 0x35f1141cu, 0x26a1e7e8u, 0xd4ca64ebu,
+    0x8ad958cfu, 0x78b2dbccu, 0x6be22838u, 0x9989ab3bu,
+    0x4d43cfd0u, 0xbf284cd3u, 0xac78bf27u, 0x5e133c24u,
+    0x105ec76fu, 0xe235446cu, 0xf165b798u, 0x030e349bu,
+    0xd7c45070u, 0x25afd373u, 0x36ff2087u, 0xc494a384u,
+    0x9a879fa0u, 0x68ec1ca3u, 0x7bbcef57u, 0x89d76c54u,
+    0x5d1d08bfu, 0xaf768bbcu, 0xbc267848u, 0x4e4dfb4bu,
+    0x20bd8edeu, 0xd2d60dddu, 0xc186fe29u, 0x33ed7d2au,
+    0xe72719c1u, 0x154c9ac2u, 0x061c6936u, 0xf477ea35u,
+    0xaa64d611u, 0x580f5512u, 0x4b5fa6e6u, 0xb93425e5u,
+    0x6dfe410eu, 0x9f95c20du, 0x8cc531f9u, 0x7eaeb2fau,
+    0x30e349b1u, 0xc288cab2u, 0xd1d83946u, 0x23b3ba45u,
+    0xf779deaeu, 0x05125dadu, 0x1642ae59u, 0xe4292d5au,
+    0xba3a117eu, 0x4851927du, 0x5b016189u, 0xa96ae28au,
+    0x7da08661u, 0x8fcb0562u, 0x9c9bf696u, 0x6ef07595u,
+    0x417b1dbcu, 0xb3109ebfu, 0xa0406d4bu, 0x522bee48u,
+    0x86e18aa3u, 0x748a09a0u, 0x67dafa54u, 0x95b17957u,
+    0xcba24573u, 0x39c9c670u, 0x2a993584u, 0xd8f2b687u,
+    0x0c38d26cu, 0xfe53516fu, 0xed03a29bu, 0x1f682198u,
+    0x5125dad3u, 0xa34e59d0u, 0xb01eaa24u, 0x42752927u,
+    0x96bf4dccu, 0x64d4cecfu, 0x77843d3bu, 0x85efbe38u,
+    0xdbfc821cu, 0x2997011fu, 0x3ac7f2ebu, 0xc8ac71e8u,
+    0x1c661503u, 0xee0d9600u, 0xfd5d65f4u, 0x0f36e6f7u,
+    0x61c69362u, 0x93ad1061u, 0x80fde395u, 0x72966096u,
+    0xa65c047du, 0x5437877eu, 0x4767748au, 0xb50cf789u,
+    0xeb1fcbadu, 0x197448aeu, 0x0a24bb5au, 0xf84f3859u,
+    0x2c855cb2u, 0xdeeedfb1u, 0xcdbe2c45u, 0x3fd5af46u,
+    0x7198540du, 0x83f3d70eu, 0x90a324fau, 0x62c8a7f9u,
+    0xb602c312u, 0x44694011u, 0x5739b3e5u, 0xa55230e6u,
+    0xfb410cc2u, 0x092a8fc1u, 0x1a7a7c35u, 0xe811ff36u,
+    0x3cdb9bddu, 0xceb018deu, 0xdde0eb2au, 0x2f8b6829u,
+    0x82f63b78u, 0x709db87bu, 0x63cd4b8fu, 0x91a6c88cu,
+    0x456cac67u, 0xb7072f64u, 0xa457dc90u, 0x563c5f93u,
+    0x082f63b7u, 0xfa44e0b4u, 0xe9141340u, 0x1b7f9043u,
+    0xcfb5f4a8u, 0x3dde77abu, 0x2e8e845fu, 0xdce5075cu,
+    0x92a8fc17u, 0x60c37f14u, 0x73938ce0u, 0x81f80fe3u,
+    0x55326b08u, 0xa759e80bu, 0xb4091bffu, 0x466298fcu,
+    0x1871a4d8u, 0xea1a27dbu, 0xf94ad42fu, 0x0b21572cu,
+    0xdfeb33c7u, 0x2d80b0c4u, 0x3ed04330u, 0xccbbc033u,
+    0xa24bb5a6u, 0x502036a5u, 0x4370c551u, 0xb11b4652u,
+    0x65d122b9u, 0x97baa1bau, 0x84ea524eu, 0x7681d14du,
+    0x2892ed69u, 0xdaf96e6au, 0xc9a99d9eu, 0x3bc21e9du,
+    0xef087a76u, 0x1d63f975u, 0x0e330a81u, 0xfc588982u,
+    0xb21572c9u, 0x407ef1cau, 0x532e023eu, 0xa145813du,
+    0x758fe5d6u, 0x87e466d5u, 0x94b49521u, 0x66df1622u,
+    0x38cc2a06u, 0xcaa7a905u, 0xd9f75af1u, 0x2b9cd9f2u,
+    0xff56bd19u, 0x0d3d3e1au, 0x1e6dcdeeu, 0xec064eedu,
+    0xc38d26c4u, 0x31e6a5c7u, 0x22b65633u, 0xd0ddd530u,
+    0x0417b1dbu, 0xf67c32d8u, 0xe52cc12cu, 0x1747422fu,
+    0x49547e0bu, 0xbb3ffd08u, 0xa86f0efcu, 0x5a048dffu,
+    0x8ecee914u, 0x7ca56a17u, 0x6ff599e3u, 0x9d9e1ae0u,
+    0xd3d3e1abu, 0x21b862a8u, 0x32e8915cu, 0xc083125fu,
+    0x144976b4u, 0xe622f5b7u, 0xf5720643u, 0x07198540u,
+    0x590ab964u, 0xab613a67u, 0xb831c993u, 0x4a5a4a90u,
+    0x9e902e7bu, 0x6cfbad78u, 0x7fab5e8cu, 0x8dc0dd8fu,
+    0xe330a81au, 0x115b2b19u, 0x020bd8edu, 0xf0605beeu,
+    0x24aa3f05u, 0xd6c1bc06u, 0xc5914ff2u, 0x37faccf1u,
+    0x69e9f0d5u, 0x9b8273d6u, 0x88d28022u, 0x7ab90321u,
+    0xae7367cau, 0x5c18e4c9u, 0x4f48173du, 0xbd23943eu,
+    0xf36e6f75u, 0x0105ec76u, 0x12551f82u, 0xe03e9c81u,
+    0x34f4f86au, 0xc69f7b69u, 0xd5cf889du, 0x27a40b9eu,
+    0x79b737bau, 0x8bdcb4b9u, 0x988c474du, 0x6ae7c44eu,
+    0xbe2da0a5u, 0x4c4623a6u, 0x5f16d052u, 0xad7d5351u,
+};
 
 u32 tbt_fec_crc32c_soft(u32 seed, const void *data, size_t len)
 {
@@ -121,8 +195,6 @@ u32 tbt_fec_crc32c_soft(u32 seed, const void *data, size_t len)
 
     if (!len)
         return seed;
-    if (!tbt_crc32c_ready)
-        tbt_crc32c_init();
     while (len--)
         crc = tbt_crc32c_table[(crc ^ *p++) & 0xff] ^ (crc >> 8);
     return ~crc;
@@ -220,11 +292,22 @@ static int tbt_crc32c_hw_detect(void)
 int tbt_fec_crc32c_hw_available(void)
 {
 #ifdef TBT_CRC32C_HW
-    static int state = -1; /* two writers store the same value: benign race */
+    /* -1 unknown, 0 table, 1 instruction. The host half is a library API and
+     * may be entered from several threads; a plain static is a C data race
+     * even when every writer stores the same value. The __atomic builtins
+     * stay available under the host's -std=gnu99 (the kernel build never
+     * compiles this half: it uses crc32c()). Relaxed is enough: the value
+     * has no dependent data, only two writers racing to publish the same
+     * result. */
+    static int state = -1;
+    int v = __atomic_load_n(&state, __ATOMIC_RELAXED);
 
-    if (state < 0)
-        state = tbt_crc32c_hw_detect();
-    return state;
+    if (v < 0)
+    {
+        v = tbt_crc32c_hw_detect();
+        __atomic_store_n(&state, v, __ATOMIC_RELAXED);
+    }
+    return v;
 #else
     return 0;
 #endif
@@ -749,8 +832,21 @@ struct tbt_fec_replay *tbt_fec_replay_new_k(u16 groups, u16 n, u16 m, u16 s,
     size_t block_bytes;
     u32 i;
 
-    if (!groups || !n || !m || !s || s > TBT_FEC_PAYLOAD_MAX || !k ||
-        k > TBT_FEC_REPLAY_K_MAX)
+    /* The ring's share count and group count are stored as u16 fields and
+     * every later share bound casts n + m to u16, so an over-limit shape
+     * would wrap the bound (n=65535, m=5 looks like 4 shares) and allocate
+     * a plane far past the replay budget. tbt_fec_replay_k_for() already
+     * applies these limits; the explicit-K constructor must not bypass
+     * them. */
+    if (!groups || groups > TBT_FEC_MAX_GROUPS || !n || !m ||
+        (u32)n + m > TBT_FEC_MAX_SHARES || !s ||
+        s > TBT_FEC_PAYLOAD_MAX || !k || k > TBT_FEC_REPLAY_K_MAX)
+        return NULL;
+    /* The ring is a bounded-memory object: an explicit K may not buy a
+     * descriptor plane and hot pool above TBT_FEC_REPLAY_BUDGET. k_for()
+     * picks K by the same rule, so every accepted K here has k <= that K. */
+    if (tbt_fec_replay_bytes(groups, n, m, s, k) >
+        TBT_FEC_REPLAY_BUDGET)
         return NULL;
     stride = TBT_FEC_HDR_LEN + s;
     slots = (size_t)k * groups * shares;
@@ -951,7 +1047,12 @@ int tbt_fec_replay_ensure_block(struct tbt_fec_replay *r, u64 block_id,
         tbt_fec_unlock(lock);
         return 0;
     }
-    memset(buf, 0, r->block_bytes);
+    /* The plane's bytes are never read without a descriptor: replay_get()
+     * checks block_id[]/len[] for this share, and store() writes both before
+     * the record. A recycled hot plane may therefore keep stale bytes; only
+     * the descriptor rows below must be reset. Zeroing the whole plane cost
+     * groups * (n + m) * stride (274 KiB for 8x32) per TX block to protect
+     * bytes no reader can reach. */
     r->blk_rec[b] = buf;
     r->block_start[b] = block_id;
     tbt_fec_replay_shape_set(r, b, block_id, n, m, seq0);
@@ -1659,7 +1760,13 @@ static u32 tbt_fec_band_weight(u16 k, u16 m, u16 r, u16 band)
     return n;
 }
 
-/* Rank of the m x k band matrix over GF(2), capped at min(m, k). */
+/* Rank of the m x k band matrix over GF(2), capped at min(m, k), or
+ * TBT_FEC_BAND_RANK_FAIL when the matrix cannot be allocated. Zero is a
+ * real rank only for an empty matrix, and every band >= 1 covers every
+ * column, so returning 0 on allocation failure would be indistinguishable
+ * from "this band has no rank" and silently select a different matrix. */
+#define TBT_FEC_BAND_RANK_FAIL (~0u)
+
 static u32 tbt_fec_band_rank(u16 k, u16 m, u16 band)
 {
     u32 words = ((u32)k + 63) / 64;
@@ -1669,7 +1776,7 @@ static u32 tbt_fec_band_rank(u16 k, u16 m, u16 band)
 
     mat = tbt_fec_alloc((size_t)m * words * sizeof(*mat));
     if (!mat)
-        return 0;
+        return TBT_FEC_BAND_RANK_FAIL;
     memset(mat, 0, (size_t)m * words * sizeof(*mat));
     for (col = 0; col < m; col++)
     {
@@ -1718,9 +1825,11 @@ static u32 tbt_fec_band_rank(u16 k, u16 m, u16 band)
     return rank;
 }
 
-/* Widest band that fits d terms per row and keeps rank min(m, k). b == 1 is
- * the partition matrix (column c belongs to row c mod m), which always fits:
- * its row weight is ceil(k/m), at most d in every configured shape. */
+/* Widest band that fits d terms per row and keeps rank min(m, k), or 0 when
+ * the rank matrix cannot be allocated. b == 1 is the partition matrix
+ * (column c belongs to row c mod m), which always fits: its row weight is
+ * ceil(k/m), at most d in every configured shape. The b == 1 fallback needs
+ * no rank probe, so an allocation failure cannot change the chosen band. */
 static u16 tbt_fec_band_pick(u16 k, u16 m, u16 d)
 {
     u32 target = m < k ? m : k;
@@ -1730,6 +1839,7 @@ static u16 tbt_fec_band_pick(u16 k, u16 m, u16 d)
     {
         u32 r;
         u32 wmax = 0;
+        u32 rank;
 
         for (r = 0; r < m; r++)
         {
@@ -1740,7 +1850,10 @@ static u16 tbt_fec_band_pick(u16 k, u16 m, u16 d)
         }
         if (wmax > d)
             continue;
-        if (tbt_fec_band_rank(k, m, band) == target)
+        rank = tbt_fec_band_rank(k, m, band);
+        if (rank == TBT_FEC_BAND_RANK_FAIL)
+            return 0;
+        if (rank == target)
             return band;
     }
     return 1;
@@ -1776,7 +1889,8 @@ struct tbt_fec_rlnc *tbt_fec_rlnc_new(u16 n, u16 m, u16 k, u16 w, size_t s, u16 
     if (!n || !m || !k || w < k || w > TBT_FEC_MAX_W || !s || !d || d > w ||
         d > TBT_FEC_MAX_D)
         return NULL;
-    if ((u16)n + (u16)m > TBT_FEC_MAX_SHARES)
+    /* Widen before the add: n=65535, m=5 must not wrap to 4 and pass. */
+    if ((u32)n + m > TBT_FEC_MAX_SHARES)
         return NULL;
     /* d == w makes every parity row the all-ones row (rank 1). Refuse it
      * unless the window itself is one packet, where it is the only choice. */
@@ -1793,6 +1907,13 @@ struct tbt_fec_rlnc *tbt_fec_rlnc_new(u16 n, u16 m, u16 k, u16 w, size_t s, u16 
     ctx->d = d;
     ctx->nonce = nonce;
     ctx->band = tbt_fec_band_pick(k, m, d);
+    if (!ctx->band)
+    {
+        /* No codec may be built with a band that was never verified: two
+         * ends could then select different matrices under memory pressure. */
+        tbt_fec_rlnc_free(ctx);
+        return NULL;
+    }
     ctx->idx = tbt_fec_alloc((size_t)w * sizeof(*ctx->idx));
     if (!ctx->idx)
     {
@@ -2378,7 +2499,7 @@ int tbt_fec_params_dynamic(u32 p_ppm, u16 carriers, struct tbt_fec_params *out)
 
 int tbt_fec_params_check(const struct tbt_fec_params *p)
 {
-    u16 shares;
+    u32 shares;
 
     if (!p)
         return -EINVAL;
@@ -2408,7 +2529,9 @@ int tbt_fec_params_check(const struct tbt_fec_params *p)
         return -EINVAL;
     if (!p->n || !p->m)
         return -EINVAL;
-    shares = (u16)p->n + (u16)p->m;
+    /* Widen before the add: with u16 arithmetic n=65535, m=5 sums to 4 and
+     * matches a 4-share group_size, bypassing the share bound below. */
+    shares = (u32)p->n + p->m;
     if (shares != p->group_size || shares > TBT_FEC_MAX_SHARES)
         return -EINVAL;
     if (!p->k || p->w < p->k || p->w > TBT_FEC_MAX_W)

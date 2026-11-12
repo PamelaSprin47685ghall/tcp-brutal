@@ -1664,8 +1664,47 @@ static void test_crypto_flow(void)
         printf("PASS flow: the sid high half is mixed\n");
     }
 
-    /* Independent construction: the 40-bit sid XORs the 64-bit nonce, and
-     * the parity share_index XORs its high word. */
+    /* Old mapping collision: with sid_lo equal, sid_hi ^ share_index made
+     * (sid_hi=1, share=0) and (sid_hi=0, share=1) the same nonce. The
+     * documented split must give two different keystreams. */
+    {
+        const u64 sid_hi1 = (1ULL << 32) | 5;
+        const u64 sid_hi0 = 5;
+
+        memcpy(a, payload, sizeof(a));
+        memcpy(b, payload, sizeof(b));
+        tbt_crypto_body_xor_flow(&ctx, sid_hi1, seq, true, 0, a, sizeof(a));
+        tbt_crypto_body_xor_flow(&ctx, sid_hi0, seq, true, 1, b, sizeof(b));
+        if (memcmp(a, b, sizeof(a)) == 0)
+        {
+            printf("FAIL flow: sid_hi and share_index collide\n");
+            failures++;
+        }
+        else
+        {
+            printf("PASS flow: sid_hi and share_index are disjoint\n");
+        }
+    }
+
+    /* The nonzero-sid PARITY domain must not collide with the single-stream
+     * (sid == 0) domain either. Under the old XOR this pair was identical. */
+    memcpy(a, payload, sizeof(a));
+    memcpy(b, payload, sizeof(b));
+    tbt_crypto_body_xor_flow(&ctx, 0, seq, true, 0, a, sizeof(a));
+    tbt_crypto_body_xor_flow(&ctx, 1ULL << 32, seq, true, 0, b, sizeof(b));
+    if (memcmp(a, b, sizeof(a)) == 0)
+    {
+        printf("FAIL flow: sid=0 and nonzero parity domains collide\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS flow: sid=0 and nonzero parity domains differ\n");
+    }
+
+    /* Independent construction: the 40-bit sid XORs the low 40 bits of the
+     * nonce, the parity share_index occupies bits 40..55, and bit 63 is the
+     * nonzero-sid parity domain marker. */
     {
         u8 fnonce[8];
         u64 n = 0;
@@ -1674,9 +1713,11 @@ static void test_crypto_flow(void)
 
         for (j = 0; j < 8; j++)
             n |= (u64)nonce[j] << (8 * j);
-        v = n ^ sid_a ^ ((u64)3 << 32);
+        v = n ^ sid_a ^ ((u64)3 << 40) ^ (1ULL << 63);
         for (j = 0; j < 8; j++)
             fnonce[j] = (u8)(v >> (8 * j));
+        memcpy(a, payload, sizeof(a));
+        tbt_crypto_body_xor_flow(&ctx, sid_a, seq, true, 3, a, sizeof(a));
         memcpy(old, payload, sizeof(old));
         if (tbt_chacha8_xor(key, sizeof(key), fnonce, (seq << 8) | 0x80u, 8,
                             old, sizeof(old)) != 0)
@@ -1717,6 +1758,8 @@ static void test_crypto_flow(void)
         tbt_crypto_body_xor_flow(&ctx, sid_a, seq, false, 0, payload,
                                  TBT_CRYPTO_BODY_MAX + 1) != -EINVAL ||
         tbt_crypto_body_xor_flow(&ctx, sid_a, TBT_CRYPTO_SEQ_MAX + 1, false,
+                                 0, payload, 1) != -EINVAL ||
+        tbt_crypto_body_xor_flow(&ctx, TBT_CRYPTO_SID_MAX + 1, seq, false,
                                  0, payload, 1) != -EINVAL)
     {
         printf("FAIL flow: invalid arguments accepted\n");
@@ -2166,7 +2209,7 @@ static void test_vector_vs_scalar(void)
 }
 
 /* ------------------------------------------------------------------------- */
-/* HELLO v9: SipHash-2-4 and the PSK tag.                                    */
+/* HELLO v11: SipHash-2-4 and the path-bound PSK tag.                        */
 
 static void sip_expect(const char *name, size_t len, const char *want_hex)
 {
@@ -2187,7 +2230,8 @@ static void sip_expect(const char *name, size_t len, const char *want_hex)
 }
 
 /* The reference implementation's vectors_sip64.h: key 000102..0f and message
- * 00 01 .. n-1. The 74-byte case is the exact length the HELLO tag covers. */
+ * 00 01 .. n-1. The 74-byte case is the body length inside the HELLO tag;
+ * the tag input itself is one path_id byte followed by these 74 bytes. */
 static void test_siphash(void)
 {
     sip_expect("SipHash-2-4 empty message", 0, "310e0edd47db6f72");
@@ -2224,14 +2268,16 @@ static void test_hello_auth(void)
     u8 other[TBT_CRYPTO_HELLO_AUTH_LEN];
     u8 key[TBT_CRYPTO_KEY_LEN];
     u8 wrong[TBT_CRYPTO_KEY_LEN];
+    u8 tag0[TBT_CRYPTO_HELLO_TAG_LEN];
     size_t i;
     int bad = 0;
 
     hello_auth_body(body, key);
     tbt_crypto_hello_auth_fill(body, epoch, key);
-    check_bytes("HELLO v9 tag over body[0..73]",
+    check_bytes("HELLO v11 tag over path0 || body[0..73]",
                 body + TBT_CRYPTO_HELLO_TAG,
-                "f56e1077acf1f2cb9e9b264ed84a6891", TBT_CRYPTO_HELLO_TAG_LEN);
+                "71e0697a8339e8e633c698d5fce3a8f7", TBT_CRYPTO_HELLO_TAG_LEN);
+    memcpy(tag0, body + TBT_CRYPTO_HELLO_TAG, sizeof(tag0));
 
     if (!tbt_crypto_hello_auth_ok(body, sizeof(body), key))
     {
@@ -2241,6 +2287,65 @@ static void test_hello_auth(void)
     else
     {
         printf("PASS hello-auth: valid tag accepted\n");
+    }
+
+    /* The outer carrier index is part of the MAC input. A tag minted for one
+     * path must not verify under another, and the path changes the tag. */
+    tbt_crypto_hello_auth_fill_path(body, sizeof(body), epoch, key, 7);
+    if (!memcmp(body + TBT_CRYPTO_HELLO_TAG, tag0, sizeof(tag0)))
+    {
+        printf("FAIL hello-auth: path_id does not change the tag\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS hello-auth: path_id changes the tag\n");
+    }
+    if (!tbt_crypto_hello_auth_ok_path(body, sizeof(body), key, 7))
+    {
+        printf("FAIL hello-auth: the path-7 tag was refused\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS hello-auth: the path-7 tag verifies\n");
+    }
+    if (tbt_crypto_hello_auth_ok_path(body, sizeof(body), key, 0) ||
+        tbt_crypto_hello_auth_ok_path(body, sizeof(body), key, 8) ||
+        tbt_crypto_hello_auth_ok(body, sizeof(body), key))
+    {
+        printf("FAIL hello-auth: a path-7 tag verified under another path\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS hello-auth: the path-7 tag fails under path 0 and 8\n");
+    }
+    tbt_crypto_hello_auth_fill_path(body, sizeof(body), epoch, key, 0);
+    if (memcmp(body + TBT_CRYPTO_HELLO_TAG, tag0, sizeof(tag0)) ||
+        !tbt_crypto_hello_auth_ok_path(body, sizeof(body), key, 0))
+    {
+        printf("FAIL hello-auth: path 0 is not reproducible\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS hello-auth: path 0 reproduces the wrapper tag\n");
+    }
+
+    /* A short body is refused before the epoch or tag is written. */
+    memcpy(other, body, sizeof(other));
+    tbt_crypto_hello_auth_fill_path(other, sizeof(other) - 1, epoch + 1, key,
+                                    9);
+    if (memcmp(other, body, sizeof(other)) != 0 ||
+        tbt_crypto_hello_auth_ok_path(other, sizeof(other) - 1, key, 9))
+    {
+        printf("FAIL hello-auth: short path-bound body was written/accepted\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS hello-auth: short path-bound body refused\n");
     }
 
     /* Every authenticated byte is inside the tag. */
@@ -2286,6 +2391,20 @@ static void test_hello_auth(void)
     else
     {
         printf("PASS hello-auth: wrong key, NULL key and short body refused\n");
+    }
+
+    /* A zero tag means "sender has no PSK": it must never authenticate. */
+    memcpy(other, body, sizeof(other));
+    memset(other + TBT_CRYPTO_HELLO_TAG, 0, TBT_CRYPTO_HELLO_TAG_LEN);
+    if (tbt_crypto_hello_auth_ok(other, sizeof(other), key) ||
+        tbt_crypto_hello_auth_ok_path(other, sizeof(other), key, 0))
+    {
+        printf("FAIL hello-auth: a zero tag was accepted\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS hello-auth: a zero tag is refused\n");
     }
 
     /* The epoch is inside the tag: a replayed body with a bumped generation

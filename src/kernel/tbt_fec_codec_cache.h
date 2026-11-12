@@ -38,10 +38,20 @@
  *   or softirq, the callback must not sleep. The module adapter can queue
  *   tbt_fec_grouped_free() on the FEC free workqueue.
  *
+ *   get(), put() and build_done() may all run under a caller spinlock: the
+ *   data plane holds spin_lock_bh(&rx->lock) around every cache call, and an
+ *   eviction inside get() or the last put() of a retired entry invokes
+ *   free_fn() there. A CODEC free is large enough to use vmalloc, and the
+ *   SLOTS free runs when a retired cache drains, so both may sleep. Do not
+ *   use in_atomic() to detect this context: with CONFIG_PREEMPT_COUNT=n it
+ *   is false even under spin_lock_bh. The adapter must always defer a
+ *   sleeping free (queue_work from atomic context) or use non-sleeping
+ *   memory for the slot array.
+ *
  * HOST TESTS
  *   alloc_fn() and free_fn() are injected. The host test passes malloc and
- *   mock codec pointers. The module passes kvzalloc/kvfree for the slot
- *   array and a tbt_fec_grouped_free() adapter for codecs.
+ *   mock codec pointers. The module passes kzalloc/kfree for the slot
+ *   array and a workqueue-deferred tbt_fec_grouped_free() for codecs.
  */
 #ifndef _TBT_FEC_CODEC_CACHE_H
 #define _TBT_FEC_CODEC_CACHE_H
@@ -118,9 +128,11 @@ struct tbt_fec_codec_cache
     u32 retiring; /* retired entries with refs > 0 */
     u8 destroyed;
     /* destroy() may run while a block still holds an entry. The cache object
-     * itself then stays alive until the last put(); free_self asks that put
-     * to call release(c). A NULL release leaves the object to its owner
-     * (host tests use stack caches). */
+     * itself then stays alive until the last put(); free_self asks whichever
+     * side drains the entries last (destroy() itself when none is
+     * referenced, otherwise the last put()) to call release(c). A NULL
+     * release leaves the object to its owner (host tests use stack
+     * caches). */
     void (*release)(struct tbt_fec_codec_cache *c);
     u8 free_self;
 };
@@ -133,10 +145,12 @@ int tbt_fec_codec_cache_init(struct tbt_fec_codec_cache *c, u32 capacity,
                              tbt_fec_codec_cache_free_fn free, void *ctx);
 
 /* Retire every entry and release the codecs that no caller holds. A codec
- * with refs > 0 is released by the last put(); the slot array goes with it,
- * and release(c) runs when free_self is set. The caller must not free the
- * cache object itself while entries are still referenced. get() returns NULL
- * after destroy(). destroy() is idempotent. */
+ * with refs > 0 is released by the last put(); the slot array goes with it.
+ * When free_self is set, release(c) runs exactly once: here if no entry is
+ * referenced, otherwise in the last put(). The caller must not free the
+ * cache object itself while entries are still referenced. get() returns
+ * NULL after destroy(). destroy() is idempotent while the object is alive;
+ * once release(c) has freed it, the caller must not touch the cache. */
 void tbt_fec_codec_cache_destroy(struct tbt_fec_codec_cache *c);
 
 /* Return the entry for key with one new reference. On a hit with a

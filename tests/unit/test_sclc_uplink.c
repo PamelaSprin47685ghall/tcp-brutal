@@ -419,6 +419,185 @@ static void test_single_erasure(void)
     }
 }
 
+/*
+ * The codec seed is part of the graph identity.  A decoder built with a
+ * different seed used to resolve the erased share through its own rows and
+ * report it complete; every received parity symbol is now certified
+ * against the recovered payload, so the share must stay unknown.  A
+ * locally corrupted parity byte must fail the same way.
+ */
+static void test_seed_identity(void)
+{
+    struct tbt_sclc_params p;
+    struct tbt_sclc_uplink *tx, *rx;
+    struct tbt_sclc_stat st;
+    struct block b;
+    u8 present_d[256], present_p[256];
+    int r;
+
+    rng_seed(91);
+    memset(&p, 0, sizeof(p));
+    p.n = 8;
+    p.m = 24;
+    p.block = TBT_FEC_SCLC_BLOCK_UP;
+    p.L = TBT_FEC_SCLC_L_UP;
+    p.rate_num = 1;
+    p.rate_den = 4;
+    p.max_core = 256;
+    p.mapping = TBT_SCLC_MAP_BITPLANE64;
+    p.seed = 1;
+    tx = tbt_sclc_uplink_new(1, &p);
+    p.seed = 2;
+    rx = tbt_sclc_uplink_new(1, &p);
+    ok(tx != NULL && rx != NULL, "seed identity: codecs", "allocation");
+    if (!tx || !rx)
+    {
+        tbt_sclc_uplink_free(tx);
+        tbt_sclc_uplink_free(rx);
+        return;
+    }
+    if (block_alloc(&b, p.n, p.m) != 0)
+    {
+        ok(0, "seed identity: shares", "allocation");
+        tbt_sclc_uplink_free(tx);
+        tbt_sclc_uplink_free(rx);
+        return;
+    }
+    block_fill(&b);
+    ok_int(tbt_sclc_uplink_encode(tx, 0, b.data, b.parity), 0,
+           "seed identity: encode");
+    memset(present_d, 1, sizeof(present_d));
+    memset(present_p, 1, sizeof(present_p));
+    present_d[3] = 0;
+    memset(b.data[3], 0x5A, TBT_FEC_S);
+
+    r = tbt_sclc_uplink_decode(rx, 0, b.data, b.parity, present_d,
+                               present_p);
+    ok(r < p.n, "seed identity: foreign seed recovers nothing",
+       "the share was reported complete");
+    ok_int(tbt_sclc_uplink_share_known(rx, 0, 3), 0,
+           "seed identity: foreign share stays unknown");
+    tbt_sclc_uplink_stat(rx, 0, &st);
+    ok(st.codes_failed > 0, "seed identity: rows diagnosed",
+       "no failed codeword");
+
+    /* Corrupt one received parity byte and decode with the matching codec. */
+    block_restore(&b);
+    ok_int(tbt_sclc_uplink_encode(tx, 0, b.data, b.parity), 0,
+           "seed identity: re-encode");
+    b.parity[0][0] ^= 1;
+    memset(b.data[3], 0x5A, TBT_FEC_S);
+    r = tbt_sclc_uplink_decode(tx, 0, b.data, b.parity, present_d,
+                               present_p);
+    ok(r < p.n, "residual: corrupt parity recovers nothing",
+       "the share was reported complete");
+    ok_int(tbt_sclc_uplink_share_known(tx, 0, 3), 0,
+           "residual: corrupt parity share stays unknown");
+
+    /* Control with the matching graph and clean parity. */
+    block_restore(&b);
+    ok_int(tbt_sclc_uplink_encode(tx, 0, b.data, b.parity), 0,
+           "seed identity: control encode");
+    memset(b.data[3], 0x5A, TBT_FEC_S);
+    r = tbt_sclc_uplink_decode(tx, 0, b.data, b.parity, present_d,
+                               present_p);
+    ok_int(r, p.n, "seed identity: matching seed recovers");
+    ok_int(block_compare_known(tx, 0, &b), 0,
+           "seed identity: recovery is byte-exact");
+
+    block_free(&b);
+    tbt_sclc_uplink_free(tx);
+    tbt_sclc_uplink_free(rx);
+}
+
+/*
+ * Fixed algebra/roundtrip: the encoder must produce a codeword whose every
+ * check holds in GF(16), a single-symbol error must fail the verifier, and
+ * the code must be linear (encode(a XOR b) == encode(a) XOR encode(b)).
+ */
+static void test_gf16_algebra(void)
+{
+    sc_params sp;
+    gf16_code *c;
+    char err[128];
+    u8 *code, *code2, *code3, *recv, *erased, *out;
+    gf16_dec_stat st;
+    int n, nd, i;
+
+    memset(&sp, 0, sizeof(sp));
+    sp.block = 16;
+    sp.L = 2;
+    sp.rate_num = 1;
+    sp.rate_den = 2;
+    sp.term = SC_TERM_ACC;
+    sp.extra_dc = 5;
+    sp.seed = 0x1234;
+    c = gf16_build(&sp, 0x1234ULL ^ 0xD1B54A32D192ED03ULL, err,
+                   sizeof(err));
+    ok(c != NULL, "gf16 algebra: build", err);
+    if (!c)
+        return;
+    n = gf16_n(c);
+    nd = gf16_n_data(c);
+    code = malloc((size_t)n);
+    code2 = malloc((size_t)n);
+    code3 = malloc((size_t)n);
+    recv = malloc((size_t)n);
+    erased = malloc((size_t)n);
+    out = malloc((size_t)n);
+    if (!code || !code2 || !code3 || !recv || !erased || !out)
+    {
+        ok(0, "gf16 algebra: alloc", "failed");
+        goto done;
+    }
+    for (i = 0; i < nd; i++)
+        code[i] = (u8)((i * 7 + 3) & 15);
+    ok_int(gf16_encode(c, code), 0, "gf16 algebra: encode");
+    ok_int(gf16_verify(c, code), 0, "gf16 algebra: syndrome");
+
+    code[0] ^= 1;
+    ok(gf16_verify(c, code) != 0, "gf16 algebra: error detected",
+       "the verifier accepted a perturbed symbol");
+    code[0] ^= 1;
+
+    for (i = 0; i < nd; i++)
+        code2[i] = (u8)((i * 11 + 5) & 15);
+    for (i = 0; i < nd; i++)
+        code3[i] = (u8)(code[i] ^ code2[i]);
+    ok_int(gf16_encode(c, code2), 0, "gf16 algebra: encode b");
+    ok_int(gf16_encode(c, code3), 0, "gf16 algebra: encode a^b");
+    for (i = 0; i < n; i++)
+        if (code3[i] != (u8)(code[i] ^ code2[i]))
+        {
+            ok(0, "gf16 algebra: linearity",
+               "encode(a^b) != encode(a)^encode(b)");
+            break;
+        }
+
+    for (i = 0; i < n; i++)
+    {
+        recv[i] = code[i];
+        erased[i] = (i < nd && (i % 3) == 1) ? 1 : 0;
+    }
+    st = gf16_decode(c, recv, erased, out, 1, 256);
+    ok_int((int)st.unresolved, 0, "gf16 algebra: decode resolves");
+    for (i = 0; i < nd; i++)
+        if (out[i] != code[i])
+        {
+            ok(0, "gf16 algebra: roundtrip exact", "decoded symbol differs");
+            break;
+        }
+
+done:
+    free(code);
+    free(code2);
+    free(code3);
+    free(recv);
+    free(erased);
+    free(out);
+    gf16_free(c);
+}
+
 struct p_result
 {
     double cw_rec;
@@ -1276,6 +1455,8 @@ int main(void)
     test_shapes();
     test_roundtrip();
     test_single_erasure();
+    test_seed_identity();
+    test_gf16_algebra();
     test_p_sweep();
     test_bitplane_recovery();
     test_contiguous_ab();

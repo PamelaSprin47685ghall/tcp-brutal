@@ -414,6 +414,9 @@ static void tbt_chacha8_blocks_xor_sse2(u32 st[16], u8 *data, size_t blocks,
     tbt_memzero_explicit(B, sizeof(B));
     tbt_memzero_explicit(C, sizeof(C));
     tbt_memzero_explicit(D, sizeof(D));
+    tbt_memzero_explicit(&ba, sizeof(ba));
+    tbt_memzero_explicit(&bb, sizeof(bb));
+    tbt_memzero_explicit(&bc, sizeof(bc));
 }
 #endif
 
@@ -542,6 +545,10 @@ tbt_chacha8_blocks_xor_neon(u32 st[16], u8 *data, size_t blocks, u32 rounds)
     tbt_memzero_explicit(B, sizeof(B));
     tbt_memzero_explicit(C, sizeof(C));
     tbt_memzero_explicit(D, sizeof(D));
+    tbt_memzero_explicit(&ba, sizeof(ba));
+    tbt_memzero_explicit(&bb, sizeof(bb));
+    tbt_memzero_explicit(&bc, sizeof(bc));
+    tbt_memzero_explicit(&bd, sizeof(bd));
 }
 #endif
 
@@ -844,12 +851,63 @@ int tbt_crypto_xor(struct tbt_crypto_ctx *c, u8 *data, size_t len)
     return 0;
 }
 
-int tbt_crypto_xor_at(struct tbt_crypto_ctx *c, u64 counter, u8 *data, size_t len)
+/* Absolute-counter XOR over `st`. The caller owns the schedule copy and
+ * wipes it; this function only needs the round count and the counter words.
+ * A whole block goes straight into the payload; only the tail needs the
+ * keystream buffer, so the wrap report lands on the same byte. */
+static int tbt_crypto_xor_state(u32 st[16], u32 rounds, u8 *data, size_t len)
 {
-    u32 st[16];
     u8 block[TBT_CRYPTO_BLOCK_LEN];
     size_t i = 0;
     int rc = 0;
+    bool block_used = false;
+
+    while (i < len)
+    {
+        size_t take = len - i;
+
+        if (take >= TBT_CRYPTO_BLOCK_LEN)
+        {
+            u64 ctr = (u64)st[12] | ((u64)st[13] << 32);
+            /* Blocks up to and including 2^64-1; saturate from counter 0. */
+            u64 room = ctr ? ~ctr + 1 : ~(u64)0;
+            size_t blocks = take / TBT_CRYPTO_BLOCK_LEN;
+
+            if ((u64)blocks > room)
+                blocks = (size_t)room;
+
+            tbt_chacha8_blocks_xor(st, data + i, blocks, rounds);
+            i += blocks * TBT_CRYPTO_BLOCK_LEN;
+            if (i < len && ctr + (u64)blocks == 0)
+            {
+                /* The request crosses past block 2^64-1. The output written
+                 * so far is not a valid stream; the caller must discard it. */
+                rc = -EINVAL;
+                goto out;
+            }
+            continue;
+        }
+
+        tbt_chacha8_block(st, block, rounds);
+        block_used = true;
+        tbt_xor_bytes(data + i, data + i, block, take);
+        i += take;
+        /* i == len here: the tail consumed the rest. No counter advance. */
+    }
+
+out:
+    /* block is the last keystream and may not be left on the stack, on the
+     * success path or the wrap path. A whole-block-only run never generated
+     * it, so do not pay 64 stores for an uninitialised buffer. */
+    if (block_used)
+        tbt_memzero_explicit(block, sizeof(block));
+    return rc;
+}
+
+int tbt_crypto_xor_at(struct tbt_crypto_ctx *c, u64 counter, u8 *data, size_t len)
+{
+    u32 st[16];
+    int rc;
 
     if (c == NULL || !c->ready)
         return -EINVAL;
@@ -864,45 +922,8 @@ int tbt_crypto_xor_at(struct tbt_crypto_ctx *c, u64 counter, u8 *data, size_t le
     st[12] = (u32)counter;
     st[13] = (u32)(counter >> 32);
 
-    while (i < len)
-    {
-        size_t take = len - i;
-
-        /* A whole block goes straight into the payload; only the tail needs a
-         * keystream buffer, so the wrap report lands on the same byte. */
-        if (take >= TBT_CRYPTO_BLOCK_LEN)
-        {
-            u64 ctr = (u64)st[12] | ((u64)st[13] << 32);
-            /* Blocks up to and including 2^64-1; saturate from counter 0. */
-            u64 room = ctr ? ~ctr + 1 : ~(u64)0;
-            size_t blocks = take / TBT_CRYPTO_BLOCK_LEN;
-
-            if ((u64)blocks > room)
-                blocks = (size_t)room;
-
-            tbt_chacha8_blocks_xor(st, data + i, blocks, c->rounds);
-            i += blocks * TBT_CRYPTO_BLOCK_LEN;
-            if (i < len && ctr + (u64)blocks == 0)
-            {
-                /* The request crosses past block 2^64-1. The output written
-                 * so far is not a valid stream; the caller must discard it. */
-                rc = -EINVAL;
-                goto out;
-            }
-            continue;
-        }
-
-        tbt_chacha8_block(st, block, c->rounds);
-        tbt_xor_bytes(data + i, data + i, block, take);
-        i += take;
-        /* i == len here: the tail consumed the rest. No counter advance. */
-    }
-
-out:
-    /* st is the key schedule and block is the last keystream; neither may be
-     * left on the stack, on the success path or the wrap path. */
+    rc = tbt_crypto_xor_state(st, c->rounds, data, len);
     tbt_memzero_explicit(st, sizeof(st));
-    tbt_memzero_explicit(block, sizeof(block));
     return rc;
 }
 
@@ -930,7 +951,8 @@ int tbt_crypto_body_xor(struct tbt_crypto_ctx *c, u64 seq, bool parity,
 int tbt_crypto_body_xor_share(struct tbt_crypto_ctx *c, u64 seq, bool parity,
                               u16 share_index, u8 *payload, u16 len)
 {
-    struct tbt_crypto_ctx tmp;
+    u32 st[16];
+    u64 ctr;
     int rc;
 
     if (c == NULL)
@@ -944,12 +966,15 @@ int tbt_crypto_body_xor_share(struct tbt_crypto_ctx *c, u64 seq, bool parity,
     if (len != 0 && payload == NULL)
         return -EINVAL;
 
-    /* Copy the key schedule, fold share_index into the nonce word, and use
-     * the same counter space as body_xor. xor_at() does not touch c. */
-    tmp = *c;
-    tmp.state[15] ^= (u32)share_index;
-    rc = tbt_crypto_xor_at(&tmp, (seq << 8) | 0x80u, payload, len);
-    tbt_memzero_explicit(&tmp, sizeof(tmp));
+    /* Copy only the schedule, fold share_index into the nonce word, and use
+     * the same counter space as body_xor. c is read-only here. */
+    memcpy(st, c->state, sizeof(st));
+    st[15] ^= (u32)share_index;
+    ctr = (seq << 8) | 0x80u;
+    st[12] = (u32)ctr;
+    st[13] = (u32)(ctr >> 32);
+    rc = tbt_crypto_xor_state(st, c->rounds, payload, len);
+    tbt_memzero_explicit(st, sizeof(st));
     return rc;
 }
 
@@ -957,7 +982,8 @@ int tbt_crypto_body_xor_flow(struct tbt_crypto_ctx *c, u64 sid, u64 seq,
                              bool parity, u16 share_index, u8 *payload,
                              u16 len)
 {
-    struct tbt_crypto_ctx tmp;
+    u32 st[16];
+    u64 ctr;
     int rc;
 
     if (c == NULL)
@@ -973,18 +999,26 @@ int tbt_crypto_body_xor_flow(struct tbt_crypto_ctx *c, u64 sid, u64 seq,
     if (!sid)
         return tbt_crypto_body_xor_share(c, seq, parity, share_index, payload,
                                          len);
+    if (sid > TBT_CRYPTO_SID_MAX)
+        return -EINVAL;
 
-    /* The nonce words are state[14] (low 32 bits) and state[15] (high 8 bits
-     * of the 40-bit sid, plus the parity share index). A 40-bit sid is
-     * injective into these 40 bits, so two flows never share a keystream. */
-    tmp = *c;
-    tmp.state[14] ^= (u32)sid;
-    tmp.state[15] ^= (u32)(sid >> 32);
+    /* The nonce words are state[14] (sid bits 0..31) and state[15]. The
+     * low 8 bits of state[15] carry sid bits 32..39, exactly as before. For
+     * PARITY, share_index occupies bits 8..23 and bit 31 is a domain marker,
+     * so (sid_hi, share_index) is injective and a nonzero-sid parity stream
+     * can never collide with the sid==0 share domain (share_index is in
+     * bits 0..15 there). DATA keeps the old mapping: its seq already names
+     * the share, and the parity counter bit separates it from PARITY. */
+    memcpy(st, c->state, sizeof(st));
+    st[14] ^= (u32)sid;
+    st[15] ^= (u32)(sid >> 32) & 0xffu;
     if (parity)
-        tmp.state[15] ^= (u32)share_index;
-    rc = tbt_crypto_xor_at(&tmp, (seq << 8) | (parity ? 0x80u : 0u),
-                           payload, len);
-    tbt_memzero_explicit(&tmp, sizeof(tmp));
+        st[15] ^= ((u32)share_index << 8) | 0x80000000u;
+    ctr = (seq << 8) | (parity ? 0x80u : 0u);
+    st[12] = (u32)ctr;
+    st[13] = (u32)(ctr >> 32);
+    rc = tbt_crypto_xor_state(st, c->rounds, payload, len);
+    tbt_memzero_explicit(st, sizeof(st));
     return rc;
 }
 
@@ -1117,7 +1151,7 @@ int tbt_crypto_resolve_key(bool local_key_wins,
 }
 
 /* ------------------------------------------------------------------------- */
-/* HELLO v9 authenticated generation.                                       */
+/* HELLO v9/v10 authenticated generation.                                   */
 
 static u64 tbt_rotl64(u64 x, unsigned int n)
 {
@@ -1150,6 +1184,7 @@ u64 tbt_siphash24(const u8 key[16], const u8 *msg, size_t len)
     u64 k1 = tbt_load64le(key + 8);
     u64 v[4];
     u64 b;
+    u64 out;
     size_t i = 0;
 
     v[0] = k0 ^ 0x736f6d6570736575ULL;
@@ -1189,46 +1224,85 @@ u64 tbt_siphash24(const u8 key[16], const u8 *msg, size_t len)
     tbt_sip_round(v);
     tbt_sip_round(v);
 
-    return v[0] ^ v[1] ^ v[2] ^ v[3];
+    out = v[0] ^ v[1] ^ v[2] ^ v[3];
+    tbt_memzero_explicit(v, sizeof(v));
+    tbt_memzero_explicit(&k0, sizeof(k0));
+    tbt_memzero_explicit(&k1, sizeof(k1));
+    tbt_memzero_explicit(&b, sizeof(b));
+    return out;
 }
 
 /* 128 tag bits from two SipHash keys: the two 128-bit halves of the 256-bit
  * PSK are independent, so an attacker has to forge both halves. No key
- * derivation and no second primitive, so there is nothing to get wrong. */
-static void tbt_hello_tag(const u8 *hello, const u8 key[TBT_CRYPTO_KEY_LEN],
-                          u8 out[TBT_CRYPTO_HELLO_TAG_LEN])
+ * derivation and no second primitive, so there is nothing to get wrong.
+ *
+ * The MAC input is path_id || hello[0..73]. path_id is in the clear outer
+ * record header, outside the HELLO body, so leaving it out let a captured
+ * body be replayed under any other carrier index. The fixed one-byte prefix
+ * keeps the binding unambiguous and does not change the body layout. */
+static void tbt_hello_tag_path(const u8 *hello, u8 path_id,
+                               const u8 key[TBT_CRYPTO_KEY_LEN],
+                               u8 out[TBT_CRYPTO_HELLO_TAG_LEN])
 {
-    tbt_store64le(out, tbt_siphash24(key, hello, TBT_CRYPTO_HELLO_TAG));
+    u8 msg[1 + TBT_CRYPTO_HELLO_TAG];
+
+    msg[0] = path_id;
+    memcpy(msg + 1, hello, TBT_CRYPTO_HELLO_TAG);
+    tbt_store64le(out, tbt_siphash24(key, msg, sizeof(msg)));
     tbt_store64le(out + 8,
-                  tbt_siphash24(key + 16, hello, TBT_CRYPTO_HELLO_TAG));
+                  tbt_siphash24(key + 16, msg, sizeof(msg)));
+    tbt_memzero_explicit(msg, sizeof(msg));
+}
+
+void tbt_crypto_hello_auth_fill_path(u8 *hello, size_t len, u64 epoch,
+                                     const u8 key[TBT_CRYPTO_KEY_LEN],
+                                     u8 path_id)
+{
+    if (hello == NULL || len < TBT_CRYPTO_HELLO_AUTH_LEN)
+        return;
+
+    tbt_store64le(hello + TBT_CRYPTO_HELLO_EPOCH, epoch);
+    if (key != NULL)
+        tbt_hello_tag_path(hello, path_id, key,
+                           hello + TBT_CRYPTO_HELLO_TAG);
+    else
+        memset(hello + TBT_CRYPTO_HELLO_TAG, 0, TBT_CRYPTO_HELLO_TAG_LEN);
 }
 
 void tbt_crypto_hello_auth_fill(u8 hello[TBT_CRYPTO_HELLO_AUTH_LEN], u64 epoch,
                                 const u8 key[TBT_CRYPTO_KEY_LEN])
 {
-    if (hello == NULL)
-        return;
-
-    tbt_store64le(hello + TBT_CRYPTO_HELLO_EPOCH, epoch);
-    if (key != NULL)
-        tbt_hello_tag(hello, key, hello + TBT_CRYPTO_HELLO_TAG);
-    else
-        memset(hello + TBT_CRYPTO_HELLO_TAG, 0, TBT_CRYPTO_HELLO_TAG_LEN);
+    tbt_crypto_hello_auth_fill_path(hello, TBT_CRYPTO_HELLO_AUTH_LEN, epoch,
+                                    key, 0);
 }
 
-bool tbt_crypto_hello_auth_ok(const u8 *hello, size_t len,
-                              const u8 key[TBT_CRYPTO_KEY_LEN])
+bool tbt_crypto_hello_auth_ok_path(const u8 *hello, size_t len,
+                                   const u8 key[TBT_CRYPTO_KEY_LEN],
+                                   u8 path_id)
 {
     u8 want[TBT_CRYPTO_HELLO_TAG_LEN];
     u8 diff = 0;
+    u8 nonzero = 0;
     size_t i;
 
     if (hello == NULL || key == NULL || len < TBT_CRYPTO_HELLO_AUTH_LEN)
         return false;
 
-    tbt_hello_tag(hello, key, want);
+    tbt_hello_tag_path(hello, path_id, key, want);
     for (i = 0; i < TBT_CRYPTO_HELLO_TAG_LEN; i++)
+    {
+        nonzero |= hello[TBT_CRYPTO_HELLO_TAG + i];
         diff |= (u8)(hello[TBT_CRYPTO_HELLO_TAG + i] ^ want[i]);
+    }
     tbt_memzero_explicit(want, sizeof(want));
-    return diff == 0;
+    /* A zero tag means "no PSK was configured on the sender"; it must never
+     * compare equal to a computed tag, even if a key somehow produced one.
+     * The check is folded into the constant-time result, not an early exit. */
+    return diff == 0 && nonzero != 0;
+}
+
+bool tbt_crypto_hello_auth_ok(const u8 *hello, size_t len,
+                              const u8 key[TBT_CRYPTO_KEY_LEN])
+{
+    return tbt_crypto_hello_auth_ok_path(hello, len, key, 0);
 }

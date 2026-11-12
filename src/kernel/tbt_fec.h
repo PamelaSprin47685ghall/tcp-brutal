@@ -360,8 +360,10 @@ u32 tbt_fec_crc32c(u32 seed, const void *data, size_t len);
 #ifndef __KERNEL__
 /* Host-only halves of the CRC32C contract. The public call above dispatches
  * to the instruction path when the CPU has one, and to the portable table
- * otherwise. The host tests compare the two bit for bit; the module keeps
- * only crc32c(). */
+ * otherwise. The table is compile-time and the instruction probe is cached
+ * atomically, so every function here may be called from several threads.
+ * The host tests compare the two paths bit for bit; the module keeps only
+ * crc32c(). */
 u32 tbt_fec_crc32c_soft(u32 seed, const void *data, size_t len);
 u32 tbt_fec_crc32c_hw(u32 seed, const void *data, size_t len);
 int tbt_fec_crc32c_hw_available(void);
@@ -837,6 +839,11 @@ size_t tbt_fec_replay_bytes(u16 groups, u16 n, u16 m, u16 s, u16 k);
 #ifndef __KERNEL__
 /* Host allocation ledger: every tbt_fec_alloc/free pair must balance. */
 long tbt_fec_host_live_allocs(void);
+/* Host-only fault injection: fail the tbt_fec_alloc() call after `n`
+ * successful calls, once. A negative value disables injection. This lets a
+ * test drive an allocation-failure path deterministically (a failed codec
+ * band matrix must fail construction, not silently change the matrices). */
+void tbt_fec_host_alloc_fail_after(long n);
 #endif
 
 /* The FEC in-flight window in shares, derived from the effective K.
@@ -1847,6 +1854,14 @@ static inline u16 tbt_fec_tx_parity_count(u16 win_len, u16 n, u16 m,
     rows = win_len >= n ? m : (win_len < m ? win_len : m);
     if ((u16)(n + m) == 32 && rows < TBT_FEC_SCLC_UP_PARITY_FLOOR)
         rows = TBT_FEC_SCLC_UP_PARITY_FLOOR;
+    /* The floor is a repair goal, never rows the codec did not build. A
+     * 32-share split with m < 10 cannot meet it; emitting past m would read
+     * an uninitialised parity pointer and name a share index at or above
+     * n+m. Every wire shape gate refuses such a split, but the client and
+     * the host tests call this helper with raw n/m, so the bound belongs
+     * here. */
+    if (rows > m)
+        rows = m;
     return rows;
 }
 
@@ -2395,15 +2410,5 @@ struct tbt_fec_shape
     u64 base_pkt;
     u64 base_block;
 };
-
-struct tbt_session;
-struct tbt_fec_blk;
-
-/* Called only from w_fec_rx, the single writer of the estimator state. */
-void tbt_fec_est_recovered(struct tbt_session *sess, u16 group,
-                           struct tbt_fec_blk *b);
-void tbt_fec_est_requested(struct tbt_session *sess, u16 group, u64 block_id,
-                           u16 share);
-void tbt_fec_est_super_done(struct tbt_session *sess, u64 super);
 
 #endif /* _TBT_FEC_H */

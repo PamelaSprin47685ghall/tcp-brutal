@@ -63,12 +63,6 @@ typedef enum
     SC_TERM_ACC = 2
 } sc_term;
 
-typedef enum
-{
-    SC_MODEL_SYMMETRIC = 0,
-    SC_MODEL_SYSTEMATIC = 1
-} sc_model;
-
 typedef struct
 {
     int block;      /* variable nodes per coupling block, q*m; even, >= 16 */
@@ -100,27 +94,10 @@ typedef struct
     const int *owned;
 } sc_graph;
 
-typedef struct
-{
-    long unresolved;
-    long target;
-    long rounds;
-    long edge_visits;
-    long resolved;
-} sc_dec_stat;
-
 void sc_get_graph(const sc_code *c, sc_graph *out);
 
 /* Build a code.  Returns NULL and fills err[] on invalid parameters. */
 sc_code *sc_build(const sc_params *p, char *err, size_t errlen);
 void sc_free(sc_code *c);
-
-int sc_data_var(const sc_code *c, int k);
-int sc_encode(sc_code *c, uint8_t *code);
-int sc_verify(const sc_code *c, const uint8_t *code);
-sc_dec_stat sc_decode(sc_code *c, const uint8_t *recv, const uint8_t *erased,
-                      uint8_t *out, int target_data_only);
-int sc_systematic(const sc_code *c);
-const uint8_t *sc_known_bits(const sc_code *c);
 
 #endif /* _TBT_SC_LDPC_H */

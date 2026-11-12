@@ -58,6 +58,14 @@ static struct workqueue_struct *tbt_fec_free_wq;
  * the variable-size kmalloc caches. */
 static struct kmem_cache *tbt_fec_out_cache;
 #define TBT_FEC_OUT_SLAB_SIZE (sizeof(struct tbt_fec_out) + TBT_FEC_REC_MAX)
+/* Control records are sent by the same flush that feeds replay and by the
+ * TX work ahead of new shares. A stalled up direction can still accumulate
+ * them while DATA keeps arriving (an ACK per delivery advance, a NACK per
+ * repair round, an FBK per feedback period), so the list needs a bound of
+ * its own. The caps are far above a healthy burst: a full FEC block is at
+ * most 256 records and an ACK is a few dozen bytes. */
+#define TBT_FEC_OUT_CTL_MAX 1024u
+#define TBT_FEC_OUT_CTL_BYTES_MAX (256u * 1024u)
 static void tbt_fec_rx_blk_attach_locked(struct tbt_fec_rx *rx,
                                          struct tbt_fec_blk *b);
 static void tbt_fec_rx_codec_queue_locked(struct tbt_fec_rx *rx,
@@ -89,7 +97,11 @@ static void tbt_fec_codec_free_work(struct work_struct *w)
 static void *tbt_fec_codec_cache_alloc(void *ctx, size_t bytes)
 {
     (void)ctx;
-    return kvzalloc(bytes, GFP_KERNEL);
+    /* Only the small entry array: capacity is at most four entries, and the
+     * release side runs under spin_lock_bh(&rx->lock) when a retired cache
+     * drains, where a sleeping free is illegal. Plain kzalloc/kfree keeps
+     * that path atomic-safe. */
+    return kzalloc(bytes, GFP_KERNEL);
 }
 
 static void tbt_fec_codec_cache_release(void *ctx, void *ptr,
@@ -102,14 +114,16 @@ static void tbt_fec_codec_cache_release(void *ctx, void *ptr,
         return;
     if (kind == TBT_FEC_CODEC_CACHE_MEM_SLOTS)
     {
-        kvfree(ptr);
+        kfree(ptr);
         return;
     }
-    if (!in_atomic() && !irqs_disabled())
-    {
-        tbt_fec_grouped_free(ptr);
-        return;
-    }
+    /* A codec is vmalloc-backed and its free may sleep. Every cache call
+     * (get() eviction, the last put() of a retired entry, destroy()) can run
+     * under spin_lock_bh(&rx->lock) from carrier RX/w_fec_rx context, and
+     * in_atomic()/irqs_disabled() cannot detect that: with PREEMPT_COUNT=n
+     * in_atomic() is always false under spin_lock_bh. Defer unconditionally;
+     * the small work request is the only allocation, and it is atomic-safe.
+     */
     r = kmalloc(sizeof(*r), GFP_ATOMIC);
     if (!r || !tbt_fec_free_wq)
     {
@@ -171,13 +185,12 @@ static void tbt_fec_codec_cache_free_obj(struct tbt_fec_codec_cache *c)
 {
     if (!c)
         return;
+    /* destroy() now owns the whole hand-off: with every entry unreferenced
+     * it frees the slots and calls release(c); otherwise the last put()
+     * does. No caller-side test of c->retiring is safe here: a concurrent
+     * last put() may already have freed the object. */
     c->free_self = 1;
     tbt_fec_codec_cache_destroy(c);
-    if (!c->retiring)
-    {
-        c->free_self = 0;
-        kfree(c);
-    }
 }
 
 static void tbt_fec_codec_key_fill(struct tbt_fec_codec_key *k,
@@ -462,12 +475,81 @@ void tbt_fec_out_kick(struct tbt_session *sess)
     mod_delayed_work(TBT_WQ, &sess->fec_drain_work, 0);
 }
 
+/* The record type of a queued control record. Locally built records always
+ * carry a full header; 0 (not a valid FEC type) marks a malformed one. */
+static u8 tbt_fec_out_ctl_type(const struct tbt_fec_out *o)
+{
+    struct tbt_fec_hdr h;
+
+    if (o->len < TBT_FEC_HDR_LEN || tbt_fec_hdr_unpack(o->data, &h))
+        return 0;
+    return h.type;
+}
+
+/* True when one more control record of `len` bytes would exceed a cap. The
+ * caller holds fec_out_lock. */
+static bool tbt_fec_out_ctl_over(const struct tbt_session *sess, u16 len)
+{
+    if (sess->fec_out_ctl_depth >= TBT_FEC_OUT_CTL_MAX)
+        return true;
+    if (sess->fec_out_ctl_bytes > TBT_FEC_OUT_CTL_BYTES_MAX)
+        return true;
+    return (u32)len > TBT_FEC_OUT_CTL_BYTES_MAX - sess->fec_out_ctl_bytes;
+}
+
+/* Make room for the control record being queued: type `type`, `len` bytes.
+ * The caller holds fec_out_lock. The queue is FIFO, so the oldest record
+ * that can be lost without stalling the link goes first:
+ *
+ *   - CFG installs a shape and is never dropped; the initial handshake is
+ *     what lets any share flow at all. Its count is the INIT retry bound
+ *     (six per plane), so admitting one past the cap is bounded.
+ *   - An ACK is the only control record with no retry: it carries the
+ *     cumulative delivery frontier and the credit that reopens the sender's
+ *     window. A dropped ACK can stop delivery and therefore the next ACK,
+ *     so an old ACK is replaced only by a newer ACK, whose frontier, credit
+ *     and byte count are cumulative.
+ *   - FBK, NACK and empty markers are retried by their own cadence (FBK
+ *     tick, NACK scan, receiver re-NACK), so they are the normal victims.
+ *
+ * Returns false when the new record cannot be admitted; its producer
+ * retries on its own cadence (NACK/FBK) instead of growing the queue.
+ * ACKs and CFGs are admitted past the cap when nothing droppable is left,
+ * so credit and the announcement cannot stall; that excess is bounded by
+ * the few pinned records. */
+static bool tbt_fec_out_ctl_room(struct tbt_session *sess, u8 type, u16 len)
+{
+    while (tbt_fec_out_ctl_over(sess, len))
+    {
+        struct tbt_fec_out *pos, *victim = NULL;
+        u8 vtype;
+
+        list_for_each_entry(pos, &sess->fec_out_ctl, node)
+        {
+            vtype = tbt_fec_out_ctl_type(pos);
+            if (vtype == TBT_FEC_CFG)
+                continue;
+            if (vtype == TBT_FEC_ACK && type != TBT_FEC_ACK)
+                continue;
+            victim = pos;
+            break;
+        }
+        if (!victim)
+            break;
+        tbt_fec_out_free(sess, victim);
+    }
+    if (!tbt_fec_out_ctl_over(sess, len))
+        return true;
+    return type == TBT_FEC_ACK || type == TBT_FEC_CFG;
+}
+
 static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
                             const u8 *buf, u16 len, bool control, bool replay,
                             u64 stamp_ns, struct tbt_fec_flow *flow)
 {
     struct tbt_fec_out *o;
     struct tbt_fec_tx *owner = flow ? flow->tx : NULL;
+    u8 ctype = 0;
     s64 queued, bytes;
     bool first = false;
 
@@ -529,6 +611,7 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
         {
             o->block_id = h.block_id;
             o->sid = h.sid;
+            ctype = h.type;
         }
     }
     o->stamp_ns = stamp_ns;
@@ -579,31 +662,55 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
     }
     if (control)
     {
-        list_add(&o->node, &sess->fec_out_ctl);
+        /* FIFO: a control record that was queued first is written first,
+         * so a newer ACK cannot overtake the NACK/CFG it followed and a
+         * bounded overflow drops the stalest record. */
+        if (!tbt_fec_out_ctl_room(sess, ctype, len))
+        {
+            spin_unlock(&sess->fec_out_lock);
+            tbt_fec_out_put(o);
+            return -ENOSPC;
+        }
+        list_add_tail(&o->node, &sess->fec_out_ctl);
         sess->fec_out_ctl_depth++;
         sess->fec_out_ctl_bytes += len;
     }
     else if (replay)
     {
-        struct tbt_fec_out *pos;
-        bool placed = false;
+        struct tbt_fec_out *last = NULL;
 
         /* Frontier first: a later super-block's repair must not sit ahead
          * of the block that holds the peer's ACK frontier. fix24's far had
          * an 8 MiB replay queue and the frontier's repair waited 6.13 s, so
          * the TX stall timer reset the stream. Within one block the NACK
          * order is kept. */
-        list_for_each_entry(pos, &sess->fec_out_replay, node)
-        {
-            if (pos->block_id > o->block_id)
-            {
-                list_add_tail(&o->node, &pos->node);
-                placed = true;
-                break;
-            }
-        }
-        if (!placed)
+        if (!list_empty(&sess->fec_out_replay))
+            last = list_last_entry(&sess->fec_out_replay,
+                                   struct tbt_fec_out, node);
+        /* A repair burst names non-decreasing block ids, so the new record
+         * is usually at or beyond the tail: append in O(1) instead of
+         * walking up to ~7.8k nodes under fec_out_lock. Only an out-of-order
+         * block pays the scan; equal ids still append behind their peers,
+         * exactly what the scan below does when no greater id exists. */
+        if (!last || last->block_id <= o->block_id)
             list_add_tail(&o->node, &sess->fec_out_replay);
+        else
+        {
+            struct tbt_fec_out *pos;
+            bool placed = false;
+
+            list_for_each_entry(pos, &sess->fec_out_replay, node)
+            {
+                if (pos->block_id > o->block_id)
+                {
+                    list_add_tail(&o->node, &pos->node);
+                    placed = true;
+                    break;
+                }
+            }
+            if (!placed)
+                list_add_tail(&o->node, &sess->fec_out_replay);
+        }
     }
     else
     {
@@ -2617,6 +2724,16 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
             max_unacked = hard;
         if (mem < TBT_FEC_MEM_PAUSE_KB && tx->replay)
             tbt_fec_replay_shrink(tx->replay, true, 0, &tx->replay_lock);
+        /* Hard memory floor: open no new block while at least two blocks are
+         * still unacknowledged. This never stops inside a block, because a
+         * partial block is invisible to the receiver's ACK; the retry is
+         * re-armed and the ACK that frees a block runs the pump again. */
+        if (mem < TBT_FEC_MEM_HARD_KB && unacked >= 2 && tx->fill == 0 &&
+            !tbt_fec_tx_block_dirty(tx))
+        {
+            tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
+            break;
+        }
         if (unacked >= max_unacked && tx->fill == 0 &&
             !tbt_fec_tx_block_dirty(tx))
         {
@@ -4090,6 +4207,38 @@ static noinline void tbt_fec_deliver_est_fold(struct tbt_session *sess,
 static void tbt_fec_rx_fin_publish(struct tbt_stream *st,
                                    struct tbt_fec_rx *rx);
 
+/* Feed the SC-LDPC controller a block that became ready without a decode
+ * attempt. A block whose DATA shares all arrived is marked ready by the
+ * carrier placement path and never reaches tbt_fec_rx_decode_one(), the only
+ * other block_sample() caller. Without these zero-erasure samples the
+ * controller sees lossy blocks only, and on a clean link it never leaves
+ * COLD. Runs in w_fec_rx under rx->lock, the controller's single writer;
+ * wake_sampled keeps one sample per block. */
+static void tbt_fec_rx_sample_ready_locked(struct tbt_fec_rx *rx, u64 s)
+{
+    u16 group;
+
+    if (!rx->sclc || !rx->ctl.ready)
+        return;
+    for (group = 0; group < rx->groups; group++)
+    {
+        struct tbt_fec_blk *b = tbt_fec_rx_blk(rx, group, s);
+        u16 real;
+
+        if (!b->used || b->block_id != s || !b->ready || b->empty ||
+            b->wake_sampled)
+            continue;
+        real = tbt_fec_blk_real_len(rx, group, b);
+        if (!real)
+            continue;
+        b->wake_sampled = 1;
+        /* Every real share is present, so E is 0; S counts the parity rows
+         * that arrived beyond the DATA count; the first attempt cannot have
+         * failed. */
+        tbt_fec_adapt_sclc_block_sample(&rx->ctl, 0, b->nparity, true, real);
+    }
+}
+
 static int tbt_fec_deliver_ready(struct tbt_session *sess,
                                  struct tbt_fec_flow *f)
 {
@@ -4151,6 +4300,8 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess,
                 end = bend;
         }
         ready = tbt_fec_super_ready_locked(rx, s);
+        if (ready)
+            tbt_fec_rx_sample_ready_locked(rx, s);
         if (!ready)
         {
             /* Name the group whose block holds the whole stream. This is a
@@ -5847,17 +5998,37 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess,
      * zero-window estimate; the TX side publishes the peer FBK below. */
     if (o.pause_idle && !o.sent_win && f->tx && f->tx->peer_est_valid)
         return;
-    a->epoch = rx->epoch;
-    a->n = rx->n;
-    a->m = rx->m;
-    a->groups = rx->groups;
-    if (sc)
-        a->class = tbt_fec_adapt_sclc_rate_pct(rx->n, rx->m);
-    else
     {
-        a->class = tbt_fec_adapt_class_of_shape(rx->n, rx->m);
-        if (a->class == 0xff)
-            a->class = 3;
+        u32 epoch;
+        u16 an, am, ag;
+        u8 class;
+
+        /* rx->n/m/groups move on a block-shape publish under rx->lock, and
+         * sess->adapt.n/m/groups/class are also stored by the TX codec
+         * switch (tbt_fec_tx_codec_tick) under sess->lock. Snapshot the
+         * receive view, then publish under that same writer lock so the two
+         * work items never store to one field concurrently. */
+        spin_lock_bh(&rx->lock);
+        epoch = rx->epoch;
+        an = rx->n;
+        am = rx->m;
+        ag = rx->groups;
+        spin_unlock_bh(&rx->lock);
+        if (sc)
+            class = tbt_fec_adapt_sclc_rate_pct(an, am);
+        else
+        {
+            class = tbt_fec_adapt_class_of_shape(an, am);
+            if (class == 0xff)
+                class = 3;
+        }
+        spin_lock(&sess->lock);
+        a->epoch = epoch;
+        a->n = an;
+        a->m = am;
+        a->groups = ag;
+        a->class = class;
+        spin_unlock(&sess->lock);
     }
     a->p_ppm = o.p_ppm;
     a->p_win_ppm = o.p_win_ppm;
@@ -6052,6 +6223,28 @@ static u16 tbt_fec_sclc_rec_slots(const struct tbt_fec_cfg *cfg, u16 shares)
     return max_n > side ? max_n : side;
 }
 
+/* Block 0 is a legal id, so placing it leaves highest_block at its initial
+ * 0 and the scalar freshness test cannot see it. Its slot is block_id %
+ * slots == 0 in every group; a placed block owns that slot. Any later
+ * block raises highest_block, so block 0's slots are the only state the
+ * scalar test can miss. The caller holds rx->lock. */
+static bool tbt_fec_rx_block0_seen_locked(const struct tbt_fec_rx *rx)
+{
+    u32 g;
+
+    if (!rx->blk || !rx->slots || !rx->groups)
+        return false;
+    for (g = 0; g < rx->groups; g++)
+    {
+        const struct tbt_fec_blk *b =
+            &rx->blk[(size_t)g * rx->slots];
+
+        if (b->used && b->block_id == 0)
+            return true;
+    }
+    return false;
+}
+
 static int tbt_fec_rx_apply_init(struct tbt_session *sess,
                                  struct tbt_fec_flow *f,
                                  const struct tbt_fec_cfg *cfg)
@@ -6063,7 +6256,7 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     struct tbt_fec_codec_entry *old_build_q[TBT_FEC_CODEC_CACHE_MAX];
     u8 old_build_q_n;
     struct tbt_fec_codec_cache *new_cache = NULL, *old_cache;
-    struct tbt_fec_grouped *codec, *old_codec;
+    struct tbt_fec_grouped *codec = NULL, *old_codec;
     struct tbt_fec_blk *blk, *old_blk;
     u64 *req_ns, *req_block, *old_req_ns, *old_req_block;
     u8 *rec, *old_rec;
@@ -6071,9 +6264,17 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     u32 slots, total, old_total;
     u16 shares = (u16)(cfg->n + cfg->m);
     u16 extra;
-    bool same, fresh, block_code = false;
+    bool same, fresh, block_code = false, standalone_codec = false;
 
     if (!rx)
+        return -EINVAL;
+    /* The protocol's first committed generation is 1: tbt_fec_tx_send_init()
+     * starts there and the sender's CFG_ACK gate accepts only that epoch. A
+     * zero epoch would leave `fresh` true after a successful install, so a
+     * later epoch-0 INIT could swap the RX geometry again, retire a second
+     * SC-LDPC cache into the single codec_cache_old slot, or free state the
+     * first install committed. Refuse it before any arena is touched. */
+    if (!cfg->epoch)
         return -EINVAL;
     /* On the far side the flow mask came from the peer's OPEN, so the INIT
      * shape must name the same peer group count. The near side's flow mask is
@@ -6093,9 +6294,17 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
            rx->shape.k == cfg->k && rx->shape.d == cfg->d &&
            rx->shape.codec_variant == cfg->codec_variant &&
            rx->shape.L == cfg->L && rx->shape.block == cfg->block &&
-           rx->shape.rate_ppm == cfg->rate_ppm;
+           rx->shape.rate_ppm == cfg->rate_ppm &&
+           rx->codec_seed == cfg->seed;
     fresh = rx->next_deliver == 0 && rx->next_super == 0 &&
-            rx->highest_block == 0 && rx->epoch == 0;
+            rx->highest_block == 0 && rx->epoch == 0 &&
+            !tbt_fec_rx_block0_seen_locked(rx);
+    if (same)
+        /* The ACK below commits this generation. Recording it here makes
+         * `fresh` false after an acknowledged INIT even when the geometry
+         * already matched, so a later announcement cannot re-swap the RX
+         * arena and free state this side has acknowledged. */
+        rx->epoch = cfg->epoch;
     spin_unlock_bh(&rx->lock);
     if (same)
         return 0;
@@ -6151,6 +6360,9 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
                                         TBT_FEC_S, cfg->d, cfg->seed);
         if (!codec)
             return -ENOMEM;
+        /* This codec is owned here until the swap installs it; the cache
+         * path above owns codecs through its entries. */
+        standalone_codec = true;
     }
 
     slots = TBT_FEC_RX_SLOTS;
@@ -6284,6 +6496,13 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
             tbt_fec_codec_cache_put(old_target);
         for (i = 0; i < old_build_q_n; i++)
             tbt_fec_codec_cache_put(old_build_q[i]);
+        /* A plane that was not SCLC built its codec directly, with neither
+         * an entry nor a cache owning it. The swap above sets rx->sclc, so
+         * plane_free() frees the caches and never this pointer; release it
+         * here. An SCLC plane always has old_entry, and its codec is then
+         * owned by that entry. */
+        if (!old_entry)
+            tbt_fec_grouped_free(old_codec);
         /* The old object stays alive until the plane dies: a block may still
          * hold one of its entries, and put() dereferences entry->cache. */
         if (!rx->codec_cache_old)
@@ -6311,6 +6530,8 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     return 0;
 
 fail:
+    if (standalone_codec)
+        tbt_fec_grouped_free(codec);
     if (entry)
         tbt_fec_codec_cache_put(entry);
     tbt_fec_codec_cache_free_obj(new_cache);
@@ -6394,27 +6615,37 @@ static int tbt_fec_rx_on_cfg(struct tbt_session *sess,
 }
 
 
-/* One pass over this flow's groups*slots. Called only by w_fec_rx. Returns
- * the number of blocks decoded, so the caller can yield after a whole-block
- * decode instead of running several of them before it delivers the first
- * one. */
+/* Decode the delivery frontier: one slot per group. Called only by w_fec_rx.
+ * Returns the number of blocks decoded, so the caller can yield after one
+ * round instead of running several blocks before it delivers the first. */
 static int tbt_fec_rx_pass_flow(struct tbt_session *sess,
                                 struct tbt_fec_flow *f)
 {
     struct tbt_fec_rx *rx = f->rx;
+    u64 s = READ_ONCE(rx->next_super);
     u16 group, slot;
     int decoded = 0;
 
+    if (!rx->slots)
+        return 0;
+    /* Only a block of the delivery frontier can be decoded: a later block
+     * cannot be delivered before next_super, and decoding it early spends a
+     * block's CPU ahead of the one the application waits for. A block id
+     * maps to exactly one slot per group (block_id % slots), so the frontier
+     * is the only slot worth probing; the other groups*slots - groups probes
+     * took rx->lock and zeroed the 1 KiB decode snapshot for nothing. The
+     * snapshot may move if a carrier rebases the window concurrently;
+     * decode_one rechecks block_id against next_super under rx->lock. */
+    slot = (u16)(s % rx->slots);
     for (group = 0; group < rx->groups; group++)
-        for (slot = 0; slot < rx->slots; slot++)
-        {
-            if (tbt_fec_rx_decode_one(sess, f, group, slot))
-                decoded++;
-            /* A grouped block code decodes one group per slot and a group
-             * block can run tens of milliseconds on the target CPU.  Let
-             * the carrier works and the timer softirq run between them. */
-            cond_resched();
-        }
+    {
+        if (tbt_fec_rx_decode_one(sess, f, group, slot))
+            decoded++;
+        /* A grouped block code decodes one group per slot and a group block
+         * can run tens of milliseconds on the target CPU. Let the carrier
+         * works and the timer softirq run between them. */
+        cond_resched();
+    }
     return decoded;
 }
 
@@ -6465,7 +6696,15 @@ static void tbt_fec_rx_work_body(struct tbt_session *sess)
          * behind the decode and held the delivery cursor for hundreds of
          * milliseconds.  The re-arm below runs the next round at once. */
         if (decoded)
+        {
+            /* Delivery may have advanced next_super after this pass sampled
+             * its slots, so the new frontier was never probed. `again` only
+             * carries a carrier placement's evidence, and an earlier round
+             * may already have consumed the new frontier's. Re-arm at once
+             * instead of waiting for the 10/100 ms poll. */
+            again = true;
             break;
+        }
     } while (again && ++rounds < 4);
     if (again)
         tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
@@ -6680,7 +6919,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
     u16 shares, group, share, slot;
     u64 block_seq0 = 0;
     bool wake = false, rebase;
-    bool fresh = false;
+    bool fresh = false, late_seen = false;
 
     if (!rx || len < TBT_FEC_HDR_LEN)
         return -EPROTO;
@@ -6721,66 +6960,69 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
                 seq0 = h.seq;
             if (tbt_fec_rx_late_fast(rx, &h))
             {
-                if (h.type == TBT_FEC_DATA && shape_ok)
-                    tbt_fec_rx_late_credit(rx, h.type, h.block_id, cg,
-                                           csh, h.n, h.m, false);
-                else
-                    atomic64_inc(&sess->fec_late_unknown);
-                atomic64_inc(&sess->fec_late_share);
-                return 0;
+                /* Defer the credit: it adjusts the loss estimator, so it
+                 * must not act on a header alone. Decrypt and payload CRC
+                 * below decide whether this share is real. */
+                late_seen = true;
             }
-            spin_lock_bh(&rx->lock);
-            /* The shape fields are read under rx->lock: w_fec_rx may apply a
-             * switch between the header check and this prefilter. A record
-             * whose shape is not the current one is left to the placement
-             * path, which decides between late, epoch_bad and rollback. */
-            if (shape_ok)
+            else
             {
-                u64 block_end = seq0 + (u64)rx->groups * h.n;
-
-                /* A whole block behind the delivery frontier is gone: count
-                 * the share and return before decrypting, placing, or
-                 * handing anything to the stream. */
-                if (tbt_fec_rx_block_late(
-                        READ_ONCE(rx->rebase_pending),
-                        rx->deliver_bytes != 0 || rx->deliver_partial, next,
-                        h.block_id, block_end,
-                        READ_ONCE(rx->next_deliver)))
-                    late = true;
-            }
-            if (!late && shape_ok &&
-                h.block_id >= next && h.block_id < next + rx->slots)
-            {
-                b = &rx->blk[(size_t)cg * rx->slots +
-                             (h.block_id % rx->slots)];
-                if (b->used && b->block_id == h.block_id)
+                spin_lock_bh(&rx->lock);
+                /* The shape fields are read under rx->lock: w_fec_rx may
+                 * apply a switch between the header check and this
+                 * prefilter. A record whose shape is not the current one is
+                 * left to the placement path, which decides between late,
+                 * epoch_bad and rollback. */
+                if (shape_ok)
                 {
-                    if (b->empty)
-                    {
-                        /* A repeated marker is a duplicate; a DATA or real
-                         * PARITY for an empty block stays -EPROTO below. */
-                        if (h.type == TBT_FEC_PARITY && h.win_len == 0)
-                            dup = true;
-                    }
-                    else if (b->ready)
-                    {
+                    u64 block_end = seq0 + (u64)rx->groups * h.n;
+
+                    /* A whole block behind the delivery frontier is gone:
+                     * count the share and return before placing, or handing
+                     * anything to the stream. The estimator credit for it
+                     * waits until the payload is authenticated below. */
+                    if (tbt_fec_rx_block_late(
+                            READ_ONCE(rx->rebase_pending),
+                            rx->deliver_bytes != 0 || rx->deliver_partial,
+                            next, h.block_id, block_end,
+                            READ_ONCE(rx->next_deliver)))
                         late = true;
-                    }
-                    else if (b->n == h.n && b->m == h.m &&
-                             h.type == TBT_FEC_DATA && b->dpresent[csh])
+                }
+                if (!late && shape_ok &&
+                    h.block_id >= next && h.block_id < next + rx->slots)
+                {
+                    b = &rx->blk[(size_t)cg * rx->slots +
+                                 (h.block_id % rx->slots)];
+                    if (b->used && b->block_id == h.block_id)
                     {
-                        dup = true;
-                    }
-                    else if (h.type == TBT_FEC_PARITY && h.win_len &&
-                             b->n == h.n && b->m == h.m &&
-                             csh >= h.n &&
-                             b->ppresent[csh - h.n])
-                    {
-                        dup = true;
+                        if (b->empty)
+                        {
+                            /* A repeated marker is a duplicate; a DATA or
+                             * real PARITY for an empty block stays -EPROTO
+                             * below. */
+                            if (h.type == TBT_FEC_PARITY && h.win_len == 0)
+                                dup = true;
+                        }
+                        else if (b->ready)
+                        {
+                            late = true;
+                        }
+                        else if (b->n == h.n && b->m == h.m &&
+                                 h.type == TBT_FEC_DATA && b->dpresent[csh])
+                        {
+                            dup = true;
+                        }
+                        else if (h.type == TBT_FEC_PARITY && h.win_len &&
+                                 b->n == h.n && b->m == h.m &&
+                                 csh >= h.n &&
+                                 b->ppresent[csh - h.n])
+                        {
+                            dup = true;
+                        }
                     }
                 }
+                spin_unlock_bh(&rx->lock);
             }
-            spin_unlock_bh(&rx->lock);
             if (debug >= 3 && (dup || late))
                 pr_info("tbtun: fec %s share block=%llu group=%u share=%u type=%u win_len=%u epoch=%u next=%llu\n",
                         late ? "late" : "dup", h.block_id, cg, csh, h.type,
@@ -6791,12 +7033,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
                 return 0;
             }
             if (late)
-            {
-                tbt_fec_rx_late_credit(rx, h.type, h.block_id, cg, csh,
-                                       h.n, h.m, false);
-                atomic64_inc(&sess->fec_late_share);
-                return 0;
-            }
+                late_seen = true;
         }
         /* Header framing is trusted here; decrypt DATA/PARITY before the
          * payload CRC, which covers the clear bytes (T0 §1.3, §2.2). The rx
@@ -6828,6 +7065,21 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
             atomic64_inc(&sess->fec_payload_crc_fail);
             return 0;
         }
+    }
+    if (late_seen)
+    {
+        /* A late share may cancel a recorded miss in the loss estimator, so
+         * it is credited only after the body decrypted and its payload CRC
+         * matched. A forged header that names a block/share but carries
+         * garbage can no longer shrink the estimate; the non-DATA branch
+         * keeps the old "unknown" accounting for parity/markers. */
+        if (h.type == TBT_FEC_DATA)
+            tbt_fec_rx_late_credit(rx, h.type, h.block_id, h.reserved,
+                                   h.share_index, h.n, h.m, false);
+        else
+            atomic64_inc(&sess->fec_late_unknown);
+        atomic64_inc(&sess->fec_late_share);
+        return 0;
     }
     if (h.type == TBT_FEC_ACK)
     {
@@ -6925,8 +7177,6 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
              * "not measured yet", not a zero-latency path. */
             if (a.rtt_us)
                 WRITE_ONCE(tx->rtt_us, a.rtt_us);
-            tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
-            tbt_tx_wake(sess);
         }
         if (st)
         {
@@ -6949,6 +7199,17 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
                 }
                 spin_unlock(&sess->lock);
             }
+        }
+        /* Arm only after st->tx_ack moved. The pump's FIN gate compares
+         * tx_ack with tx_seq: a wake issued before the store can run the
+         * pump against the old frontier, skip the FIN this ACK just
+         * released, and leave it waiting for the next FBK tick. The ack
+         * store above takes sess->lock, which is also the lock every
+         * reader of the FIN gate relies on for a stable snapshot. */
+        if (tx)
+        {
+            tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+            tbt_tx_wake(sess);
         }
         if (st)
             tbt_stream_put(st);
@@ -8094,6 +8355,14 @@ void tbt_fec_data_module_exit(void)
     if (tbt_fec_free_wq)
     {
         rcu_barrier();
+        /* A flow free runs on this queue and retires its codec caches, and
+         * every codec free is now deferred onto the same queue so it is safe
+         * under spin_lock_bh(). The first flush runs the flow frees and
+         * queues their codec frees; the second drains that generation.
+         * destroy_workqueue() would reject (and leak) a work queued while it
+         * drains. */
+        flush_workqueue(tbt_fec_free_wq);
+        flush_workqueue(tbt_fec_free_wq);
         destroy_workqueue(tbt_fec_free_wq);
         tbt_fec_free_wq = NULL;
     }
@@ -8525,6 +8794,10 @@ tbt_fec_rx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     rx->base_pkt = 0;
     rx->base_block = 0;
     rx->epoch = 0;
+    /* Every RX codec built here uses this seed, SCLC or RLNC. FEC INIT
+     * compares it against the announced seed before accepting a shape; a
+     * zero here would make the first RLNC INIT look like a seed change. */
+    rx->codec_seed = tbt_fec_base_nonce(sess);
     rx->shape.n = n;
     rx->shape.m = m;
     rx->shape.groups = groups;
@@ -8583,7 +8856,6 @@ tbt_fec_rx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
 
         rx->sclc = true;
         rx->sclc_shape = *sclc;
-        rx->codec_seed = tbt_fec_base_nonce(sess);
         rx->m_target = m;
         rx->codec_cache = tbt_fec_codec_cache_new_obj(sclc->variant);
         if (!rx->codec_cache)

@@ -24,6 +24,12 @@
  *   - batch b owns a contiguous byte region in every share.  Its size is
  *     chosen so every data share is filled exactly by the group block and
  *     every parity share stays within S bytes.
+ * A batch decode is accepted only after a residual pass over the check
+ * rows: a received parity symbol must equal the value the recovered data
+ * implies, so a foreign graph seed or corrupted parity fails the batch
+ * instead of completing a share.  The decoder scratch (including the dense
+ * core matrix) is allocated on the first decode, not by the constructor,
+ * so a transmit codec never carries it; see tbt_sc_ldpc_gf16.h.
  * The peel and the GF(16) core elimination therefore run once per batch
  * while four planes carry all 64 lanes.  `TBT_SCLC_MAP_INTERLEAVED` keeps
  * the legacy symbol rotation for the host A/B test.
@@ -53,8 +59,9 @@ enum tbt_sclc_mapping
 
 /* One group FEC block.  n + m <= 256, S is the share payload size.
  * block and L are the SC-IRA graph parameters.  The codeword count follows
- * from n and the share size: C = n*2S / (L*block/2).  Phase 1 uses
- * block=128, L=16, so C = n*16. */
+ * from n and the share size: C = n*2S / (L*block/2).  The production shape
+ * is block=64, L=8 with S=1024, so C = n*8 (TBT_FEC_SCLC_BLOCK_UP /
+ * TBT_FEC_SCLC_L_UP). */
 struct tbt_sclc_params
 {
     u16 n;        /* data shares per group */

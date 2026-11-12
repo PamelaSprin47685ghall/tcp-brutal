@@ -150,6 +150,8 @@ struct tbt_fec_adapt_sclc_sample
     u64 bucket_start_ns;
     u16 sent;
     u16 miss;
+    u32 p_block_ppm; /* miss/sent at push or after a late correction */
+    u32 p_before_ppm; /* EWMA before this sample; suffix replay start */
     u8 bucket;
     u8 used;
 };
@@ -238,8 +240,9 @@ void tbt_fec_adapt_sclc_est_recompute(struct tbt_fec_adapt_sclc_est *e);
 /* Remove one miss from an exact bucket; returns false when it has none. */
 bool tbt_fec_adapt_sclc_est_correct_miss(struct tbt_fec_adapt_sclc_est *e,
                                          u8 bucket);
-/* Correct one miss in the exact committed super-block. Replays the 64-super
- * EWMA ring so p_ewma matches the corrected history. */
+/* Correct one miss in the exact committed super-block. Replays the EWMA
+ * suffix from that sample so p_ewma matches the corrected history; the
+ * per-sample block ratios are cached, so the replay does no division. */
 bool tbt_fec_adapt_sclc_est_correct_super(struct tbt_fec_adapt_sclc_est *e,
                                           u64 super_id);
 

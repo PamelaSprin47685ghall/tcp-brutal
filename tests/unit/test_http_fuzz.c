@@ -48,6 +48,12 @@ static int failures;
 static unsigned long open_cases;
 static unsigned long open_feeds;
 
+/* A failure line must name the seed that reproduces it: TBT_HTTP_SEED
+ * reseeds the generator, so a hardcoded "seed=1" would point at the wrong
+ * stream. */
+#define FAIL_FMT "FAIL seed=0x%016llx case=%lu: "
+#define FAIL_ARGS (unsigned long long)fuzz_seed, case_no
+
 static u64 rnd64(void)
 {
     u64 x = rng_state;
@@ -71,7 +77,7 @@ static void check(int cond, const char *what)
         return;
     failures++;
     if (failures <= 20)
-        printf("FAIL seed=1 case=%lu: %s\n", case_no, what);
+        printf(FAIL_FMT "%s\n", FAIL_ARGS, what);
 }
 
 static int valid_status(int err)
@@ -302,7 +308,7 @@ static void open_feed(const u8 *stream, size_t len, size_t step,
     open_cases++;
     if (!buf)
     {
-        printf("FAIL seed=1 case=%lu: out of memory\n", case_no);
+        printf(FAIL_FMT "out of memory\n", FAIL_ARGS);
         exit(2);
     }
     memcpy(buf, stream, len);
@@ -329,7 +335,7 @@ static void open_feed(const u8 *stream, size_t len, size_t step,
         if (n > fed - pos)
         {
             failures++;
-            printf("FAIL seed=1 case=%lu: %s: consumed %zu of %zu\n", case_no,
+            printf(FAIL_FMT "%s: consumed %zu of %zu\n", FAIL_ARGS,
                    what, n, fed - pos);
             break;
         }
@@ -342,7 +348,7 @@ static void open_feed(const u8 *stream, size_t len, size_t step,
                 memcmp(rec.body, masks[records], TBT_OPEN_BODY_LEN))
             {
                 failures++;
-                printf("FAIL seed=1 case=%lu: %s: bad record %u\n", case_no,
+                printf(FAIL_FMT "%s: bad record %u\n", FAIL_ARGS,
                        what, records);
                 break;
             }
@@ -362,7 +368,7 @@ static void open_feed(const u8 *stream, size_t len, size_t step,
         if (!n)
         {
             failures++;
-            printf("FAIL seed=1 case=%lu: %s: no progress\n", case_no, what);
+            printf(FAIL_FMT "%s: no progress\n", FAIL_ARGS, what);
             break;
         }
     }
@@ -371,7 +377,7 @@ static void open_feed(const u8 *stream, size_t len, size_t step,
     if (want_proto ? !saw_proto : saw_proto)
     {
         failures++;
-        printf("FAIL seed=1 case=%lu: %s: PROTO verdict %d\n", case_no, what,
+        printf(FAIL_FMT "%s: PROTO verdict %d\n", FAIL_ARGS, what,
                saw_proto);
     }
     if (!want_proto)
@@ -380,21 +386,21 @@ static void open_feed(const u8 *stream, size_t len, size_t step,
         if (records != want_records)
         {
             failures++;
-            printf("FAIL seed=1 case=%lu: %s: decoded %u of %u records\n",
-                   case_no, what, records, want_records);
+            printf(FAIL_FMT "%s: decoded %u of %u records\n",
+                   FAIL_ARGS, what, records, want_records);
         }
         checks++;
         if (want_done != (tbt_http_rx_done(&rx) ? 1 : 0))
         {
             failures++;
-            printf("FAIL seed=1 case=%lu: %s: done=%d want %d\n", case_no,
+            printf(FAIL_FMT "%s: done=%d want %d\n", FAIL_ARGS,
                    what, tbt_http_rx_done(&rx), want_done);
         }
         checks++;
         if (want_done && pos != len)
         {
             failures++;
-            printf("FAIL seed=1 case=%lu: %s: done at %zu of %zu\n", case_no,
+            printf(FAIL_FMT "%s: done at %zu of %zu\n", FAIL_ARGS,
                    what, pos, len);
         }
     }
@@ -442,14 +448,14 @@ static void test_open_chunks(void)
             off = open_add_chunk(stream, sizeof(stream), off, rec, n);
             if (!off)
             {
-                printf("FAIL seed=1 case=%lu: OPEN chunk build\n", case_no);
+                printf(FAIL_FMT "OPEN chunk build\n", FAIL_ARGS);
                 exit(2);
             }
         }
         off = open_add_term(stream, sizeof(stream), off);
         if (!off)
         {
-            printf("FAIL seed=1 case=%lu: OPEN terminator build\n", case_no);
+            printf(FAIL_FMT "OPEN terminator build\n", FAIL_ARGS);
             exit(2);
         }
 
@@ -493,14 +499,13 @@ static void test_open_chunks(void)
                                  bad[c].wire_len);
             if (!off)
             {
-                printf("FAIL seed=1 case=%lu: hostile chunk build\n", case_no);
+                printf(FAIL_FMT "hostile chunk build\n", FAIL_ARGS);
                 exit(2);
             }
             off = open_add_term(stream, sizeof(stream), off);
             if (!off)
             {
-                printf("FAIL seed=1 case=%lu: hostile terminator build\n",
-                       case_no);
+                printf(FAIL_FMT "hostile terminator build\n", FAIL_ARGS);
                 exit(2);
             }
             for (step = 1; step <= 7; step++)
@@ -543,7 +548,7 @@ int main(void)
 
         if (!buf)
         {
-            printf("FAIL seed=1 case=%lu: out of memory\n", case_no);
+            printf(FAIL_FMT "out of memory\n", FAIL_ARGS);
             return 2;
         }
         for (j = 0; j < len; j++)

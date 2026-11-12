@@ -219,7 +219,7 @@ static void test_tunnel_nonce(void)
         " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
         " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-        " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+        " rx_reorder_bytes=67108864 tx_window_bytes=0 tx_retain_bytes=0"
         " carrier_stall_ms=0"
         " portblock=0-0 nonce=00112233445566778899aabbccddeeff\n";
     char text[TBT_LINE_MAX];
@@ -237,7 +237,7 @@ static void test_tunnel_nonce(void)
               " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
               " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
               " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-              " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+              " rx_reorder_bytes=67108864 tx_window_bytes=0 tx_retain_bytes=0"
               " carrier_stall_ms=0"
               " portblock=0-0 nonce=00000000000000000011223344556677\n");
 
@@ -253,7 +253,7 @@ static void test_tunnel_nonce(void)
               " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
               " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
               " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-              " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+              " rx_reorder_bytes=67108864 tx_window_bytes=0 tx_retain_bytes=0"
               " carrier_stall_ms=0"
               " portblock=0-0 nonce=00112233445566778899aabbccddeeff\n");
 
@@ -310,21 +310,21 @@ static void test_crypto_cfg(void)
         " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
         " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-        " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+        " rx_reorder_bytes=67108864 tx_window_bytes=0 tx_retain_bytes=0"
         " carrier_stall_ms=0 portblock=0-0\n";
     static const char *const canon_on =
         "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-        " n=4 m=1 fec=on adaptive=on mode=rlnc w=8 carriers=5 crypto=on crypto_key=-"
+        " n=4 m=1 fec=on adaptive=off mode=rlnc w=8 carriers=5 crypto=on crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
         " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-        " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+        " rx_reorder_bytes=67108864 tx_window_bytes=0 tx_retain_bytes=0"
         " carrier_stall_ms=0 portblock=0-0\n";
     static const char *const canon_on_crypto_off =
         "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-        " n=4 m=1 fec=on adaptive=on mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " n=4 m=1 fec=on adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
         " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-        " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+        " rx_reorder_bytes=67108864 tx_window_bytes=0 tx_retain_bytes=0"
         " carrier_stall_ms=0 portblock=0-0\n";
     static const char *const key_hex =
         "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
@@ -360,13 +360,13 @@ static void test_crypto_cfg(void)
 
         snprintf(want, sizeof(want), "%s",
                  "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-                 " n=4 m=1 fec=on adaptive=on mode=rlnc w=8 carriers=5"
+                 " n=4 m=1 fec=on adaptive=off mode=rlnc w=8 carriers=5"
                  " crypto=on crypto_key=");
         strncat(want, key_hex, sizeof(want) - strlen(want) - 1);
         strncat(want,
                 " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
                 " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-                " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+                " rx_reorder_bytes=67108864 tx_window_bytes=0 tx_retain_bytes=0"
                 " carrier_stall_ms=0 portblock=0-0\n",
                 sizeof(want) - strlen(want) - 1);
         roundtrip("crypto_key set", text, want);
@@ -414,9 +414,11 @@ static void test_crypto_cfg(void)
     refuse("crypto_key empty", text, TBT_PARSE_EINVAL, "crypto_key", "empty");
 }
 
-/* --- adaptive= (0.3.0): the control-law switch. It follows fec by default;
- * adaptive=on needs fec=on, and the configured n/m stay as the initial shape
- * and the upper hint (design §4.5). --------------------------------------- */
+/* --- adaptive=: the control-law switch. Only mode=sc-ldpc has a data-plane
+ * controller; on the GF(2) rlnc/grouped modes the effective value is
+ * normalized off so the canonical line never claims a controller that does
+ * not exist. adaptive=on needs fec=on, and the configured n/m stay as the
+ * initial shape on the mode=3 rate ladder (design §4.5). ------------------ */
 static void test_adaptive_cfg(void)
 {
     static const char *const base =
@@ -429,17 +431,27 @@ static void test_adaptive_cfg(void)
         " crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000"
         " drip_ms=1000 replay=8388608 tunnel_rate=0"
         " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=67108864"
-        " tx_window_bytes=67108864 tx_retain_bytes=0 carrier_stall_ms=0"
+        " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0"
         " portblock=0-0\n";
-    char text[TBT_LINE_MAX];
+    char text[TBT_LINE_MAX], buf[TBT_LINE_MAX * 2];
     struct tbt_cmd cmd;
     struct tbt_parse_error perr = { NULL, NULL };
 
-    /* The default follows fec: off for the legacy plane, on with FEC. */
+    /* The default follows the controller, not fec: off for the legacy plane
+     * and off for the controllerless GF(2) rlnc/grouped modes. */
     parse(base, &cmd, &perr);
     ok(cmd.cfg.adaptive == 0, "adaptive defaults off with fec=off", NULL);
     parse(base_on, &cmd, &perr);
-    ok(cmd.cfg.adaptive == 1, "adaptive defaults on with fec=on", NULL);
+    ok(cmd.cfg.adaptive == 0,
+       "adaptive defaults off for mode=rlnc (no controller)", NULL);
+    ok(parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=8 m=8"
+             " fec=on mode=grouped", &cmd, &perr) == 0 &&
+           cmd.cfg.mode == 2 && cmd.cfg.adaptive == 0,
+       "adaptive defaults off for mode=grouped (no controller)", NULL);
+    ok(tbt_render_cfg(&cmd.cfg, buf, sizeof(buf)) > 0 &&
+           strstr(buf, " adaptive=off ") != NULL &&
+           strstr(buf, " adaptive=on ") == NULL,
+       "controllerless mode renders adaptive=off", buf);
 
     /* An explicit off keeps the configured pair fixed and round-trips. */
     snprintf(text, sizeof(text), "%s adaptive=off", base_on);
@@ -448,11 +460,22 @@ static void test_adaptive_cfg(void)
     ok(cmd.cfg.n == 4 && cmd.cfg.m == 1 && cmd.cfg.adaptive == 0,
        "adaptive=off keeps the configured n/m", NULL);
 
-    /* Explicit n/m under adaptive are hints, not rewritten by the parser. */
-    parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=5 m=3"
-          " fec=on adaptive=on", &cmd, &perr);
-    ok(cmd.cfg.adaptive == 1 && cmd.cfg.n == 5 && cmd.cfg.m == 3,
-       "adaptive=on keeps explicit n/m as the initial hint", NULL);
+    /* An explicit on on a controllerless mode is normalized off; n/m stay
+     * the configured fixed shape and the render shows the effective value. */
+    ok(parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=5 m=3"
+             " fec=on adaptive=on", &cmd, &perr) == 0 &&
+           cmd.cfg.adaptive == 0 && cmd.cfg.n == 5 && cmd.cfg.m == 3,
+       "rlnc adaptive=on normalizes off and keeps n/m", NULL);
+    ok(tbt_render_cfg(&cmd.cfg, buf, sizeof(buf)) > 0 &&
+           strstr(buf, " n=5 m=3 fec=on adaptive=off mode=rlnc ") != NULL,
+       "rlnc adaptive=on renders off", buf);
+    ok(parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=8 m=8"
+             " fec=on mode=grouped adaptive=on", &cmd, &perr) == 0 &&
+           cmd.cfg.adaptive == 0 && cmd.cfg.mode == 2,
+       "grouped adaptive=on normalizes off", NULL);
+    ok(tbt_render_cfg(&cmd.cfg, buf, sizeof(buf)) > 0 &&
+           strstr(buf, " adaptive=off mode=grouped ") != NULL,
+       "grouped adaptive=on renders off", buf);
 
     refuse("adaptive on without fec",
            "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 adaptive=on",
@@ -555,7 +578,7 @@ static void test_dev_cfg(void)
         " dup=1 profile=http-kal keepalive=5000"
         " drip_ms=1000 replay=8388608 tunnel_rate=0"
         " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=67108864"
-        " tx_window_bytes=67108864 tx_retain_bytes=0 carrier_stall_ms=0"
+        " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0"
         " portblock=0-0";
     char text[TBT_LINE_MAX], want[TBT_LINE_MAX];
     struct tbt_cmd cmd;
@@ -584,6 +607,20 @@ static void test_dev_cfg(void)
     snprintf(text, sizeof(text), "%s dev=eth/0", base);
     refuse("dev with slash refused", text, TBT_PARSE_EINVAL, "dev",
            "interface name");
+    /* dev_valid_name() rejects ':' and the "." / ".." spellings, so a name
+     * the parser accepts would only fail later at SO_BINDTODEVICE. Dots
+     * inside a name (vlan.100) stay legal. */
+    snprintf(text, sizeof(text), "%s dev=eth:0", base);
+    refuse("dev with colon refused", text, TBT_PARSE_EINVAL, "dev",
+           "interface name");
+    snprintf(text, sizeof(text), "%s dev=.", base);
+    refuse("dev . refused", text, TBT_PARSE_EINVAL, "dev", "interface name");
+    snprintf(text, sizeof(text), "%s dev=..", base);
+    refuse("dev .. refused", text, TBT_PARSE_EINVAL, "dev", "interface name");
+    snprintf(text, sizeof(text), "%s dev=eth0.100", base);
+    ok(!parse(text, &cmd, &perr) && cmd.cfg.dev_set &&
+           !strcmp(cmd.cfg.dev, "eth0.100"),
+       "dev with an interior dot is accepted", perr.why);
 }
 
 /* map=listen:target[,listen:target...]: the parser, the canonical render, the
@@ -597,7 +634,7 @@ static void test_map_cfg(void)
         " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
         " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-        " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+        " rx_reorder_bytes=67108864 tx_window_bytes=0 tx_retain_bytes=0"
         " carrier_stall_ms=0"
         " portblock=0-0\n";
     char text[TBT_LINE_MAX], want[TBT_LINE_MAX * 2], list[160];
@@ -627,7 +664,7 @@ static void test_map_cfg(void)
               " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
               " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
               " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-              " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+              " rx_reorder_bytes=67108864 tx_window_bytes=0 tx_retain_bytes=0"
               " carrier_stall_ms=0"
               " portblock=0-0\n");
     parse("tunnel 1 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
@@ -644,7 +681,7 @@ static void test_map_cfg(void)
               " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
               " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
               " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-              " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+              " rx_reorder_bytes=67108864 tx_window_bytes=0 tx_retain_bytes=0"
               " carrier_stall_ms=0"
               " portblock=0-0\n");
 
@@ -658,7 +695,7 @@ static void test_map_cfg(void)
               " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
               " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
               " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-              " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+              " rx_reorder_bytes=67108864 tx_window_bytes=0 tx_retain_bytes=0"
               " carrier_stall_ms=0"
               " portblock=0-0\n");
 
@@ -712,6 +749,108 @@ static void test_map_cfg(void)
         strncat(list, "1:1,", sizeof(list) - strlen(list) - 1);
     snprintf(text, sizeof(text), "%s map=%s", base_near, list);
     refuse("map list too long", text, TBT_PARSE_EINVAL, "map", "too long");
+}
+
+/* mode=sc-ldpc resolves w= from the direction the split names: one group of
+ * 256 shares is the binary downlink block (256); a 32-share group is the
+ * GF(16) uplink block (64). Before this fix w=0 always became 256, so the
+ * uplink line was then rejected by its own "block=64" adaptive check. */
+static void test_sclc_w_defaults(void)
+{
+    static const char *const uplink =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+        " n=8 m=24 fec=on mode=sc-ldpc carriers=256";
+    static const char *const downlink =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+        " n=128 m=128 fec=on mode=sc-ldpc carriers=256";
+    static const char *const block512 =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+        " n=128 m=128 fec=on mode=sc-ldpc w=512 carriers=256 L=16";
+    char text[TBT_LINE_MAX], once[TBT_LINE_MAX * 2], twice[TBT_LINE_MAX * 2];
+    struct tbt_cmd cmd, again;
+    struct tbt_parse_error perr = { NULL, NULL };
+    int rc;
+
+    rc = parse(uplink, &cmd, &perr);
+    ok(rc == 0, "uplink line without w= parses", perr.why);
+    if (rc == 0)
+    {
+        ok(cmd.cfg.w == 64 && cmd.cfg.adaptive == 1 &&
+               cmd.cfg.carriers == 256,
+           "uplink without w= resolves to block 64", NULL);
+        ok(tbt_render_cfg(&cmd.cfg, once, sizeof(once)) > 0,
+           "uplink without w= renders", NULL);
+        ok(strstr(once, " w=64 ") != NULL &&
+               strstr(once, " adaptive=on ") != NULL,
+           "uplink default renders w=64 adaptive=on", once);
+        parse(once, &again, &perr);
+        tbt_render_cfg(&again.cfg, twice, sizeof(twice));
+        ok(!strcmp(once, twice), "uplink default w= line is a fixed point",
+           twice);
+    }
+
+    /* An explicit w=0 is auto, not a request for the downlink block. */
+    snprintf(text, sizeof(text), "%s w=0", uplink);
+    rc = parse(text, &cmd, &perr);
+    ok(rc == 0 && cmd.cfg.w == 64 && cmd.cfg.adaptive == 1,
+       "explicit w=0 resolves like an omitted w=", perr.why);
+
+    rc = parse(downlink, &cmd, &perr);
+    ok(rc == 0 && cmd.cfg.w == 256 && cmd.cfg.adaptive == 1,
+       "downlink without w= resolves to block 256", perr.why);
+
+    /* A fixed L16/block512 shape is not an adaptive profile. The parser must
+     * leave adaptive=off instead of inferring on and then rejecting itself. */
+    rc = parse(block512, &cmd, &perr);
+    ok(rc == 0, "block512/L16 fixed shape parses", perr.why);
+    if (rc == 0)
+    {
+        ok(cmd.cfg.adaptive == 0 && cmd.cfg.w == 512 && cmd.cfg.L == 16,
+           "block512/L16 keeps adaptive=off", NULL);
+        tbt_render_cfg(&cmd.cfg, once, sizeof(once));
+        ok(strstr(once, " adaptive=off ") != NULL &&
+               strstr(once, " w=512 ") != NULL &&
+               strstr(once, " L=16\n") != NULL,
+           "block512/L16 renders its fixed shape", once);
+        parse(once, &again, &perr);
+        tbt_render_cfg(&again.cfg, twice, sizeof(twice));
+        ok(!strcmp(once, twice),
+           "block512/L16 fixed line is a fixed point", twice);
+    }
+
+    /* L is a mode=3 key. Storing it on another mode would be lost by the
+     * renderer, so the parsed struct would not match the rendered one. */
+    rc = parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+               " L=8", &cmd, &perr);
+    ok(rc == 0 && cmd.cfg.L == 0,
+       "L is cleared when mode is not sc-ldpc", perr.why);
+    tbt_render_cfg(&cmd.cfg, once, sizeof(once));
+    ok(strstr(once, " L=") == NULL, "L is not rendered outside mode=sc-ldpc",
+       once);
+}
+
+/* A repeated key replaces its value, and the canonical render then parses
+ * back to an identical struct only if the writer clears the tail the earlier,
+ * longer value left behind: an IPv4 endpoint after an IPv6 one, a shorter
+ * map= or srcaddrs= list, and a shorter dev= name. */
+static void test_cfg_identity(void)
+{
+    static const char *const text =
+        "tunnel 1 role=near listen=[2001:db8::1]:1 listen=10.0.0.1:1"
+        " peer=[::2]:2 peer=10.0.0.2:2 target=[::3]:3 target=10.0.0.3:3"
+        " map=9001:80,9002:81 map=9003:82"
+        " srcaddrs=2001:db8::7,[::1] srcaddrs=10.1.1.1"
+        " dev=abcdefghijklmno dev=eth0";
+    char once[TBT_LINE_MAX * 2];
+    struct tbt_cmd a, b;
+    struct tbt_parse_error perr = { NULL, NULL };
+
+    ok(parse(text, &a, &perr) == 0, "mixed-family repeats parse", perr.why);
+    ok(tbt_render_cfg(&a.cfg, once, sizeof(once)) > 0,
+       "mixed-family repeats render", NULL);
+    ok(parse(once, &b, &perr) == 0, "mixed-family render parses", perr.why);
+    ok(!memcmp(&a.cfg, &b.cfg, sizeof(a.cfg)),
+       "mixed-family repeats round-trip to an identical struct", NULL);
 }
 
 static void test_stats_prefix(void)
@@ -802,6 +941,7 @@ static void maximal_cfg(struct tbt_cfg *c, u64 id)
     c->fec = 1;
     c->mode = 3; /* sc-ldpc, the longest name */
     c->w = 512;
+    c->L = 4096; /* the largest mode=3 coupling length */
     c->carriers = TBT_MAX_CARRIERS_LIMIT;
     c->dup = 3;
     c->keepalive_ms = 86400000;
@@ -825,6 +965,13 @@ static void maximal_cfg(struct tbt_cfg *c, u64 id)
     }
     c->nonce_set = true;
     memset(c->nonce, 0xa5, sizeof(c->nonce));
+    /* Optional keys that each lengthen the canonical line; together with
+     * the eight IPv6 srcaddrs above they are why the line buffer must be
+     * larger than the old 1024 bytes. */
+    c->crypto_key_set = true;
+    memset(c->crypto_key, 0xab, sizeof(c->crypto_key));
+    strcpy(c->dev, "abcdefghijklmno");
+    c->dev_set = true;
 }
 
 static void test_maximal_lines(void)
@@ -1414,7 +1561,7 @@ int main(void)
         " dup=1 profile=http-kal keepalive=5000"
         " drip_ms=1000 replay=8388608 tunnel_rate=0"
         " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=67108864"
-        " tx_window_bytes=67108864 tx_retain_bytes=0 carrier_stall_ms=0"
+        " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0"
         " portblock=0-0\n";
     static const char *const full_near =
         "tunnel 7 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443"
@@ -1529,6 +1676,30 @@ int main(void)
     /* 10. Hostnames are refused, never resolved. */
     refuse("hostname", "tunnel 1 role=near listen=example.com:9000 peer=10.0.0.2:2",
            TBT_PARSE_EINVAL, NULL, "hostname");
+
+    /* 10b. An IPv4 octet has exactly one spelling: a multi-digit octet may
+     * not start with '0' ("010" is decimal 10 here but octal 8 to
+     * inet_aton). The HTTP Host parser applies the same rule; the shared
+     * embedded-quad path means an IPv6 literal inherits it too. */
+    refuse("IPv4 leading zero in listen",
+           "tunnel 1 role=near listen=010.0.0.1:9000 peer=10.0.0.2:2",
+           TBT_PARSE_EINVAL, NULL, "leading zero");
+    refuse("IPv4 leading zero in peer",
+           "tunnel 1 role=near listen=10.0.0.1:9000 peer=10.0.0.02:2",
+           TBT_PARSE_EINVAL, NULL, "leading zero");
+    refuse("IPv4 leading zero in target",
+           "tunnel 1 role=far listen=10.0.0.1:9000 target=010.0.0.2:2",
+           TBT_PARSE_EINVAL, NULL, "leading zero");
+    refuse("IPv4 leading zero in srcaddrs",
+           "tunnel 1 role=near listen=10.0.0.1:9000 peer=10.0.0.2:2"
+           " srcaddrs=010.0.0.1",
+           TBT_PARSE_EINVAL, NULL, "leading zero");
+    refuse("IPv6 embedded quad leading zero",
+           "tunnel 1 role=near listen=[::ffff:010.0.0.1]:9000 peer=10.0.0.2:2",
+           TBT_PARSE_EINVAL, NULL, "IPv6");
+    ok(parse("tunnel 1 role=far listen=0.0.0.0:9000 target=0.0.0.1:2",
+             &cmd, &perr) == 0,
+       "a lone zero octet is still a literal", perr.why);
 
     /* 11. Out-of-range values are refused. */
     refuse("n=0", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=0", TBT_PARSE_EINVAL, "n", NULL);
@@ -1679,7 +1850,7 @@ int main(void)
     parse("tunnel 8 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=224 m=32 fec=on",
           &cmd, &perr);
     tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
-    ok(strstr(buf, " fec=on adaptive=on mode=rlnc w=448 carriers=256 crypto=on"
+    ok(strstr(buf, " fec=on adaptive=off mode=rlnc w=448 carriers=256 crypto=on"
                     " crypto_key=- dup=1 profile=http-kal keepalive=") != NULL,
        "fec=on renders in canonical order", buf);
     {
@@ -1704,7 +1875,7 @@ int main(void)
               " dup=1 profile=http-kal keepalive=5000"
               " drip_ms=1000 replay=8388608 tunnel_rate=0"
               " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=67108864"
-              " tx_window_bytes=67108864 tx_retain_bytes=0 carrier_stall_ms=0"
+              " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0"
               " portblock=40000-44095\n");
 
     refuse("dup=4", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 dup=4", TBT_PARSE_EINVAL, "dup", NULL);
@@ -1787,7 +1958,7 @@ int main(void)
           " rx_reorder_bytes=4096 tx_retain_bytes=1024 carrier_stall_ms=250",
           &cmd, &perr);
     tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
-    ok(strstr(buf, " rx_reorder_bytes=4096 tx_window_bytes=4096 tx_retain_bytes=1024"
+    ok(strstr(buf, " rx_reorder_bytes=4096 tx_window_bytes=0 tx_retain_bytes=1024"
                     " carrier_stall_ms=250 ") != NULL,
        "C3 keys render canonically", buf);
     {
@@ -1801,16 +1972,23 @@ int main(void)
     parse("tunnel 4 role=near listen=10.0.0.1:1 peer=10.0.0.2:2", &cmd, &perr);
     tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
     ok(cmd.cfg.hole_budget_ms == 0 && cmd.cfg.carrier_stall_ms == 0 &&
-           cmd.cfg.rx_reorder_bytes == 67108864 && cmd.cfg.tx_window_bytes == 67108864,
+           cmd.cfg.rx_reorder_bytes == 67108864 && cmd.cfg.tx_window_bytes == 0,
        "C3 budgets default when omitted", NULL);
-    ok(strstr(buf, " hole_budget_ms=0 rx_reorder_bytes=67108864 tx_window_bytes=67108864"
+    ok(strstr(buf, " hole_budget_ms=0 rx_reorder_bytes=67108864 tx_window_bytes=0"
                     " tx_retain_bytes=0 carrier_stall_ms=0 ") != NULL,
        "C3 defaults render when omitted", buf);
     /* tx_window_bytes: 0 means auto and is the default; an explicit window
      * above the peer's reorder budget kills the stream, so both keys are
      * validated together once the whole line has been read. */
     parse("tunnel 5 role=near listen=10.0.0.1:1 peer=10.0.0.2:2", &cmd, &perr);
-    ok(cmd.cfg.tx_window_bytes == 67108864, "tx_window_bytes defaults to 64 MiB", NULL);
+    ok(cmd.cfg.tx_window_bytes == 0, "tx_window_bytes defaults to auto", NULL);
+    parse("tunnel 5 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+          " rx_reorder_bytes=1048576 tx_window_bytes=0",
+          &cmd, &perr);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(cmd.cfg.tx_window_bytes == 0 &&
+           strstr(buf, " rx_reorder_bytes=1048576 tx_window_bytes=0 ") != NULL,
+       "explicit tx_window_bytes=0 stays auto", buf);
     parse("tunnel 5 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
           " rx_reorder_bytes=1048576 tx_window_bytes=524288",
           &cmd, &perr);
@@ -1965,6 +2143,10 @@ int main(void)
 
     /* 24d2. map=: multi-port slots, near listen conflicts, far allow list. */
     test_map_cfg();
+
+    /* 24d3. mode=sc-ldpc w= is direction-driven, and L belongs to mode 3. */
+    test_sclc_w_defaults();
+    test_cfg_identity();
 
     /* 24e. mode=sc-ldpc: L is rendered only for mode 3, adaptive defaults
      * off, and both directions round-trip through the canonical line. */

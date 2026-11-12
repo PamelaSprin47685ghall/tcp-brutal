@@ -31,6 +31,7 @@
 #include "tbtun.h"
 #include "tbt_fec.h"
 #include "tbt_rec.h"
+#include "tbt_tx_acct.h"
 
 /* The receiver's hole budget. Explicit config wins; auto is k x SRTT with
  * k's upper bound (5), floored at 2 s. The floor must cover the carrier TCP's
@@ -43,6 +44,35 @@
  * rtt_mean_us is 0 until the pump has a sample, so a fresh session gets the
  * floor. */
 #define TBT_RX_HOLE_FLOOR_US 2000000ULL
+
+/* The largest authenticated HELLO generation a fixed emitter can name:
+ * floor(2^63 / NSEC_PER_USEC), i.e. the microsecond value of the largest
+ * positive signed 64-bit nanosecond clock. Both pre-1970 wrap classes land
+ * at or above this bound: the old kernel cast nanoseconds to u64 before
+ * dividing and stays below 2^64/1000 with bit 63 clear, the old client cast
+ * a negative seconds count to ~U64_MAX. A top-bit test misses the kernel
+ * class. The emitter in tbt_session.c caps its output one below this limit,
+ * so refusing every value >= limit rejects the wrap class without touching
+ * any fixed peer. */
+#define TBT_RX_HELLO_EPOCH_LIMIT ((1ULL << 63) / NSEC_PER_USEC)
+
+/* The receiver's effective reorder budget mirrors the sender's automatic
+ * window cap in tbt_tx_window(): max(cfg.rx_reorder_bytes,
+ * tbt_tx_reorder_floor(n_car)). tbt_tx_window_update() must not rewrite the
+ * parsed tunnel config, because /proc/net/tbtun/config renders it and
+ * `cat config > backup; cat backup > config` would pin the grown value.
+ * An explicit tx_window_bytes is checked against cfg.rx_reorder_bytes by the
+ * parser, so it needs no floor. */
+static u64 tbt_rx_reorder_budget(const struct tbt_session *sess)
+{
+    const struct tbt_cfg *cfg = &sess->tunnel->cfg;
+    u64 budget = READ_ONCE(cfg->rx_reorder_bytes);
+
+    if (!READ_ONCE(cfg->tx_window_bytes))
+        budget = max_t(u64, budget,
+                       tbt_tx_reorder_floor(READ_ONCE(sess->n_car)));
+    return budget;
+}
 
 static u64 tbt_rx_hole_budget_ns(struct tbt_session *sess)
 {
@@ -179,6 +209,17 @@ static int tbt_rx_bind_stream(struct tbt_carrier *c, const struct tbt_hdr *h,
     return r == TBT_BIND_BAD ? -EPROTO : 0;
 }
 
+/* Apply the sender's receive offset for the opposite direction. Only a frame
+ * that passed its own validation may move it: tbt_tx_ack() advances tx_ack
+ * and takes an RTT sample, so a record that is about to be refused (-EPROTO
+ * stops the carrier) must not reach it. Every accepted frame still
+ * piggybacks its uack, as before. */
+static void tbt_rx_uack(struct tbt_carrier *c, const struct tbt_hdr *hdr)
+{
+    if (tbt_hdr_sid(hdr))
+        tbt_tx_ack(c->sess, c, hdr->uack, tbt_hdr_sid(hdr));
+}
+
 static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *payload, u16 len)
 {
     struct tbt_session *sess = c->sess;
@@ -191,6 +232,10 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
                    * sit at the head of the ready queue forever */
     if (hdr->seq > U64_MAX - len)
         return -EPROTO;
+    /* The frame is structurally valid from here on: tbt_rx_bind_stream()
+     * already accepted the sid. Move the piggybacked ack before the
+     * tombstone/state drops below, which are policy, not malformed input. */
+    tbt_rx_uack(c, hdr);
     st = tbt_stream_get(sess, tbt_hdr_sid(hdr), false, false);
     if (!st)
         return 0; /* unknown/tombstoned sid: drop, do not kill the carrier */
@@ -202,6 +247,28 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
          * success, so this check is the only gate.  Drop without growing rx_q. */
         tbt_stream_put(st);
         return 0;
+    }
+    fr = kmalloc(struct_size(fr, data, len), GFP_ATOMIC);
+    if (!fr)
+    {
+        /* Do not kill the carrier for a transient GFP_ATOMIC failure: the
+         * carrier layer would count -ENOMEM as rx_parse_proto and close a
+         * healthy subflow.
+         *
+         * Raw profile: the record is still in parser->buf, so -EAGAIN keeps
+         * it buffered (the delivery-ring pause contract) and the 50 ms poll
+         * retries it. HTTP profile: the decoded record has already left the
+         * parser buffer and lives in http_rx->rec; a pending retry has no
+         * wake source when the socket is empty, so drop the record (return
+         * 0) and let the sender's retransmit repair it -- tx_ack does not
+         * move, so the record is still in its retention ring.
+         *
+         * The per-carrier receive counters move below this point so a retry
+         * cannot count the same record twice (they are the FBK high-water
+         * the sender trusts). */
+        atomic64_inc(&sess->dbg_alloc_fail);
+        tbt_stream_put(st);
+        return c->profile == 3 ? -EAGAIN : 0;
     }
     c->rx_frames++;
     c->rx_bytes += len;
@@ -215,13 +282,6 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
     else
     {
         tbt_fbk_kick(sess, false);
-    }
-
-    fr = kmalloc(struct_size(fr, data, len), GFP_ATOMIC);
-    if (!fr)
-    {
-        tbt_stream_put(st);
-        return -ENOMEM;
     }
     INIT_LIST_HEAD(&fr->list);
     fr->len = len;
@@ -297,12 +357,21 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
         /* Two bounds: one stream's tree, and the session's whole tree. The
          * per-stream limit alone would let 128 streams hold 128 x the
          * configured budget; the session total is what makes the memory
-         * bound explainable. A concurrent insert on another stream can
-         * overshoot by at most one frame before this check fires. */
-        if (st->rx_ooo_bytes > st->rx_limit ||
-            atomic64_read(&sess->rx_ooo_total) >
-                sess->tunnel->cfg.rx_reorder_bytes)
-            kill = true;
+         * bound explainable. The budget is the effective one: in auto-window
+         * mode the sender may run ahead by tbt_tx_reorder_floor(n_car).
+         * A concurrent insert on another stream can overshoot by at most one
+         * frame before this check fires. */
+        {
+            /* max() keeps the per-stream snapshot meaningful if the tunnel
+             * config is ever replaced under a live stream, while still
+             * admitting the auto-window floor. */
+            u64 reorder_budget =
+                max_t(u64, st->rx_limit, tbt_rx_reorder_budget(sess));
+
+            if (st->rx_ooo_bytes > reorder_budget ||
+                atomic64_read(&sess->rx_ooo_total) > reorder_budget)
+                kill = true;
+        }
     }
     /* The ack is the contiguous *received* offset: it bounds the sender's
      * window (and therefore this tree), and it advances even while delivery to
@@ -367,6 +436,13 @@ int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len)
         st->rx_queued += len;
         st->rx_next = off + len;
         tbt_rx_pull_locked(st);
+        /* FEC delivery must apply the same delivery-queue pause as the ARQ
+         * path (tbt_rx_flush()). Without it nothing ever sets st->paused in
+         * a FEC session, so the carrier readers in tbt_car_rx_body() never
+         * stop; a slow application would let rx_q grow without bound under
+         * GFP_ATOMIC allocations while the FEC ACK keeps granting credit. */
+        if (st->rx_queued >= TBT_RX_RING_MAX)
+            WRITE_ONCE(st->paused, true);
         queued = true;
     }
     else
@@ -487,10 +563,15 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
     struct tbt_session *sess = c->sess;
     struct tbt_stream *st;
 
-    /* Every frame carries the sender's receive offset for the opposite
-     * direction; only the current stream may consume it. */
-    if (tbt_hdr_sid(hdr))
-        tbt_tx_ack(sess, c, hdr->uack, tbt_hdr_sid(hdr));
+    /* A FEC session carries stream data and feedback in the FEC plane.
+     * Accepting a legacy 32-byte DATA/FBK/SACK record here would bypass the
+     * FEC decoder -- and with crypto on, the DATA/PARITY ChaCha8 step and
+     * payload CRC -- while still delivering bytes into the shared rx_next /
+     * rx_q space. The reference client rejects the same three types; refuse
+     * them before the header's uack can move tx_ack too. */
+    if (sess->fec && (hdr->type == TBT_F_DATA || hdr->type == TBT_F_FBK ||
+                      hdr->type == TBT_F_SACK))
+        return -EPROTO;
 
     switch (hdr->type)
     {
@@ -504,12 +585,17 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
          * target_port. The session binds it after the contract-order checks:
          * the bitmap admits the flow, then the route slot and target port are
          * authorized against the mapping table. */
-        return tbt_rx_bind_stream(c, hdr, true, payload, len);
+        {
+            int err = tbt_rx_bind_stream(c, hdr, true, payload, len);
+
+            if (!err)
+                tbt_rx_uack(c, hdr);
+            return err;
+        }
 
     case TBT_F_FIN:
         if (tbt_rx_bind_stream(c, hdr, false, NULL, 0))
             return -EPROTO;
-        c->rx_bytes += len;
         /* FIN body: flow-local packet range, little-endian. A peer that names
          * an end before its base is refused before any stream state is
          * touched. */
@@ -523,6 +609,8 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
                 return -EPROTO;
             }
         }
+        tbt_rx_uack(c, hdr);
+        c->rx_bytes += len;
         st = tbt_stream_get(sess, tbt_hdr_sid(hdr), false, false);
         if (!st)
             return 0;
@@ -578,6 +666,7 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
     case TBT_F_RST:
         if (tbt_rx_bind_stream(c, hdr, false, NULL, 0))
             return -EPROTO;
+        tbt_rx_uack(c, hdr);
         pr_info_ratelimited("tbtun: rx RST sid=%llu seq=%llu carrier=%u\n",
                             (unsigned long long)tbt_hdr_sid(hdr),
                             (unsigned long long)hdr->seq,
@@ -593,15 +682,21 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
          * near to redial a slot it has retired. */
         if (hdr->body_len != 1)
             return -EPROTO;
+        tbt_rx_uack(c, hdr);
         tbt_session_retire(sess, payload[0], (u8)hdr->seq);
         return 0;
 
     case TBT_F_FBK:
+        /* The record scanner already enforced body_len == path_ack_count x
+         * TBT_FBK_ENTRY_LEN; no stream binding exists for a session-level
+         * feedback record. */
+        tbt_rx_uack(c, hdr);
         return tbt_rx_fbk(c, hdr, payload);
 
     case TBT_F_SACK:
         if (hdr->body_len != 1)
             return -EPROTO;
+        tbt_rx_uack(c, hdr);
         st = tbt_stream_get(sess, tbt_hdr_sid(hdr), false, false);
         if (!st)
         {
@@ -624,6 +719,7 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
         return 0;
 
     case TBT_F_PAD:
+        tbt_rx_uack(c, hdr);
         return 0;
 
     default:
@@ -654,7 +750,8 @@ struct tbt_hello_gen
  * and a wrong key rule is indistinguishable from a wrong key on the wire
  * without it. */
 static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
-                               size_t len, const struct tbt_hello_gen *g,
+                               size_t len, u8 path_id,
+                               const struct tbt_hello_gen *g,
                                const char **why)
 {
     bool enabled = false;
@@ -697,7 +794,9 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
      * resolves from its own key anyway, and with key_id 1 the key is in the
      * message, so a tag over it would be public. */
     if (sess->tunnel->cfg.crypto_key_set &&
-        !tbt_crypto_hello_auth_ok(body, len, sess->tunnel->cfg.crypto_key))
+        !tbt_crypto_hello_auth_ok_path(body, len,
+                                       sess->tunnel->cfg.crypto_key,
+                                       path_id))
     {
         atomic64_inc(&sess->hello_tag_reject);
         *why = "crypto tag";
@@ -762,7 +861,21 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
          * it: a replayed HELLO carries an older epoch, a stranger has no
          * tag, and neither can reset a keystream. */
         if (memcmp(sess->crypto_rx_nonce, peer_nonce, sizeof(peer_nonce)) == 0)
+        {
+            /* v11 mints a fresh epoch for every HELLO, so the authenticated
+             * session-identity high-water must advance here too. Otherwise a
+             * captured later HELLO of this nonce would still clear the
+             * anchor-move floor below (g->epoch > crypto_epoch) after the
+             * generation had already moved past it. Nonce rotation still
+             * requires a strictly greater value. */
+            if (g->psk &&
+                (!sess->crypto_epoch_set || g->epoch > sess->crypto_epoch))
+            {
+                sess->crypto_epoch = g->epoch;
+                sess->crypto_epoch_set = true;
+            }
             goto out;
+        }
         if (!g->psk ||
             (sess->crypto_epoch_set && g->epoch <= sess->crypto_epoch))
         {
@@ -783,7 +896,9 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
          * downlink; on the near side this HELLO is the far's restart and
          * only the RX direction may move. The context is rebuilt in
          * w_fec_tx(), the only reader of crypto_ctx.tx, and the HELLO that
-         * tbt_session_join() sends next already names the new nonce. */
+         * tbt_session_join() sends next already names the new nonce. Its
+         * body epoch is a fresh tbt_hello_epoch_now(), allocated above this
+         * stored nonce generation. */
         if (sess->tunnel->cfg.role == TBT_ROLE_FAR)
         {
             u64 now;
@@ -890,13 +1005,34 @@ static int tbt_hello_far_gate(struct tbt_session *sess, struct tbt_carrier *c,
     /* An established anchor rejects every other source, free carrier index
      * included, before the nonce is even examined: a stranger cannot probe
      * the nonce. Only an owner may move it, and a configured peer= never
-     * moves. */
+     * moves. A moved source must additionally prove a strictly newer
+     * authenticated generation: a same-epoch HELLO replayed from another
+     * address is otherwise indistinguishable from the owner and could move
+     * the anchor. This deliberately refuses a same-epoch dynamic-address
+     * re-lease; only a restarted peer (new epoch, PSK-proved) may roam.
+     * tbt_session_join() separately requires a strict epoch advance for
+     * every authenticated replacement, so a replayed same-epoch HELLO from
+     * the same anchor cannot take a live slot either. */
     if (sess->anchor_set && !tbt_addr_eq(src, &sess->anchor))
     {
         if (tbt_addr_set(&t->cfg.peer) || !owner)
         {
             atomic64_inc(&sess->join_src_reject);
             *why = "source address";
+            return -EPROTO;
+        }
+        /* Phase one only: this check runs before tbt_rx_hello_crypto(), so
+         * no state has moved yet. Phase two (commit) runs after the crypto
+         * step adopted this HELLO's nonce/epoch, where equality is expected
+         * for the very HELLO that performed the rotation; re-testing here
+         * would reject every legitimate restarted peer that changed source.
+         * A replay never reaches phase two: phase one rejects it. */
+        if (!commit &&
+            (!g->psk || !sess->crypto_epoch_set ||
+             g->epoch <= sess->crypto_epoch))
+        {
+            atomic64_inc(&sess->join_src_reject);
+            *why = "source epoch";
             return -EPROTO;
         }
     }
@@ -969,7 +1105,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
 
     if (!tbt_hello_admit(sess->fec, h->body_len, body, want_role))
         return tbt_hello_bad(c, "length/version/role");
-    /* The v9 generation tail. Only a configured PSK can authenticate it: the
+    /* The v11 generation tail. Only a configured PSK can authenticate it: the
      * gate and the crypto step both use `psk`, and with key_id 1 the key
      * travels in the body, so a tag over it would prove nothing. */
     memset(&hg, 0, sizeof(hg));
@@ -979,8 +1115,21 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
         hg.epoch = tbt_le64(body + TBT_CRYPTO_HELLO_EPOCH);
         hg.psk = t->cfg.crypto_key_set &&
                  body[TBT_CRYPTO_HELLO_KEY_ID] == TBT_CRYPTO_KEY_ID_NONE &&
-                 tbt_crypto_hello_auth_ok(body, h->body_len, t->cfg.crypto_key);
+                 tbt_crypto_hello_auth_ok_path(body, h->body_len,
+                                               t->cfg.crypto_key,
+                                               h->path_id);
     }
+    /* The authenticated generation is a session-identity high-water. A
+     * pre-1970 realtime clock has two wrap classes: the old kernel cast the
+     * negative ktime to u64 before dividing by NSEC_PER_USEC, landing in
+     * [limit, 2*limit) with bit 63 clear, and the old client cast a negative
+     * seconds count to ~U64_MAX. Both are at or above the largest value a
+     * fixed emitter can name, so the limit -- not the top bit -- identifies
+     * them. Refuse before the gate or the crypto step can move any state.
+     * Without a PSK-proved tag the epoch authorizes nothing, so the check
+     * follows the client's psk-only rule. */
+    if (hg.psk && hg.epoch >= TBT_RX_HELLO_EPOCH_LIMIT)
+        return tbt_hello_bad(c, "epoch range");
     /* The last HELLO byte names the container. Both ends derive the expected
      * value from the carrier index (spares of an http-kal tunnel drip), so a
      * restart with a different profile is refused here instead of being
@@ -1032,7 +1181,8 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
     if (sess->fec)
     {
         const char *why = "crypto fields";
-        int cerr = tbt_rx_hello_crypto(sess, body, h->body_len, &hg, &why);
+        int cerr = tbt_rx_hello_crypto(sess, body, h->body_len, h->path_id,
+                                       &hg, &why);
 
         if (cerr)
             return tbt_hello_bad(c, why);
@@ -1051,7 +1201,10 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
         spin_unlock(&sess->lock);
         if (gerr)
             return tbt_hello_bad(c, why);
-        err = tbt_session_join(sess, c, h->path_id);
+        /* The join reads this epoch under sess->lock; only a PSK-proved
+         * HELLO may raise the path high-water. */
+        c->hello_epoch = hg.epoch;
+        err = tbt_session_join(sess, c, h->path_id, hg.psk);
         if (err)
             return err;
     }
@@ -1121,6 +1274,20 @@ static int tbt_http_bad(struct tbt_carrier *c, const char *why, int err)
     return err;
 }
 
+/* Drop the consumed prefix from the carrier's partial-record buffer. Both
+ * parsers decode a whole 8 KiB run through a local read cursor and compact
+ * once on return: a per-record memmove of the tail made one slice of K small
+ * records O(K^2) bytes copied (a 32-byte-record flood is ~128x amplification
+ * per slice). */
+static void tbt_parser_compact(struct tbt_parser *p, size_t consumed)
+{
+    if (!consumed || consumed > p->have)
+        return;
+    p->have -= consumed;
+    if (p->have)
+        memmove(p->buf, p->buf + consumed, p->have);
+}
+
 /* The HTTP container's receive state machine: header block (request on the far
  * side, response on the near side), then chunks decoded by the host-tested
  * assembler, then the next message's header after the terminator. Any PROTO is
@@ -1131,6 +1298,8 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
     struct tbt_parser *p = c->parser;
     struct tbt_session *sess = c->sess;
     bool near = sess->tunnel->cfg.role == TBT_ROLE_NEAR;
+    size_t pos = 0;
+    int ret = 0;
 
     /* Before the peer's HELLO is accepted, print the exact parser state the
      * container is about to consume. `have` is a byte count used as a memmove
@@ -1164,28 +1333,35 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                                    c->http_pending_len);
 
             if (err == -EAGAIN)
-                return -EAGAIN;
+            {
+                ret = -EAGAIN;
+                break;
+            }
             c->http_pending = false;
             if (err)
-                return err;
+            {
+                ret = err;
+                break;
+            }
         }
         if (!c->http_hdr_done)
         {
-            size_t take, hlen;
+            size_t take, hlen, avail;
             int perr = 0;
 
-            if (!p->have)
-                return 0;
-            take = min_t(size_t, p->have, TBT_HTTP_HDR_MAX - c->http_have);
+            avail = p->have - pos;
+            if (!avail)
+                break;
+            take = min_t(size_t, avail, TBT_HTTP_HDR_MAX - c->http_have);
             if (!take)
             {
                 atomic64_inc(&sess->http_parse_err);
-                return tbt_http_bad(c, "header full", -EPROTO);
+                ret = tbt_http_bad(c, "header full", -EPROTO);
+                break;
             }
-            memcpy(c->http_hdr + c->http_have, p->buf, take);
+            memcpy(c->http_hdr + c->http_have, p->buf + pos, take);
             c->http_have += take;
-            p->have -= take;
-            memmove(p->buf, p->buf + take, p->have);
+            pos += take;
 
             if (near)
             {
@@ -1197,19 +1373,22 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                     if (c->http_have == TBT_HTTP_HDR_MAX)
                     {
                         atomic64_inc(&sess->http_parse_err);
-                        return tbt_http_bad(c, "response header full", -EPROTO);
+                        ret = tbt_http_bad(c, "response header full",
+                                           -EPROTO);
                     }
-                    return 0;
+                    break;
                 }
                 if (perr == TBT_HTTP_PROTO)
                 {
                     atomic64_inc(&sess->http_parse_err);
-                    return tbt_http_bad(c, "response header proto", -EPROTO);
+                    ret = tbt_http_bad(c, "response header proto", -EPROTO);
+                    break;
                 }
                 if (resp.status != 200 || !resp.chunked || !resp.keep_alive)
                 {
                     atomic64_inc(&sess->http_status_err);
-                    return tbt_http_bad(c, "response status", -EPROTO);
+                    ret = tbt_http_bad(c, "response status", -EPROTO);
+                    break;
                 }
             }
             else
@@ -1222,44 +1401,55 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                     if (c->http_have == TBT_HTTP_HDR_MAX)
                     {
                         atomic64_inc(&sess->http_parse_err);
-                        return tbt_http_bad(c, "request header full", -EPROTO);
+                        ret = tbt_http_bad(c, "request header full",
+                                           -EPROTO);
                     }
-                    return 0;
+                    break;
                 }
                 if (perr == TBT_HTTP_PROTO)
                 {
                     atomic64_inc(&sess->http_parse_err);
-                    return tbt_http_bad(c, "request header proto", -EPROTO);
+                    ret = tbt_http_bad(c, "request header proto", -EPROTO);
+                    break;
                 }
                 if (!req.chunked || !req.keep_alive)
                 {
                     atomic64_inc(&sess->http_parse_err);
-                    return tbt_http_bad(c, "request framing", -EPROTO);
+                    ret = tbt_http_bad(c, "request framing", -EPROTO);
+                    break;
                 }
                 c->http_req_done = true;
                 tbt_tx_wake(sess);
             }
+            if (ret)
+                break;
             if (hlen > c->http_have)
             {
                 atomic64_inc(&sess->http_parse_err);
-                return tbt_http_bad(c, "header length", -EPROTO);
+                ret = tbt_http_bad(c, "header length", -EPROTO);
+                break;
             }
             {
                 size_t extra = c->http_have - hlen;
 
                 if (extra)
                 {
-                    memmove(p->buf + extra, p->buf, p->have);
+                    size_t remaining = p->have - pos;
+
+                    memmove(p->buf + extra, p->buf + pos, remaining);
                     memcpy(p->buf, c->http_hdr + hlen, extra);
-                    p->have += extra;
+                    p->have = remaining + extra;
+                    pos = 0;
                 }
             }
             c->http_have = 0;
             c->http_hdr_done = true;
             continue;
         }
-        while (p->have)
+        while (p->have > pos)
         {
+            const u8 *buf = p->buf + pos;
+            size_t avail = p->have - pos;
             struct tbt_rec rec;
             int derr = 0;
             size_t n;
@@ -1270,10 +1460,9 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                 size_t flen = 0;
                 int ferr = TBT_RX_NEED_MORE;
 
-                n = tbt_http_fec_frame_decode(c->http_rx, p->buf, p->have, &frec,
+                n = tbt_http_fec_frame_decode(c->http_rx, buf, avail, &frec,
                                               &flen, &ferr);
-                p->have -= n;
-                memmove(p->buf, p->buf + n, p->have);
+                pos += n;
                 if (ferr == TBT_RX_OK)
                 {
                     int err;
@@ -1283,7 +1472,11 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                     if (tbt_fec_record_type(frec[0]))
                     {
                         if (!c->saw_hello)
-                            return tbt_http_bad(c, "fec before hello", -EPROTO);
+                        {
+                            ret = tbt_http_bad(c, "fec before hello",
+                                               -EPROTO);
+                            break;
+                        }
                         err = tbt_fec_rx_record(c, (u8 *)frec, flen);
                     }
                     else
@@ -1293,11 +1486,17 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                         size_t used = tbt_rec_scan(frec, flen, &orec, &rerr);
 
                         if (rerr != TBT_REC_OK || used != flen)
-                            return tbt_http_bad(c, "record scan", -EPROTO);
+                        {
+                            ret = tbt_http_bad(c, "record scan", -EPROTO);
+                            break;
+                        }
                         err = tbt_http_record(c, &orec);
                     }
                     if (err)
-                        return err;
+                    {
+                        ret = err;
+                        break;
+                    }
                     continue;
                 }
                 if (ferr == TBT_RX_NEED_MORE)
@@ -1311,12 +1510,12 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                     break;
                 }
                 atomic64_inc(&sess->http_parse_err);
-                return tbt_http_bad(c, "fec chunk", -EPROTO);
+                ret = tbt_http_bad(c, "fec chunk", -EPROTO);
+                break;
             }
 
-            n = tbt_http_frame_decode(c->http_rx, p->buf, p->have, &rec, &derr);
-            p->have -= n;
-            memmove(p->buf, p->buf + n, p->have);
+            n = tbt_http_frame_decode(c->http_rx, buf, avail, &rec, &derr);
+            pos += n;
             if (derr == TBT_RX_OK)
             {
                 int err = tbt_http_record(c, &rec);
@@ -1326,10 +1525,14 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                     c->http_pending = true;
                     c->http_pending_hdr = rec.hdr;
                     c->http_pending_len = rec.body_len;
-                    return -EAGAIN;
+                    ret = -EAGAIN;
+                    break;
                 }
                 if (err)
-                    return err;
+                {
+                    ret = err;
+                    break;
+                }
                 continue;
             }
             if (derr == TBT_RX_NEED_MORE)
@@ -1343,19 +1546,28 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                 break;
             }
             atomic64_inc(&sess->http_parse_err);
-            return tbt_http_bad(c, "chunk", -EPROTO);
+            ret = tbt_http_bad(c, "chunk", -EPROTO);
+            break;
         }
+        if (ret)
+            break;
         if (c->http_hdr_done)
-            return 0;
+            break;
     }
+    tbt_parser_compact(p, pos);
+    return ret;
 }
 
 static int tbt_rx_parse_raw(struct tbt_carrier *c)
 {
     struct tbt_parser *p = c->parser;
+    size_t pos = 0;
+    int ret = 0;
 
     for (;;)
     {
+        const u8 *buf = p->buf + pos;
+        size_t avail = p->have - pos;
         struct tbt_rec rec;
         int st = TBT_REC_NEED_MORE;
         size_t used;
@@ -1364,31 +1576,39 @@ static int tbt_rx_parse_raw(struct tbt_carrier *c)
          * (DATA..FBK); the old 32-byte header never matches it. Parse the
          * record here and leave the old scanner untouched, so a mixed
          * carrier (HELLO/OPEN/FIN + FEC shares) works. */
-        if (p->have && tbt_fec_record_type(p->buf[0]))
+        if (avail && tbt_fec_record_type(buf[0]))
         {
             size_t need = 0;
-            int fst = tbt_fec_record_len(p->buf, p->have, &need);
+            int fst = tbt_fec_record_len(buf, avail, &need);
             int ferr;
 
             if (fst == TBT_REC_NEED_MORE)
                 break;
             if (fst == TBT_REC_PROTO)
-                return -EPROTO;
+            {
+                ret = -EPROTO;
+                break;
+            }
             if (!c->saw_hello)
-                return -EPROTO;
-            ferr = tbt_fec_rx_record(c, p->buf, need);
+            {
+                ret = -EPROTO;
+                break;
+            }
+            ferr = tbt_fec_rx_record(c, (u8 *)buf, need);
             /* The record was handed to the FEC layer, which may have
              * decrypted it in place. Consume it even on error: retrying the
              * same bytes would XOR the plaintext again and turn one real
              * error into a stream of payload-CRC failures. */
-            p->have -= need;
-            memmove(p->buf, p->buf + need, p->have);
+            pos += need;
             if (ferr)
-                return ferr;
+            {
+                ret = ferr;
+                break;
+            }
             continue;
         }
 
-        used = tbt_rec_scan(p->buf, p->have, &rec, &st);
+        used = tbt_rec_scan(buf, avail, &rec, &st);
         if (st == TBT_REC_NEED_MORE)
             break;
         if (st == TBT_REC_PROTO)
@@ -1397,7 +1617,7 @@ static int tbt_rx_parse_raw(struct tbt_carrier *c)
             {
                 struct tbt_hdr bad;
 
-                tbt_hdr_decode(p->buf, &bad);
+                tbt_hdr_decode(buf, &bad);
                 pr_info_ratelimited("tbtun: carrier proto error: "
                                     "type=%u flags=%u path=%u ackc=%u ackm=%u len=%u "
                                     "seq=%llu sid=%u:%u r2=%u conv=%u\n",
@@ -1407,11 +1627,12 @@ static int tbt_rx_parse_raw(struct tbt_carrier *c)
                                     bad.sid_lo, bad.reserved2, bad.conv);
                 if (debug >= 3)
                     print_hex_dump(KERN_INFO, "tbtun rx: ", DUMP_PREFIX_OFFSET,
-                                   16, 1, p->buf,
-                                   min_t(size_t, p->have, 64), false);
+                                   16, 1, buf,
+                                   min_t(size_t, avail, 64), false);
             }
             atomic64_inc(&c->sess->rx_parse_proto);
-            return -EPROTO;
+            ret = -EPROTO;
+            break;
         }
 
         atomic64_inc(&c->sess->rx_records);
@@ -1424,10 +1645,16 @@ static int tbt_rx_parse_raw(struct tbt_carrier *c)
             int err;
 
             if (rec.hdr.type != TBT_F_HELLO)
-                return -EPROTO;
+            {
+                ret = -EPROTO;
+                break;
+            }
             err = tbt_rx_hello(c, &rec.hdr, rec.body);
             if (err)
-                return err;
+            {
+                ret = err;
+                break;
+            }
             c->saw_hello = true;
         }
         else
@@ -1439,14 +1666,20 @@ static int tbt_rx_parse_raw(struct tbt_carrier *c)
                         rec.hdr.type, rec.hdr.seq, rec.hdr.sid_lo, rec.body_len,
                         p->have);
             if (err == -EAGAIN)
-                return -EAGAIN; // record stays buffered; carrier pauses
+            {
+                ret = -EAGAIN; // record stays buffered; carrier pauses
+                break;
+            }
             if (err)
-                return err;
+            {
+                ret = err;
+                break;
+            }
         }
-        p->have -= used;
-        memmove(p->buf, p->buf + used, p->have);
+        pos += used;
     }
-    return 0;
+    tbt_parser_compact(p, pos);
+    return ret;
 }
 
 static int tbt_rx_parse(struct tbt_carrier *c)
@@ -1599,9 +1832,16 @@ void tbt_rx_check_hole(struct tbt_stream *st)
     }
     if ((now - st->hole_since_ns) / NSEC_PER_USEC > st->rx_max_stall_us)
         st->rx_max_stall_us = (now - st->hole_since_ns) / NSEC_PER_USEC;
-    /* The byte budget is the reorder bound (or 64 KiB, whichever is larger):
-     * a hole that lets the tree reach the reorder bound has already failed. */
-    budget_bytes = sess->tunnel->cfg.rx_reorder_bytes;
+    /* The byte budget is the effective reorder bound (or 64 KiB, whichever is
+     * larger): a hole that lets the tree reach the reorder bound has already
+     * failed. In auto-window mode the sender may legitimately run ahead by
+     * tbt_tx_reorder_floor(n_car), so use the same effective value as
+     * tbt_rx_data() rather than the raw configured bytes. */
+    {
+        u64 eff = tbt_rx_reorder_budget(sess);
+
+        budget_bytes = eff > U32_MAX ? U32_MAX : (u32)eff;
+    }
     if (budget_bytes < TBT_HOLE_BUDGET_BYTES)
         budget_bytes = TBT_HOLE_BUDGET_BYTES;
     if (now - st->hole_since_ns > tbt_rx_hole_budget_ns(sess) ||

@@ -815,6 +815,8 @@ static void case_carrier_helpers(void)
        "alive: not established");
     ok(!tbt_fec_adapt_carrier_alive(true, false, true, now, 0, 100000),
        "alive: never received");
+    ok(!tbt_fec_adapt_carrier_alive(true, false, true, 0, 0, 100000),
+       "alive: never received at time zero");
 }
 
 /* The estimator fold in tbt_fec_data.c keeps one entry per physical group in

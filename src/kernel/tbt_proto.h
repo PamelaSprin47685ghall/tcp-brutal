@@ -104,4 +104,28 @@ static inline bool tbt_hello_admit(bool fec, u16 body_len, const u8 *body,
     return body[1] == want_role;
 }
 
+/* HELLO v11 per-path freshness. A PSK-proved HELLO names the epoch of the
+ * near side's incarnation; the far side keeps the highest epoch it has
+ * accepted on each path (`hwm_valid`, `hwm`) and the epoch of the carrier
+ * still installed in that path's slot (`old_alive`, `old_epoch`).
+ *
+ * A same-or-older authenticated epoch is a replay: accepting it would let a
+ * captured HELLO replace the live carrier, or reinstall a dead one under an
+ * epoch the session has already left behind. A live slot therefore yields
+ * only to a strictly newer epoch, and an empty or dead slot only to an epoch
+ * above the path high-water. Non-PSK HELLOs carry no authenticated epoch
+ * and never reach this predicate; they keep the path-tag/TOFU rules.
+ *
+ * Pure and host-testable: tests/unit/test_wire_compat.c pins the policy. */
+static inline bool tbt_hello_epoch_admit(bool hwm_valid, u64 hwm,
+                                         bool old_alive, u64 old_epoch,
+                                         u64 epoch)
+{
+    if (hwm_valid && epoch <= hwm)
+        return false;
+    if (old_alive && epoch <= old_epoch)
+        return false;
+    return true;
+}
+
 #endif /* _TBT_PROTO_H */

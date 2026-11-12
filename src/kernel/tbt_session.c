@@ -159,9 +159,12 @@ static bool tbt_cfg_sane(const struct tbt_cfg *c, int *err)
         *err = -EINVAL;
         return false;
     }
-    /* The control law lives in the FEC data plane; without it there is no
-     * shape to adapt. The parser already rejects this pair. */
-    if (c->adaptive && !c->fec)
+    /* The control law lives in the FEC data plane and is implemented only
+     * for the mode=3 SC-LDPC codec: without FEC there is no shape to adapt,
+     * and RLNC/grouped have no eval/applied caller. The parser normalises an
+     * explicit adaptive=on for mode!=3 to off; this is the kernel-side
+     * re-proof for a caller that builds struct tbt_cfg directly. */
+    if (c->adaptive && (!c->fec || c->mode != 3))
     {
         *err = -EINVAL;
         return false;
@@ -278,13 +281,24 @@ static unsigned int tbt_tunnel_count_locked(void)
     return n;
 }
 
-/* Carry the session crypto state across a tunnel overwrite. The peer checks
- * every later HELLO against the first one it saw: a new key or a new TX
- * nonce is refused on every carrier, and the peer cannot tell the replaced
- * session's last HELLOs from the replacement's. The TX nonce therefore
- * survives whenever the role is unchanged. The key survives only when this
- * near side generated and announced it; a configured or adopted key is not
- * this tunnel's to carry. The old session is still alive here:
+/* Carry the session crypto state across a tunnel overwrite.
+ *
+ * The generated key survives: a new key would make every replacement HELLO
+ * unreadable to a far side that adopted the old one. The key is carried only
+ * when this near side generated and announced it; a configured or adopted key
+ * is not this tunnel's to carry.
+ *
+ * The TX nonce is deliberately NOT carried across a session replacement. The
+ * replacement's FEC flows restart `seq` at zero, so a reused nonce would seal
+ * new plaintext under a keystream the old session may already have spent; the
+ * per-flow sid is folded into the nonce, but the sid prefix is only 16 random
+ * bits, so that is a 2^-16 accident, not a guarantee. A replacement therefore
+ * generates a fresh nonce. The HELLO generation that announces it is strictly
+ * greater than every generation this module has handed out (see
+ * tbt_hello_epoch_now()), which is what a PSK peer requires before it
+ * rotates its RX nonce. A peer with no configured PSK has no tag to
+ * authenticate the change and refuses it: the replacement fails closed
+ * instead of reusing the keystream. The old session is still alive here:
  * tbt_tunnel_add() destroys it after the new one is installed. */
 static void tbt_tunnel_inherit_crypto(struct tbt_tunnel *t,
                                       const struct tbt_tunnel *old)
@@ -295,35 +309,17 @@ static void tbt_tunnel_inherit_crypto(struct tbt_tunnel *t,
         return;
     if (!s)
     {
-        /* The old session is already gone; the tunnel-level key and nonce
-         * are the only state that can keep the far side's pin valid. */
+        /* The old session is already gone; the tunnel-level key is the only
+         * state that can keep the far side's pin valid. */
         if (old->crypto_key_inherit_valid)
         {
             memcpy(t->crypto_key_inherit, old->crypto_key_inherit,
                    sizeof(t->crypto_key_inherit));
             t->crypto_key_inherit_valid = true;
         }
-        if (old->crypto_tx_nonce_inherit_valid)
-        {
-            memcpy(t->crypto_tx_nonce_inherit, old->crypto_tx_nonce_inherit,
-                   sizeof(t->crypto_tx_nonce_inherit));
-            t->crypto_tx_nonce_inherit_valid = true;
-        }
         return;
     }
     spin_lock(&s->lock);
-    if (s->crypto)
-    {
-        memcpy(t->crypto_tx_nonce_inherit, s->crypto_tx_nonce,
-               sizeof(t->crypto_tx_nonce_inherit));
-        t->crypto_tx_nonce_inherit_valid = true;
-    }
-    else if (old->crypto_tx_nonce_inherit_valid)
-    {
-        memcpy(t->crypto_tx_nonce_inherit, old->crypto_tx_nonce_inherit,
-               sizeof(t->crypto_tx_nonce_inherit));
-        t->crypto_tx_nonce_inherit_valid = true;
-    }
     if (t->cfg.role == TBT_ROLE_NEAR && !t->cfg.crypto_key_set)
     {
         bool got = false;
@@ -359,6 +355,7 @@ int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net)
     struct tbt_tunnel *old, *t;
     int err = 0;
     bool listening = false;
+    bool restored = false;
     u8 i;
 
     if (!tbt_cfg_sane(cfg, &err))
@@ -406,16 +403,14 @@ int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net)
     if (err)
     {
         list_del_rcu(&t->node);
-        mutex_unlock(&tbt_lock);
-        goto undo;
+        goto undo_locked;
     }
     listening = true;
     err = tbt_session_create(t);
     if (err)
     {
         list_del_rcu(&t->node);
-        mutex_unlock(&tbt_lock);
-        goto undo;
+        goto undo_locked;
     }
     /* A connection accepted before the session exists would reach
      * tbt_stream_start(NULL, ...); enable accepting only now. */
@@ -433,19 +428,39 @@ int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net)
     }
     return 0;
 
-undo:
+/* tbt_lock is still held here. The replacement detached `old` and stopped its
+ * listener before the failure-prone steps; its session was deliberately kept
+ * alive. Put that configuration back before another writer can observe the
+ * id missing or install a different tunnel under it: a rejected line must
+ * leave the previous configuration running (DESIGN.md §8.3 no partial
+ * application), not delete it. */
+undo_locked:
     if (listening)
         tbt_listen_stop(t);
-    tbt_session_destroy(t);
-    if (old)
+    if (old && old->sess && !tbt_listen_start(old))
     {
-        /* We detached the previous tunnel before starting the new one; on a
-         * failure it must not be left running detached. */
-        tbt_listen_stop(old);
+        list_add_tail_rcu(&old->node, &tbt_tunnels);
+        atomic_set(&old->accepting, 1);
+        for (i = 0; i < old->nlisteners; i++)
+            schedule_work(&old->listeners[i].w_accept);
+        restored = true;
+    }
+    mutex_unlock(&tbt_lock);
+
+    /* The failed tunnel is off the list, so its session teardown cannot block
+     * any /proc reader or config writer. */
+    tbt_session_destroy(t);
+    tbt_tunnel_put(t);
+    if (old && !restored)
+    {
+        /* Its listener could not be rebound (for example the port was taken
+         * while the replacement was being tried). Drop it instead of leaving
+         * a detached tunnel alive with no listener. */
+        pr_err("tbtun: tunnel %llu replacement failed (%d) and its predecessor could not be restored; dropping the old tunnel\n",
+               (unsigned long long)cfg->id, err);
         tbt_session_destroy(old);
         tbt_tunnel_put(old);
     }
-    tbt_tunnel_put(t);
     return err;
 }
 
@@ -729,6 +744,17 @@ int tbt_action_apply(const struct tbt_cmd *cmd)
                 err = -EINVAL;
                 goto out_unlock;
             }
+            /* The control law is implemented only for mode=3 (SC-LDPC).
+             * RLNC/grouped have no eval/applied caller, so switching the
+             * flag on there would make the c13 stats lie about a controller
+             * that does not exist. Refuse, and keep adaptive=off legal as a
+             * no-op. */
+            if (cmd->adaptive && s->tunnel &&
+                s->tunnel->cfg.mode != 3)
+            {
+                err = -EOPNOTSUPP;
+                goto out_unlock;
+            }
             /* A mode=3 session can adapt only when the data plane built the
              * SC-LDPC controller from an on-ladder initial profile. */
             if (cmd->adaptive && s->tunnel &&
@@ -805,10 +831,15 @@ out_unlock:
         {
             /* `up` is the inverse of `down`; it never dials. A carrier that
              * was shut down has no socket, so this only clears the flag for a
-             * carrier that is still connected. */
-            atomic_set(&c->stopping, 0);
+             * carrier that is still connected. Clearing stopping on a slot
+             * whose socket is already gone would tell the replacement worker
+             * the slot is healthy again, and the dead 5-tuple would never be
+             * redialled. */
             if (tbt_carrier_sk_present(c))
+            {
+                atomic_set(&c->stopping, 0);
                 c->state = TBT_CAR_UP;
+            }
             err = 0;
         }
         else if (cmd->carrier_action == TBT_CARRIER_DROP_PPM)
@@ -988,10 +1019,13 @@ static struct tbt_stream *tbt_stream_get_created(struct tbt_session *sess,
         }
     }
     /* The admission gate and the lifetime gate are checked under the same
-     * lock as the publish: a stream cannot appear after destroy's sweep. */
+     * lock as the publish: a stream cannot appear after destroy's sweep.
+     * Order matters: the reference is taken only after both gates pass, or
+     * the n_active refusal below would leak it (the short-circuit used to
+     * evaluate the increment first, then return without a put). */
     if (READ_ONCE(sess->closing) ||
-        !refcount_inc_not_zero(&sess->refs) ||
-        sess->n_active >= TBT_STREAMS_MAX)
+        sess->n_active >= TBT_STREAMS_MAX ||
+        !refcount_inc_not_zero(&sess->refs))
     {
         spin_unlock(&sess->lock);
         kfree(st);
@@ -1182,7 +1216,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
     bool near = sess->tunnel->cfg.role == TBT_ROLE_NEAR;
     bool adopt = false, drop = false, tombstone_open = false;
     struct tbt_fec_flow *flow = NULL;
-    u16 target_port = 0;
+    u16 target_port = 0, wire_slot = 0;
     u8 route_slot = 0;
     bool flow_admitted = false;
 
@@ -1202,7 +1236,14 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
 
         if (!body || len != TBT_OPEN_BODY_LEN)
             return TBT_BIND_BAD;
-        route_slot = (u8)tbt_le16(body + TBT_OPEN_ROUTE_SLOT);
+        /* Validate the full 16-bit wire field before narrowing it to the u8
+         * slot the mapping table can name. 0x0100 must not alias slot 0:
+         * the near side would accept the far's echo for the wrong mapping,
+         * and the far side would silently serve its slot-0 target. */
+        wire_slot = tbt_le16(body + TBT_OPEN_ROUTE_SLOT);
+        if (wire_slot > 0xff)
+            return TBT_BIND_DROP;
+        route_slot = (u8)wire_slot;
         target_port = tbt_le16(body + TBT_OPEN_TARGET_PORT);
         /* group_mask is the first 32 bytes on both planes, but only a FEC
          * session may set a bit. The OPEN mask is the peer's TX partition, so
@@ -1670,18 +1711,32 @@ static void tbt_reap_work(struct work_struct *w)
         tbt_session_put(sess);
 }
 
+static void tbt_session_arm_reap_now(struct tbt_session *s);
+
 /* A new near incarnation is authenticated by the HELLO generation. Its sid
  * allocator starts from a different per-process value, but the far must not
  * depend on that: sids tombstoned by the process this HELLO replaces belong
  * to an earlier incarnation and must not refuse its first OPEN. Expire every
- * existing tombstone and reap it now, rather than after
- * TBT_REAP_INTERVAL_MS. Tombstones created after this point belong to the
- * new incarnation and keep their TBT_TOMBSTONE_MS guard, so a duplicate
- * OPEN inside one incarnation is still dropped and warned about. */
+ * existing tombstone, then let the session reaper unlink and close them.
+ * Tombstones created after this point belong to the new incarnation and keep
+ * their TBT_TOMBSTONE_MS guard, so a duplicate OPEN inside one incarnation
+ * is still dropped and warned about.
+ *
+ * The reap itself must run on the workqueue, not here. This is called from
+ * tbt_rx_hello_crypto() in the carrier RX work item, which holds that
+ * carrier's sk_lock; tbt_reap_body() cancels stream work items and calls
+ * sock_release() on their sockets, which takes a second AF_INET k-sk_lock.
+ * That nested acquisition is exactly the lockdep recursion tbt_stream_kill()
+ * documents and defers to w_kill for. Expiring the tombstones is the part
+ * the following OPEN needs synchronously; unlinking runs on the workqueue.
+ * tbt_session_arm_reap_now() retimes an already pending 200 ms reaper
+ * instead of losing the wake to arm()'s "bit already set" fast path, so the
+ * expired tombstones are unlinked on the next worker pass rather than after
+ * the retry interval. */
 void tbt_session_reincarnate(struct tbt_session *sess)
 {
     struct tbt_stream *st;
-    int i, cleared = 0;
+    int i, expired = 0;
 
     spin_lock(&sess->lock);
     for (i = 0; i < TBT_STREAM_HT; i++)
@@ -1690,22 +1745,14 @@ void tbt_session_reincarnate(struct tbt_session *sess)
             if (!st->tombstone_until_ns)
                 continue;
             st->tombstone_until_ns = 1;
+            expired++;
         }
     spin_unlock(&sess->lock);
 
-    /* tbt_reap_body unlinks at most TBT_REAP_BATCH expired tombstones per
-     * call. Drain all of them before the new incarnation's first OPEN can
-     * race the 200 ms reaper. */
-    for (;;)
-    {
-        int n = tbt_reap_body(sess);
-
-        if (!n)
-            break;
-        cleared += n;
-    }
-    if (cleared)
-        atomic64_add(cleared, &sess->tombstones_reincarnated);
+    if (!expired)
+        return;
+    atomic64_add(expired, &sess->tombstones_reincarnated);
+    tbt_session_arm_reap_now(sess);
 }
 
 /* One session-wide ARQ/control pump wake.  tbt_tx_wake() used to schedule
@@ -1786,13 +1833,21 @@ void tbt_session_put(struct tbt_session *s)
  * already holding sess->lock. `delay` is in jiffies.
  *
  * The reference is taken before the bit is published: a canceller that sees
- * the bit must always have a reference it may return. The queue attempt can
- * still be refused. cancel_work_sync() disables a work item while it runs,
- * and a queue that races the cancel is dropped silently (kernel 6.10+
- * workqueue). The work_pending() check below detects that and returns the
- * reference here. Without it the reference would be owed to an instance that
- * never exists, so refs would never reach zero and tbt_session_destroy()
- * would wait forever -- the 0.2.1 `del 1` hang. */
+ * the bit must always have a reference it may return. Once the queue call
+ * has been made, the reference belongs to the work item. It must not be
+ * returned here on a work_pending() observation: process_one_work() clears
+ * WORK_STRUCT_PENDING before it invokes the entry, so an immediate instance
+ * (delay 0) can already be running while this thread still sees the sched
+ * bit set. test_and_clear_bit() then succeeds while the entry dereferences
+ * the same object, and the put can free it under the entry -- the entry
+ * finds the bit clear (owned == false) and does not put, so this thread's
+ * put was that instance's only reference.
+ *
+ * The price is that a queue dropped by a concurrent cancel_delayed_work_sync()
+ * leaves the bit and its reference with no entry to return them. Only
+ * teardown cancels, so tbt_session_destroy()'s final sched reclaim collects
+ * that case after every scheduler has stopped and every entry has been
+ * flushed. That is why the arm no longer tries to guess. */
 bool tbt_session_arm(struct tbt_session *s, enum tbt_sess_work w,
                      unsigned long delay)
 {
@@ -1828,23 +1883,48 @@ bool tbt_session_arm(struct tbt_session *s, enum tbt_sess_work w,
         return false;
     }
     mod_delayed_work(TBT_WQ, dw, delay);
-    /* A queue dropped by a concurrent cancel leaves no instance to consume
-     * the bit. The entry clears the bit before it runs, so a lost race with
-     * the entry is not mistaken for a dropped queue: exactly one of the two
-     * clears it and returns the reference. */
-    if (!work_pending(&dw->work) && test_and_clear_bit(w, &s->sched))
-    {
-        tbt_session_put(s);
-        return false;
-    }
     return true;
+}
+
+/* Make the tombstone reaper run now without losing the wake to arm()'s
+ * "bit already set" fast path. Two cases own the sched bit:
+ *
+ *   - a timer-pending instance (the 200 ms re-arm from tbt_reap_body). The
+ *     timer owns the queue but the same arm owns the reference, so retiming
+ *     it to 0 needs no new reference. If the timer fires during the retime,
+ *     the workqueue may queue one extra pass; that pass owns no sched bit or
+ *     reference, and destroy's REAP reclaim flushes it before the session
+ *     can be freed, so it cannot outlive the session.
+ *   - an instance already queued or running (no timer). It will observe the
+ *     expired tombstones when it runs, so queueing another instance would
+ *     only create a duplicate pass.
+ *
+ * With the bit clear, arm() takes the reference for the new queue. The only
+ * canceller is tbt_session_destroy(), whose final sched reclaim flushes REAP
+ * before the session can be freed, so a retime racing that cancel cannot
+ * leave an instance running past the session's lifetime. */
+static void tbt_session_arm_reap_now(struct tbt_session *s)
+{
+    struct delayed_work *dw = tbt_sess_dw(s, TBT_SW_REAP);
+
+    if (!dw)
+        return;
+    if (!test_bit(TBT_SW_REAP, &s->sched))
+    {
+        tbt_session_arm(s, TBT_SW_REAP, 0);
+        return;
+    }
+    if (delayed_work_pending(dw))
+        mod_delayed_work(TBT_WQ, dw, 0);
 }
 
 /* Cancel one session work item. A pending instance never runs its entry, so
  * the canceller returns its reference. A running instance returns its own at
  * the end of the entry wrapper, and cancel_delayed_work_sync() waits for it.
- * A reference taken by an arm that raced this cancel is returned by that
- * arm's own post-queue check; the canceller must not guess at it. */
+ * An arm that races this cancel owns the ambiguity between a queue the
+ * cancel dropped and an instance that already started; tbt_session_arm()
+ * therefore leaves that reference with the sched bit, and the final reclaim
+ * in tbt_session_destroy() returns it. The canceller must not guess at it. */
 void tbt_session_cancel(struct tbt_session *s, enum tbt_sess_work w)
 {
     struct delayed_work *dw;
@@ -1862,15 +1942,78 @@ void tbt_session_cancel(struct tbt_session *s, enum tbt_sess_work w)
 // ---------------------------------------------------------------------------
 // Session lifecycle (C3: one session per tunnel, n carriers, one stream)
 
-/* The HELLO generation clock: realtime microseconds. A restarted process or
- * a recreated session then names a later generation than its predecessor,
- * which is what the far side orders. The only case this cannot order is a
- * backwards wall-clock step on the near host; the far side refuses the
- * generation, counts it, and says so, instead of silently resetting a
- * crypto nonce that a replayed HELLO could then name. */
+/* The last HELLO generation this module handed out. Guarded by the atomic
+ * compare-exchange below; every generation source in the module funnels
+ * through this function, so no later caller can name an equal or older
+ * generation. */
+static atomic64_t tbt_hello_epoch_hwm = ATOMIC64_INIT(0);
+
+/* floor(2^63 / NSEC_PER_USEC), the largest microsecond value a positive
+ * signed 64-bit nanosecond clock can produce. An authenticated epoch at or
+ * above this limit cannot come from a fixed emitter: it is the pre-1970
+ * wrap class, either the old kernel's u64-nanosecond cast (a negative ktime_t
+ * divided by 1000 lands in [limit, 2*limit]) or the old client's u64-seconds
+ * cast (~U64_MAX). Receivers refuse it before it becomes a high-water mark.
+ * The emitter reserves the limit itself, so a fixed sender never trips a
+ * fixed receiver; generation saturates one below it (year 2262). */
+#define TBT_HELLO_EPOCH_LIMIT ((1ULL << 63) / NSEC_PER_USEC)
+
+/* Allocate the next HELLO generation.
+ *
+ * Realtime microseconds keep generations ordered across restarts and across a
+ * module reload, which is what the peer needs. Realtime alone is not safe,
+ * though: ktime_get_real() is signed, a pre-1970 clock makes it negative, and
+ * the old u64 conversion wrapped it into the huge class
+ * [limit, 2*limit) instead of a generation (see TBT_HELLO_EPOCH_LIMIT). A
+ * peer that stored one then refused every sane later generation forever.
+ * Clamp an invalid clock instead of converting it, and take CLOCK_MONOTONIC
+ * as a floor: monotonic is always non-negative and never steps backwards
+ * within a boot, so a backwards wall-clock step or a dead RTC cannot lower a
+ * generation the module has already used. The wall clock still wins normally,
+ * which is the only thing that can order across a reboot.
+ *
+ * The module-wide high-water then makes the result strictly greater than
+ * every previous return: two calls inside one microsecond, or a backwards
+ * wall-clock step, still yield an ordered pair. A strictly later generation
+ * is what authorises a changed TX nonce at a PSK peer
+ * (tbt_rx_hello_crypto), so this is also what lets a replaced tunnel with a
+ * fresh nonce be accepted instead of silently reusing the old keystream.
+ *
+ * Across a reload the wall clock is again the only ordering source. A
+ * backwards step there is refused by the peer, which counts the generation
+ * and keeps its old nonce: the designed fail-closed behaviour. The clamp here
+ * is what keeps that refusal from becoming a permanent high-water pin. */
 u64 tbt_hello_epoch_now(void)
 {
-    return (u64)(ktime_get_real_ns() / NSEC_PER_USEC);
+    s64 real_ns = ktime_to_ns(ktime_get_real());
+    u64 now = 0;
+    u64 prev, next;
+
+    if (real_ns > 0)
+        now = (u64)real_ns / NSEC_PER_USEC;
+    {
+        u64 mono = ktime_get_ns() / NSEC_PER_USEC;
+
+        if (mono > now)
+            now = mono;
+    }
+    if (now >= TBT_HELLO_EPOCH_LIMIT)
+        now = TBT_HELLO_EPOCH_LIMIT - 1;
+
+    prev = (u64)atomic64_read(&tbt_hello_epoch_hwm);
+    for (;;)
+    {
+        /* Generation is a u64 but a receiver refuses the wrap class above.
+         * Saturating one below it keeps every emitted value acceptable; only
+         * a wall clock at the 2262 representable limit loses strict order. */
+        if (prev >= TBT_HELLO_EPOCH_LIMIT - 1)
+            return TBT_HELLO_EPOCH_LIMIT - 1;
+        next = now > prev ? now : prev + 1;
+        if ((u64)atomic64_cmpxchg(&tbt_hello_epoch_hwm, (s64)prev,
+                                  (s64)next) == prev)
+            return next;
+        prev = (u64)atomic64_read(&tbt_hello_epoch_hwm);
+    }
 }
 
 int tbt_session_create(struct tbt_tunnel *t)
@@ -1899,6 +2042,9 @@ int tbt_session_create(struct tbt_tunnel *t)
     INIT_LIST_HEAD(&s->tx_q);
     INIT_LIST_HEAD(&s->prov);
     INIT_LIST_HEAD(&s->dead_release);
+    /* Unused by the tunnel today; the session's node links the unload-time
+     * list of sessions that tbt_session_destroy() had to leak. */
+    INIT_LIST_HEAD(&s->node);
     atomic_set(&s->n_prov, 0);
     INIT_LIST_HEAD(&s->pending);
     s->n_pending = 0;
@@ -1954,12 +2100,17 @@ int tbt_session_create(struct tbt_tunnel *t)
      * advertises it with key_id=1. The far side learns it from the near's
      * HELLO before its own TX context can be initialized. */
     s->crypto = t->cfg.crypto;
-    /* Our own HELLO generation. It only has to increase when our TX nonce
-     * changes; a session replacement inherits the nonce and needs no new
-     * value, but a later rotation always names a later one. */
+    /* Our own TX nonce generation. Every crypto session rotates its TX nonce
+     * below, a replacement included, so this must be greater than the
+     * replaced session's: tbt_hello_epoch_now() returns a value greater than
+     * every generation this module has handed out. A HELLO body does not
+     * reuse it: tbt_tx_hello() allocates a fresh epoch per carrier, which is
+     * necessarily above this session-create value. */
     s->crypto_tx_epoch = tbt_hello_epoch_now();
-    if (!s->crypto_tx_epoch)
-        s->crypto_tx_epoch = 1;
+    /* HELLO v11: no path has an authenticated epoch yet. kzalloc() already
+     * zeroed the table; the explicit clear keeps the initialization here,
+     * next to the other session-identity state. */
+    bitmap_zero(s->peer_hello_epoch_valid, TBT_MAX_CARRIERS_LIMIT);
     bool inherited_key = false;
     if (t->cfg.crypto_key_set)
     {
@@ -1972,20 +2123,16 @@ int tbt_session_create(struct tbt_tunnel *t)
         TBT_DIAG("crypto setup start tunnel=%llu role=%u key_set=%d",
                  (unsigned long long)t->cfg.id, t->cfg.role,
                  t->cfg.crypto_key_set);
-        /* Replacing a tunnel must repeat this direction's nonce: the peer
-         * checks every later HELLO against the first one it saw, and the
-         * replacement's HELLOs are indistinguishable from the old ones.
-         * Only a tunnel with no predecessor generates a fresh nonce. */
-        if (t->crypto_tx_nonce_inherit_valid)
-            memcpy(s->crypto_tx_nonce, t->crypto_tx_nonce_inherit,
-                   sizeof(s->crypto_tx_nonce));
-        else
-        {
-            get_random_bytes(s->crypto_tx_nonce, sizeof(s->crypto_tx_nonce));
-            memcpy(t->crypto_tx_nonce_inherit, s->crypto_tx_nonce,
-                   sizeof(t->crypto_tx_nonce_inherit));
-            t->crypto_tx_nonce_inherit_valid = true;
-        }
+        /* Every session, replacement included, gets a fresh TX nonce. The
+         * replaced session's FEC flows may already have sealed data, and a
+         * new flow restarts `seq` at zero, so reusing the nonce would risk a
+         * two-time pad: the sid folded into the stream differs between
+         * sessions by only 16 random bits. A PSK peer accepts the rotation
+         * because the HELLO carries a strictly later generation; a
+         * generated-key peer has no tag and refuses it, which stops the
+         * carriers (fail closed) instead of spending the old keystream
+         * twice. */
+        get_random_bytes(s->crypto_tx_nonce, sizeof(s->crypto_tx_nonce));
         if (t->cfg.role == TBT_ROLE_NEAR && !s->crypto_have_key)
         {
             /* The tunnel owns the generated key: the first near session
@@ -2067,6 +2214,103 @@ int tbt_session_create(struct tbt_tunnel *t)
     TBT_DIAG("session create done tunnel=%llu n_car=%u poll_ms=50",
              (unsigned long long)t->cfg.id, s->n_car);
     return 0;
+}
+
+/* True while tbt_core.c's exit path is tearing the module down. Set before
+ * tbt_tunnel_shutdown(), because module_exit cannot fail and module text must
+ * not be unmapped while a leaked work item can still run it. */
+static bool tbt_session_unloading;
+
+/* Called by tbt_core.c; prototypes live there until tbtun.h can carry them. */
+void tbt_session_mark_unloading(void);
+void tbt_session_wait_leaked(void);
+
+/* Called by tbt_core.c from tbtun_exit(), after tbt_procfs_exit() has stopped
+ * new writers and before tbt_tunnel_shutdown(). Declared locally there until
+ * tbtun.h carries the prototype. */
+void tbt_session_mark_unloading(void)
+{
+    WRITE_ONCE(tbt_session_unloading, true);
+}
+
+/* Sessions whose destroy timed out with references still held. They are off
+ * every tunnel list (the tunnel was freed), so tbt_tunnel_shutdown() cannot
+ * see them; only module exit can still reach them. Guarded by
+ * tbt_leaked_lock, using the session's otherwise unused list node. */
+static LIST_HEAD(tbt_leaked_sessions);
+static DEFINE_MUTEX(tbt_leaked_lock);
+
+/* Last owner of a session object: all references were returned and every
+ * work item has run its final put. */
+static void tbt_session_free_now(struct tbt_session *s)
+{
+    tbt_crypto_pair_wipe(&s->crypto_ctx);
+    tbt_memzero_explicit(s->crypto_key, sizeof(s->crypto_key));
+    put_net(s->net);
+    kfree(s);
+}
+
+/* Recover the reference of a session work whose queue a cancel dropped while
+ * tbt_session_arm() was publishing its sched bit (see the ownership note on
+ * that function). Only valid from destroy, after every arm source has been
+ * stopped: then a cancel flush leaves no instance running, and a still-set
+ * bit with no pending instance cannot belong to an entry that is about to
+ * run. Two passes catch a body that armed a work whose turn had already
+ * passed. */
+static void tbt_session_sched_reclaim(struct tbt_session *s)
+{
+    int pass, w;
+
+    for (pass = 0; pass < 2; pass++)
+    {
+        for (w = 0; w <= TBT_SW_FEC_CUT; w++)
+        {
+            struct delayed_work *dw = tbt_sess_dw(s, (enum tbt_sess_work)w);
+
+            if (!dw)
+                continue;
+            cancel_delayed_work_sync(dw);
+            if (!work_pending(&dw->work) &&
+                test_and_clear_bit(w, &s->sched))
+                tbt_session_put(s);
+        }
+    }
+}
+
+/* The same recovery for the five per-stream work items. Destroy has already
+ * stopped every scheduler outside the stream, so no instance can be armed
+ * after its cancel flush. Two passes cover a body that schedules a sibling
+ * work whose slot in the table was already processed. */
+static void tbt_stream_sched_reclaim(struct tbt_stream *st)
+{
+    static const unsigned long bits[] = {
+        TBT_STREAM_F_SCHED_READ,
+        TBT_STREAM_F_SCHED_DRAIN,
+        TBT_STREAM_F_SCHED_CTRL,
+        TBT_STREAM_F_SCHED_KILL,
+        TBT_STREAM_F_SCHED_TARGET,
+    };
+    struct work_struct *works[] = {
+        &st->w_read,
+        &st->w_drain,
+        &st->w_ctrl,
+        &st->w_kill,
+        &st->w_target,
+    };
+    int pass, i;
+
+    BUILD_BUG_ON(sizeof(bits) / sizeof(bits[0]) !=
+                 sizeof(works) / sizeof(works[0]));
+    for (pass = 0; pass < 2; pass++)
+    {
+        for (i = 0; i < (int)(sizeof(bits) / sizeof(bits[0])); i++)
+        {
+            cancel_work_sync(works[i]);
+            if (!work_pending(works[i]) &&
+                test_and_clear_bit(bits[i], &st->attached))
+                tbt_stream_put(st);
+        }
+    }
 }
 
 /* Tear a session down in the reference-counted order of
@@ -2197,11 +2441,20 @@ void tbt_session_destroy(struct tbt_tunnel *t)
              * for it and return a pending instance's reference. */
             tbt_stream_cancel(victim, &victim->w_kill,
                               TBT_STREAM_F_SCHED_KILL);
+            /* w_target owns the far-side dial; a stream that showed up here
+             * without the first pass must still stop it before the socket
+             * release. */
+            tbt_stream_cancel(victim, &victim->w_target,
+                              TBT_STREAM_F_SCHED_TARGET);
             tbt_fec_flow_detach(victim);
             /* Detach restores core callbacks, then release the socket this
              * stream owns.  A detached but unreleased accepted socket keeps
              * module text and oopses after unload (F2). */
             tbt_stream_release_socket(victim);
+            /* A queue a concurrent cancel dropped kept a stream reference
+             * with no entry to return it; reclaim it now that every work of
+             * this stream has been flushed. */
+            tbt_stream_sched_reclaim(victim);
             tbt_stream_put(victim);
         }
     }
@@ -2220,6 +2473,11 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     tbt_session_cancel(s, TBT_SW_FEC_CUT);
     tbt_session_cancel(s, TBT_SW_TX);
 
+    /* The assertion pass above does not cover POLL/PENDING/REAP and returns
+     * only the references of instances it actually canceled. Collect the
+     * arm/cancel race leftovers before the FEC planes go away. */
+    tbt_session_sched_reclaim(s);
+
     tbt_fec_data_free(s);
 
     up_write(&s->stats_lock);
@@ -2230,22 +2488,69 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     if (!wait_for_completion_timeout(&s->drained,
                                      msecs_to_jiffies(TBT_SESSION_DRAIN_MS)))
     {
-        /* A reference nobody returns used to block this thread forever
-         * (0.2.1: `del 1` waited hours in D state and pinned rmmod behind
-         * it). Do not free a session that a holder can still reach: report
-         * what is left and leak it. */
-        pr_err("tbtun: tunnel %llu session destroy: %u references still held after %u ms (sched=%#lx streams=%u active=%u carriers=%u); session leaked\n",
-               (unsigned long long)t->cfg.id,
-               (unsigned int)refcount_read(&s->refs), TBT_SESSION_DRAIN_MS,
-               READ_ONCE(s->sched), (unsigned int)s->n_streams,
-               (unsigned int)s->n_active, (unsigned int)s->n_car);
-        return;
+        if (READ_ONCE(tbt_session_unloading))
+        {
+            /* Unload cannot fail, and module_exit() is about to unmap the
+             * text every surviving callback would return to. Wait instead of
+             * returning: a genuinely stuck holder now blocks rmmod, which is
+             * the only outcome that is not a use-after-free. */
+            pr_err("tbtun: tunnel %llu session destroy: %u references still held after %u ms; unload waits for them\n",
+                   (unsigned long long)t->cfg.id,
+                   (unsigned int)refcount_read(&s->refs),
+                   TBT_SESSION_DRAIN_MS);
+            wait_for_completion(&s->drained);
+        }
+        else
+        {
+            /* A reference nobody returns used to block this thread forever
+             * (0.2.1: `del 1` waited hours in D state and pinned rmmod behind
+             * it). Do not free a session that a holder can still reach:
+             * report what is left and leak it. */
+            pr_err("tbtun: tunnel %llu session destroy: %u references still held after %u ms (sched=%#lx streams=%u active=%u carriers=%u); session leaked\n",
+                   (unsigned long long)t->cfg.id,
+                   (unsigned int)refcount_read(&s->refs), TBT_SESSION_DRAIN_MS,
+                   READ_ONCE(s->sched), (unsigned int)s->n_streams,
+                   (unsigned int)s->n_active, (unsigned int)s->n_car);
+            /* The tunnel is about to be freed. Leaked holders may still run;
+             * the bodies that check this pointer must see it cleared rather
+             * than dangling. */
+            spin_lock(&s->lock);
+            WRITE_ONCE(s->tunnel, NULL);
+            spin_unlock(&s->lock);
+            /* The tunnel list no longer owns this session, so shutdown
+             * cannot find it. Keep it for the unload-time wait; its
+             * references may still drain, in which case the wait frees it. */
+            mutex_lock(&tbt_leaked_lock);
+            list_add_tail(&s->node, &tbt_leaked_sessions);
+            mutex_unlock(&tbt_leaked_lock);
+            return;
+        }
     }
 
-    tbt_crypto_pair_wipe(&s->crypto_ctx);
-    tbt_memzero_explicit(s->crypto_key, sizeof(s->crypto_key));
-    put_net(s->net);
-    kfree(s);
+    tbt_session_free_now(s);
+}
+
+/* Called by tbt_core.c from tbtun_exit() after tbt_tunnel_shutdown(). Waits
+ * out every session an earlier destroy had to leak, then frees it. Closing
+ * was set when that destroy ran, so no new reference can be taken and a
+ * completed &drained means the object is unreachable. A stuck reference
+ * blocks rmmod, which is the same UAF-free policy as the unload wait inside
+ * tbt_session_destroy(). */
+void tbt_session_wait_leaked(void)
+{
+    struct tbt_session *s, *tmp;
+    LIST_HEAD(victims);
+
+    mutex_lock(&tbt_leaked_lock);
+    list_splice_init(&tbt_leaked_sessions, &victims);
+    mutex_unlock(&tbt_leaked_lock);
+
+    list_for_each_entry_safe(s, tmp, &victims, node)
+    {
+        list_del_init(&s->node);
+        wait_for_completion(&s->drained);
+        tbt_session_free_now(s);
+    }
 }
 
 /* Install an accepted carrier at its HELLO-named index. A live occupant is a
@@ -2261,7 +2566,9 @@ void tbt_session_destroy(struct tbt_tunnel *t)
 void tbt_session_retire(struct tbt_session *sess, u8 index, u8 gen)
 {
     struct tbt_carrier *old;
+    struct tbt_stream *st;
     bool retired = false;
+    int b;
 
     if (!sess || index >= sess->n_car)
         return;
@@ -2276,9 +2583,25 @@ void tbt_session_retire(struct tbt_session *sess, u8 index, u8 gen)
     if (old && (old->peer_gen & 0xf) == (gen & 0xf))
     {
         atomic_set(&old->stopping, 1);
+        /* The replacement has a new carrier generation. The announce marks
+         * store that generation modulo 16, so a stale mark makes
+         * tbt_stream_announced() claim the new carrier already received this
+         * stream's OPEN and the pump never sends it (up stays 0). This is
+         * the same invalidation tbt_carrier_lost() performs for a local
+         * failure; the peer-driven RETIRE path needs it too. */
+        for (b = 0; b < TBT_STREAM_HT; b++)
+            hlist_for_each_entry(st, &sess->streams[b], node)
+                clear_bit(index, st->announced_mask);
         retired = true;
     }
     spin_unlock(&sess->lock);
+    if (retired)
+    {
+        /* Frames last written on this path are a known loss, not a
+         * suspected one: drop its bits from the retain masks and repath them
+         * now instead of waiting for the RTO. */
+        tbt_tx_path_lost(sess, index);
+    }
     /* Close the replaced socket now, not at the next poll: until w_replace
      * runs, the far holds a dead 5-tuple and its peers row names the old
      * generation. */
@@ -2286,7 +2609,13 @@ void tbt_session_retire(struct tbt_session *sess, u8 index, u8 gen)
         tbt_session_arm(sess, TBT_SW_REPLACE, 0);
 }
 
-int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
+/* Install a HELLO-validated carrier in its path slot. `authenticated` is
+ * true when the HELLO carried a valid PSK tag; only then does its epoch
+ * count against the per-path high-water. A same-or-older authenticated epoch
+ * is a replay and is refused; a live old carrier yields only to a strictly
+ * newer epoch. A non-PSK HELLO keeps the four-bit generation rule below. */
+int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index,
+                     bool authenticated)
 {
     struct tbt_carrier *old;
     struct tbt_stream **snap;
@@ -2324,7 +2653,23 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
         return -ENOTCONN;
     }
     old = sess->car[index];
-    if (old && old != c && !tbt_carrier_dead(old))
+    if (authenticated)
+    {
+        bool old_alive = old && old != c && !tbt_carrier_dead(old);
+
+        if (!tbt_hello_epoch_admit(
+                test_bit(index, sess->peer_hello_epoch_valid),
+                sess->peer_hello_epoch[index], old_alive,
+                old ? old->hello_epoch : 0, c->hello_epoch))
+        {
+            /* A replayed or stale incarnation. Count it with the other
+             * duplicate joins: the peer sees the same refusal either way. */
+            sess->session_join_dup++;
+            spin_unlock(&sess->lock);
+            return -EALREADY;
+        }
+    }
+    else if (old && old != c && !tbt_carrier_dead(old))
     {
         /* A HELLO from the same or a newer generation supersedes the slot.
          * The near replaces a carrier as soon as its own bytes stop being
@@ -2357,6 +2702,15 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
         atomic_dec(&sess->n_prov);
     }
     list_del_init(&c->node);
+    if (authenticated)
+    {
+        /* Publish only after the slot install, under ->lock: a refused or
+         * failed join must not raise the path high-water. Compare-and-max
+         * keeps a slower concurrent join from lowering it. */
+        if (c->hello_epoch > sess->peer_hello_epoch[index])
+            sess->peer_hello_epoch[index] = c->hello_epoch;
+        __set_bit(index, sess->peer_hello_epoch_valid);
+    }
     if (old && old != c)
     {
         atomic64_inc(&sess->carrier_replaced);

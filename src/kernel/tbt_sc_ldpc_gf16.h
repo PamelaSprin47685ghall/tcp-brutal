@@ -47,6 +47,14 @@ gf16_code *gf16_build(const sc_params *p, uint64_t coef_seed, char *err,
                       size_t errlen);
 void gf16_free(gf16_code *c);
 
+/* Allocate the decoder-only scratch on first use.  The constructor keeps
+ * only the graph and the encoder state, so a transmit codec never pays for
+ * the peel, batch, core and 64-lane buffers.  Every decode entry point
+ * calls this; it is idempotent.  Returns nonzero when an allocation fails
+ * and leaves the object unchanged.  Must run in process context (the module
+ * decodes on its FEC workqueue). */
+int gf16_ensure_decode(gf16_code *c);
+
 int gf16_n(const gf16_code *c);
 int gf16_n_data(const gf16_code *c);
 int gf16_n_par(const gf16_code *c);
@@ -54,22 +62,26 @@ u32 gf16_mem(const gf16_code *c);
 
 /* Systematic encoder.  code[0 .. n_data-1] holds the payload symbols on
  * entry; code[n_data .. n-1] receives the parity symbols. */
+#ifndef __KERNEL__
 int gf16_encode(gf16_code *c, uint8_t *code);
+#endif
 
 /* Returns 0 if every check equation holds, else 1 + index of first bad check. */
 int gf16_verify(const gf16_code *c, const uint8_t *code);
 
+#ifndef __KERNEL__
 /* q-ary peeling decoder for the BEC.  recv[v] holds the received symbol of
  * a non-erased variable; erased[v] != 0 marks an erasure.  out[v] receives
  * the decoded symbol of every variable (0 for unresolved).  max_core caps
  * the dense core solve in variables; 0 disables it. */
+/* Success is a code-consistency result, not just "no erasure left": before
+ * any target symbol is returned the decoder certifies the recovered data
+ * against every check row (and every received parity symbol).  A caller
+ * must therefore trust out[]/unresolved only when unresolved == 0. */
 gf16_dec_stat gf16_decode(gf16_code *c, const uint8_t *recv,
                           const uint8_t *erased, uint8_t *out,
                           int target_data_only, int max_core);
-
-/* Decoder knowledge after the last gf16_decode(): 1 = value known.  The
- * batched entry point below does not maintain this array. */
-const uint8_t *gf16_known(const gf16_code *c);
+#endif
 
 /* 64-lane bit-sliced encoder.  vp holds four uint64 planes per variable,
  * interleaved (vp[v*4 + b]); bit c is codeword c's bit b, for c < 64.
@@ -86,8 +98,12 @@ void gf16_encode_planes(gf16_code *c, int B, uint64_t *vp);
  * address; an unresolved variable is zeroed.  The peel runs once for the
  * batch; after it stalls the dense core solve performs one GF(16)
  * elimination on the shared coefficient matrix and carries the 64
- * right-hand sides in planes.  Returns the batch statistics; unresolved ==
- * 0 means every target variable decoded. */
+ * right-hand sides in planes.  Before reporting success the decoder walks
+ * every check row: a known owned symbol is compared against the value its
+ * other neighbours imply and an erased one is filled, so the residual is
+ * checked in all 64 lanes (the core solve's own verify covers lane 0).
+ * Returns the batch statistics; unresolved == 0 means every target
+ * variable decoded and the residual is clean. */
 gf16_dec_stat gf16_decode64(gf16_code *c, uint64_t *planes,
                             const uint8_t *erased, int target_data_only,
                             int max_core);
@@ -99,6 +115,7 @@ gf16_dec_stat gf16_decode64(gf16_code *c, uint64_t *planes,
 /* Codewords processed together by gf16_decode_batch().  The graph is the
  * same for every slot; only recv/erased differ.  The slots are peeled in
  * lockstep so several independent walks hide each other's cache misses. */
+#ifndef __KERNEL__
 #define GF16_BATCH 4
 
 /* Decode B <= GF16_BATCH codewords of one graph.  recv_b and erased_b hold
@@ -109,5 +126,6 @@ void gf16_decode_batch(gf16_code *c, int B, const uint8_t *recv_b,
                        const uint8_t *erased_b, uint8_t *out_b,
                        int target_data_only, int max_core,
                        gf16_dec_stat *st_b);
+#endif /* !__KERNEL__ */
 
 #endif /* _TBT_SC_LDPC_GF16_H */

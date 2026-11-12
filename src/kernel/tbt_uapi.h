@@ -168,9 +168,29 @@ static inline u16 tbt_port_host16(u16 net)
  * either. A version-8 peer fails tbt_hello_admit() by length and version at
  * the first HELLO, so the two revisions never share a session; TBT_CONV moves
  * to 0x000c as the session gate, and TBT_FEC_CONV stays 0x100b because no
- * FEC record moved. */
+ * FEC record moved.
+ *
+ * Version 10 is the path-bound authentication cut: the HELLO PSK tag now
+ * covers the outer carrier index (path_id) as well as the 74 body bytes, and
+ * the PARITY keystream derivation separates sid_hi from share_index. No body
+ * field, length, or offset moves, but a captured v9 HELLO can be replayed at
+ * another path_id and the PARITY ciphertext changes, so the HELLO version is
+ * the narrow session gate: TBT_WIRE_VERSION_V6 moves 9 -> 10. TBT_CONV stays
+ * 0x000d because the 32-byte header and legacy ARQ wire are byte-identical;
+ * every FEC session is refused at its first HELLO until both ends upgrade.
+ *
+ * Version 11 is the HELLO freshness cut: every carrier's HELLO body carries
+ * a fresh, strictly increasing epoch, and a far side keeps a per-path
+ * high-water of PSK-authenticated epochs. A HELLO whose authenticated epoch
+ * is at or below that path's high-water is a replay and is refused; a
+ * replacement for a live carrier must name a strictly newer epoch than the
+ * carrier it replaces. No body field, length, offset, or tag input moves, but
+ * the version byte is inside the tagged bytes and the replay rule is new, so
+ * TBT_WIRE_VERSION_V6 moves 10 -> 11. TBT_CONV and TBT_FEC_CONV stay 0x000d
+ * and 0x100c: the ARQ wire and the FEC record layout are unchanged, and the
+ * HELLO version is the session gate that refuses a v10 FEC peer. */
 #define TBT_WIRE_VERSION 1
-#define TBT_WIRE_VERSION_V6 9
+#define TBT_WIRE_VERSION_V6 11
 
 /* ------------------------------------------------------------------ *
  * FEC wire: an independent record format, TBT_FEC_CONV 0x100c.
@@ -618,7 +638,8 @@ enum tbt_frame_type
 /* FEC HELLO: the 23 legacy bytes, then crypto (1), key_id (1), reserved (1),
  * crypto_nonce[8], key[32] at +23..+65 (T0 §2.3), then the authenticated
  * generation tail: boot_epoch (u64 LE) at +66 and the 128-bit tag at +74.
- * The tail arrived with wire version 9; TBT_CRYPTO_HELLO_* names the offsets.
+ * The tail arrived with wire version 9 and still has the same layout at 10;
+ * TBT_CRYPTO_HELLO_* names the offsets.
  * The old ARQ never sends this length. */
 #define TBT_HELLO_BODY_LEN_V6 (TBT_HELLO_BODY_LEN + 43 + 24)      /* 90 */
 

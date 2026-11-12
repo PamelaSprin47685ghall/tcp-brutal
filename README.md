@@ -50,16 +50,16 @@ uplink, 512 reserved) and the rate follows `n/(n+m)`. The per-direction
 `FEC_CFG` INIT carries `L`, block and rate, and the receiver uses the peer's
 shape. `mode=rlnc`/`grouped` remain as the GF(2) band RLNC fallback.
 
-Adaptive FEC (`adaptive=`) defaults on when `fec=on`. The GF(2)
-`mode=rlnc`/`grouped` family keeps Phase 1: the shape stays in the
-`n + m = 8`, 32-group family and `m` moves in 1..6. `mode=sc-ldpc` uses the
-per-flow SC-LDPC estimator/controller and moves the split along the shipped
-rate ladder (downlink `n+m=256` with `n` in 64/76/102/128/151/178; uplink
+Adaptive FEC (`adaptive=`) is implemented only for `mode=sc-ldpc`. Its
+per-flow SC-LDPC estimator/controller moves the split along the shipped rate
+ladder (downlink `n+m=256` with `n` in 64/76/102/128/151/178; uplink
 `n+m=32` with `n` in 8/16/20/24). The switch rides `FEC_CFG`/`FEC_FBK`
 (wire `0x100c`). A `mode=sc-ldpc` line whose split is not on that ladder
 stays `adaptive=off`, so a fixed test shape keeps its configured `n/m`.
-`adaptive=off` always wins; `session <id> adaptive=off` disables it at
-runtime. Shapes with `n + m != 8` are not implemented for the GF(2) family.
+`mode=rlnc`/`grouped` has no kernel adaptive controller: an explicit
+`adaptive=on` is normalized to `off` (n/m are preserved), and the canonical
+config/stats report `adaptive=off`. `adaptive=off` always wins;
+`session <id> adaptive=off` disables it at runtime.
 
 One session carries one FEC flow (wire `0x100c`). There is no subframe mux:
 a DATA or PARITY payload is plain application bytes. An 8 KiB write becomes one full DATA share as the
@@ -169,9 +169,14 @@ both ends must run the same build.
 The 36-byte OPEN carries: the 32-byte FEC group bitmap, the
 little-endian route slot (the near side's listen mapping), and the
 little-endian target port for that slot. Zero keeps the far side's configured
-port; any other value must equal it. `TBT_WIRE_VERSION_V6` is 9:
-version 9 grows the HELLO body to 90 bytes with a `boot_epoch` and a 128-bit
-SipHash tag over the session-naming bytes. A configured `crypto_key=` (the
+port; any other value must equal it. `TBT_WIRE_VERSION_V6` is 11:
+version 9 grew the HELLO body to 90 bytes with a `boot_epoch` and a 128-bit
+SipHash tag over the session-naming bytes; version 10 binds that tag to the
+outer carrier `path_id` and separates the PARITY nonce words; version 11 makes
+every HELLO carry a fresh, strictly increasing epoch, so a far side refuses a
+replayed epoch on the same path and replaces a live carrier only with a
+strictly newer incarnation. A configured
+`crypto_key=` (the
 256-bit PSK) proves the tag, so a restarted client may present a fresh crypto
 nonce and a client whose address changed may re-anchor; without the key the
 tag is absent and the HELLO stays unauthenticated.
@@ -361,7 +366,9 @@ before trying.
 One directive per line. A directive is applied only when its line is complete: a
 newline, or `close()` for a final unterminated line. A bad line returns `EINVAL`
 from `write()`, so `echo` fails visibly, and nothing from that line is applied.
-A line longer than 1023 bytes is refused with `E2BIG`. A whole-line `#` comment is
+A line longer than `TBT_LINE_MAX - 1` (currently 1151) bytes is refused with
+`E2BIG`; the same bound applies to the canonical `config` render, so a parsed
+configuration is always writable back. A whole-line `#` comment is
 ignored; a `#` after a token is not a comment and the line is refused.
 
 `tunnel <id>` takes these keys:
@@ -383,12 +390,12 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `max_inflate` | `2.000` | Duplication inflation ceiling |
 | `hole_budget_ms` | `0` | How long a hole may stay open, `0..60000` ms; `0` = auto from the measured RTT (floor 2 s) |
 | `rx_reorder_bytes` | `67108864` | Receiver reorder budget, bytes, `1..268435456`; bounds each stream's reorder tree and the session-wide sum; `0` is refused |
-| `tx_window_bytes` | `67108864` | Sender window bytes; `0` = auto from the carriers' BBR samples and aggregate advertised window (the cap scales with the carrier count); an explicit value must not exceed `rx_reorder_bytes` and is never truncated |
+| `tx_window_bytes` | `0` | Sender window bytes; `0` = auto from the carriers' BBR samples and aggregate advertised window (the cap scales with the carrier count); an explicit value must not exceed `rx_reorder_bytes` and is never truncated |
 | `tx_retain_bytes` | `0` | Sender retention bytes, `0` = unlimited |
 | `carrier_stall_ms` | `0` | Cap on the stall threshold, `0..3600000` ms; `0` = auto: 5 × RTO (`SRTT + 4×RTTVAR`), clamped to 1..60 s. An explicit value only lowers the auto threshold |
 | `profile` | `http-kal` | `http-kal`, `http-kal-drip`, or `raw` |
 | `fec` | `off` | `off` (old ARQ) or `on` (FEC v6 data plane) |
-| `adaptive` | `on` when `fec=on` | `on` lets the control law move `n/m`; `on` requires `fec=on`; with `mode=sc-ldpc` the default is `on` only for a split on the shipped ladder, otherwise `off`; `adaptive=off` always wins |
+| `adaptive` | `on` for a `mode=sc-ldpc` ladder split, otherwise `off` | `on` lets the SC-LDPC control law move `n/m`; `on` requires `fec=on` and `mode=sc-ldpc`; `rlnc`/`grouped` normalize `adaptive=on` to `off`; `adaptive=off` always wins |
 | `mode` | `rlnc` | `rlnc` (one group), `grouped` (GF(2) band RLNC), or `sc-ldpc` (downlink 1×256 binary, uplink grouped GF(16); `w` is the codeword block) |
 | `w` | `0` | RLNC window, `0..1024`; `0` resolves to `2*n` |
 | `carriers` | `0` | Carrier slots, `0..256`; `0` resolves to `n + m`; must be a multiple of `n + m` |
@@ -586,10 +593,11 @@ one.
   runs the downlink binary block (1×256) or the uplink grouped GF(16) code
   (8×32, `L=16`); `adaptive=on` moves the split along the shipped rate ladder
   in both directions. `rlnc`/`grouped` remain as the GF(2) band RLNC fallback.
-- **Adaptive FEC.** The GF(2) family keeps Phase 1: `adaptive=on` moves `m`
-  in the fixed `n + m = 8`, 32-group family; `n + m != 8` is not implemented.
-  `mode=sc-ldpc` moves the configured split along the ladder; a non-ladder
-  split stays fixed. `adaptive=off` keeps the configured shape.
+- **Adaptive FEC.** Only `mode=sc-ldpc` has a kernel control law; it moves
+  the configured ladder split. `mode=rlnc`/`grouped` normalizes
+  `adaptive=on` to `off` (the GF(2) Phase 1 controller is not wired to the
+  data plane). A non-ladder SC-LDPC split stays fixed. `adaptive=off` keeps
+  the configured shape.
 - **Single-stream FEC.** A session carries one FEC flow (`0x100c`). The
   DATA/PARITY payload is the application byte stream, and an 8 KiB write is
   one DATA share, so no per-stream demux or window state exists.

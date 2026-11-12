@@ -162,8 +162,19 @@ void tbt_fec_codec_cache_destroy(struct tbt_fec_codec_cache *c)
         e->used = 0;
         c->used--;
     }
-    if (!c->retiring)
-        slots_free(c);
+    if (c->retiring)
+        return;
+    /* The release decision belongs to the object itself, whichever side
+     * drains the last reference. Reading c->retiring in the caller after
+     * this function returns would race the last put(): that put frees the
+     * slot array and calls release(c), so a caller-side test would read
+     * freed memory and could free the object a second time. */
+    slots_free(c);
+    if (c->free_self && c->release)
+    {
+        c->free_self = 0;
+        c->release(c);
+    }
 }
 
 struct tbt_fec_codec_entry *

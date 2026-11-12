@@ -681,8 +681,8 @@ def audit_message(msg, direction, carrier, round_no, audit, ctx):
             f"{ctx}: HELLO uses the 90-byte v9 body",
         )
         audit.need(
-            hello["body"][0] == 9,
-            f"{ctx}: HELLO body[0] is TBT_WIRE_VERSION_V6",
+            hello["body"][0] == 11,
+            f"{ctx}: HELLO body[0] is TBT_WIRE_VERSION_V6 (v11)",
         )
         audit.need(
             hello["body"][1] == (2 if direction == "request" else 3),

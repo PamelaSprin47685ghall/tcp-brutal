@@ -123,9 +123,14 @@ struct gf16_code {
     uint16_t *owned; /* n_chk */
 
     /* decoder scratch */
-    uint16_t *cx;   /* low 4 bits: known-value XOR; high byte: unknowns */
     uint8_t *val;   /* 0..15, 0xFF = unknown */
-    uint8_t *known; /* 1 = value known */
+    u8 dec_ready; /* decoder scratch below is allocated on first decode */
+
+#ifndef __KERNEL__
+    /* Scalar and batched peeling state: host A/B tests only.  The module's
+     * uplink codec decodes 64 lanes at a time (gf16_decode64), so the scalar
+     * arrays and the GF16_BATCH slots are not allocated in the kernel. */
+    uint16_t *cx;   /* low 4 bits: known-value XOR; high byte: unknowns */
     uint16_t *queue;
 
     /* Batched decoder state: GF16_BATCH slots of the arrays above.  The
@@ -137,6 +142,7 @@ struct gf16_code {
     uint8_t *bval;  /* batch * n */
     uint8_t *bout;  /* batch * n */
     uint16_t *bq;   /* batch * n_chk */
+#endif /* !__KERNEL__ */
 
     /* 64-lane bit-sliced encoder scratch.  vp holds four uint64 planes per
      * variable, interleaved so one variable is one 32-byte load.  The
@@ -148,8 +154,8 @@ struct gf16_code {
     /* 64-lane shared-control decoder.  The batch is peeled once because
      * every lane of the uplink batch sees the same erasure mask; the
      * planes below carry the 64 lane values.  The dense core solve keeps
-     * its coefficient matrix and the 64-lane right-hand side here so the
-     * hot path never allocates. */
+     * its coefficient matrix and the 64-lane right-hand side here so a
+     * decode never allocates once gf16_ensure_decode() has run. */
     uint64_t *lcx;  /* n_chk * 4, known-value XOR */
     uint16_t *lcnt; /* n_chk, unknown neighbours (one mask, one count) */
     uint16_t *lq;   /* n_chk */
@@ -179,14 +185,15 @@ void gf16_free(gf16_code *c)
     sclc_free(c->vadj);
     sclc_free(c->vcoef);
     sclc_free(c->owned);
-    sclc_free(c->cx);
     sclc_free(c->val);
-    sclc_free(c->known);
+#ifndef __KERNEL__
+    sclc_free(c->cx);
     sclc_free(c->queue);
     sclc_free(c->bcx);
     sclc_free(c->bval);
     sclc_free(c->bout);
     sclc_free(c->bq);
+#endif
     sclc_free(c->mul_mask);
     sclc_free(c->lcx);
     sclc_free(c->lcnt);
@@ -218,6 +225,86 @@ int gf16_n_par(const gf16_code *c)
 u32 gf16_mem(const gf16_code *c)
 {
     return (u32)c->mem_bytes;
+}
+
+int gf16_ensure_decode(gf16_code *c)
+{
+    if (!c)
+        return -1;
+    if (c->dec_ready)
+        return 0;
+
+    c->val = zalloc((size_t)c->n, 1);
+#ifndef __KERNEL__
+    c->cx = zalloc((size_t)c->n_chk, sizeof(uint16_t));
+    c->queue = zalloc((size_t)c->n_chk, sizeof(uint16_t));
+    c->bcx = zalloc((size_t)GF16_BATCH * (size_t)c->n_chk,
+                    sizeof(uint16_t));
+    c->bval = zalloc((size_t)GF16_BATCH * (size_t)c->n, 1);
+    c->bout = zalloc((size_t)GF16_BATCH * (size_t)c->n, 1);
+    c->bq = zalloc((size_t)GF16_BATCH * (size_t)c->n_chk,
+                   sizeof(uint16_t));
+#endif
+    c->lcx = zalloc((size_t)c->n_chk * 4, sizeof(uint64_t));
+    c->lcnt = zalloc((size_t)c->n_chk, sizeof(uint16_t));
+    c->lq = zalloc((size_t)c->n_chk, sizeof(uint16_t));
+    c->lunk = zalloc((size_t)c->n, 1);
+    c->cmat = zalloc(GF16_CORE_BUDGET, 1);
+    c->icol = zalloc((size_t)c->n, sizeof(int));
+    c->iuv = zalloc((size_t)c->n, sizeof(int));
+    c->irow = zalloc((size_t)c->n_chk, sizeof(int));
+    c->ipiv = zalloc((size_t)c->n, sizeof(int));
+    if (!c->val
+#ifndef __KERNEL__
+        || !c->cx || !c->queue || !c->bcx ||
+        !c->bval || !c->bout || !c->bq
+#endif
+        || !c->lcx || !c->lcnt ||
+        !c->lq || !c->lunk || !c->cmat || !c->icol || !c->iuv ||
+        !c->irow || !c->ipiv) {
+        sclc_free(c->val);
+#ifndef __KERNEL__
+        sclc_free(c->cx);
+        sclc_free(c->queue);
+        sclc_free(c->bcx);
+        sclc_free(c->bval);
+        sclc_free(c->bout);
+        sclc_free(c->bq);
+#endif
+        sclc_free(c->lcx);
+        sclc_free(c->lcnt);
+        sclc_free(c->lq);
+        sclc_free(c->lunk);
+        sclc_free(c->cmat);
+        sclc_free(c->icol);
+        sclc_free(c->iuv);
+        sclc_free(c->irow);
+        sclc_free(c->ipiv);
+        c->val = NULL;
+#ifndef __KERNEL__
+        c->cx = NULL;
+        c->queue = NULL;
+        c->bcx = NULL;
+        c->bval = NULL;
+        c->bout = NULL;
+        c->bq = NULL;
+#endif
+        c->lcx = NULL;
+        c->lcnt = NULL;
+        c->lq = NULL;
+        c->lunk = NULL;
+        c->cmat = NULL;
+        c->icol = NULL;
+        c->iuv = NULL;
+        c->irow = NULL;
+        c->ipiv = NULL;
+        return -1;
+    }
+#ifndef __KERNEL__
+    c->batch = GF16_BATCH;
+#endif
+    c->dec_ready = 1;
+    return 0;
 }
 
 gf16_code *gf16_build(const sc_params *p, uint64_t coef_seed, char *err,
@@ -350,22 +437,6 @@ gf16_code *gf16_build(const sc_params *p, uint64_t coef_seed, char *err,
     sclc_free(cur);
     cur = NULL;
 
-    c->cx = zalloc((size_t)c->n_chk, sizeof(uint16_t));
-    c->val = zalloc((size_t)c->n, 1);
-    c->known = zalloc((size_t)c->n, 1);
-    c->queue = zalloc((size_t)c->n_chk, sizeof(uint16_t));
-    c->bcx = zalloc((size_t)GF16_BATCH * (size_t)c->n_chk,
-                    sizeof(uint16_t));
-    c->bval = zalloc((size_t)GF16_BATCH * (size_t)c->n, 1);
-    c->bout = zalloc((size_t)GF16_BATCH * (size_t)c->n, 1);
-    c->bq = zalloc((size_t)GF16_BATCH * (size_t)c->n_chk,
-                   sizeof(uint16_t));
-    if (!c->cx || !c->val || !c->known || !c->queue || !c->bcx ||
-        !c->bval || !c->bout || !c->bq) {
-        snprintf(err, errlen, "out of memory");
-        goto fail;
-    }
-    c->batch = GF16_BATCH;
     c->mul_mask = zalloc(16 * 16, sizeof(uint64_t));
     if (!c->mul_mask) {
         snprintf(err, errlen, "out of memory");
@@ -382,23 +453,12 @@ gf16_code *gf16_build(const sc_params *p, uint64_t coef_seed, char *err,
                     c->mul_mask[a * 16 + i * 4 + j] =
                         ((t >> i) & 1u) ? ~(uint64_t)0 : 0;
             }
-    c->lcx = zalloc((size_t)c->n_chk * 4, sizeof(uint64_t));
-    c->lcnt = zalloc((size_t)c->n_chk, sizeof(uint16_t));
-    c->lq = zalloc((size_t)c->n_chk, sizeof(uint16_t));
-    c->lunk = zalloc((size_t)c->n, 1);
-    c->cmat = zalloc(GF16_CORE_BUDGET, 1);
-    c->icol = zalloc((size_t)c->n, sizeof(int));
-    c->iuv = zalloc((size_t)c->n, sizeof(int));
-    c->irow = zalloc((size_t)c->n_chk, sizeof(int));
-    c->ipiv = zalloc((size_t)c->n, sizeof(int));
-    if (!c->lcx || !c->lcnt || !c->lq || !c->lunk ||
-        !c->cmat || !c->icol || !c->iuv || !c->irow ||
-        !c->ipiv) {
-        snprintf(err, errlen, "out of memory");
-        goto fail;
-            }
     }
-
+    /* Decoder scratch is allocated lazily by gf16_ensure_decode().  A
+     * transmit codec encodes with the graph and mul_mask alone, so it never
+     * pays for the peel, batch, core or 64-lane buffers.  mem_bytes reports
+     * the full working set of the build it is compiled for, whether or not
+     * the first decode has happened yet. */
     mem = sizeof(*c) +
           (size_t)c->n_chk * sizeof(int) + (size_t)c->n * sizeof(int) +
           (size_t)c->n_chk * (size_t)c->dc_max * sizeof(uint16_t) +
@@ -406,16 +466,19 @@ gf16_code *gf16_build(const sc_params *p, uint64_t coef_seed, char *err,
           (size_t)c->n * (size_t)c->dv_max * sizeof(uint16_t) +
           (size_t)c->n * (size_t)c->dv_max +
           (size_t)c->n_chk * sizeof(uint16_t) +
-          (size_t)c->n_chk * sizeof(uint16_t) + (size_t)c->n +
-          (size_t)c->n + (size_t)c->n_chk * sizeof(uint16_t) +
-          (size_t)GF16_BATCH * ((size_t)c->n_chk * sizeof(uint16_t) +
-                                (size_t)c->n * 2 +
-                                (size_t)c->n_chk * sizeof(uint16_t)) +
+          (size_t)c->n +
           16u * 16u * sizeof(uint64_t) +
           (size_t)c->n_chk * 4 * sizeof(uint64_t) +
           (size_t)c->n_chk * 2 * sizeof(uint16_t) +
           c->n + GF16_CORE_BUDGET +
           ((size_t)c->n * 3 + (size_t)c->n_chk) * sizeof(int);
+#ifndef __KERNEL__
+    mem += (size_t)c->n_chk * sizeof(uint16_t) +
+           (size_t)c->n_chk * sizeof(uint16_t) +
+           (size_t)GF16_BATCH * ((size_t)c->n_chk * sizeof(uint16_t) +
+                                 (size_t)c->n * 2 +
+                                 (size_t)c->n_chk * sizeof(uint16_t));
+#endif
     c->mem_bytes = mem;
 
     sc_free(sc);
@@ -433,6 +496,9 @@ fail:
 /* encoder / verifier                                                  */
 /* ------------------------------------------------------------------ */
 
+#ifndef __KERNEL__
+/* One-codeword encoder for the host A/B share maps.  The module encodes a
+ * 64-lane batch with gf16_encode_planes(). */
 int gf16_encode(gf16_code *c, uint8_t *code)
 {
     int ck, k;
@@ -458,6 +524,7 @@ int gf16_encode(gf16_code *c, uint8_t *code)
     }
     return 0;
 }
+#endif /* !__KERNEL__ */
 
 int gf16_verify(const gf16_code *c, const uint8_t *code)
 {
@@ -475,6 +542,79 @@ int gf16_verify(const gf16_code *c, const uint8_t *code)
             return ck + 1;
     }
     return 0;
+}
+
+#ifndef __KERNEL__
+
+/*
+ * Residual check for the row decoder.
+ *
+ * "Every target variable is known" is not by itself a successful decode:
+ * some check rows can still contain erased parity symbols, and every row
+ * whose neighbours are all known must satisfy its equation.  A received
+ * parity symbol whose row is not fully known also has to be certified
+ * against the recovered data.
+ *
+ * SC_TERM_ACC is systematic and triangular: a check owns exactly one
+ * parity symbol and every other parity edge into it comes from an earlier
+ * check's owned symbol (the accumulator).  Walking the checks in
+ * construction order therefore sees all other neighbours known once every
+ * data symbol is known.  A known owned symbol must equal the value its
+ * other neighbours imply; an erased one is set to that value.  Comparing
+ * rather than always writing is what turns a foreign or corrupted parity
+ * row into a decode failure instead of silently accepted payload.
+ *
+ * Returns 0 when a row is inconsistent or an earlier row was not
+ * completed; 1 when the codeword is certified.
+ */
+static int gf16_finish_vals(const gf16_code *c, uint8_t *v)
+{
+    int ck, k;
+
+    for (ck = 0; ck < c->n_chk; ck++) {
+        int own = c->owned[ck];
+        uint8_t s = 0;
+
+        for (k = 0; k < c->cdeg[ck]; k++) {
+            int vv = c->cadj[(size_t)ck * c->dc_max + k];
+            uint8_t coef = c->ccoef[(size_t)ck * c->dc_max + k];
+
+            if (vv == own)
+                continue;
+            if (v[vv] == 0xFF)
+                return 0;
+            s ^= gf_mul(coef, v[vv]);
+        }
+        if (v[own] == 0xFF)
+            v[own] = s;
+        else if (v[own] != s)
+            return 0;
+    }
+    return 1;
+}
+
+/*
+ * Certify a decode whose target symbols are all known.  When no variable
+ * is erased the peel's per-check accumulator already holds every row's
+ * residual, so the scan is O(checks).  When parity erasures remain, the
+ * finish walk reconstructs and compares the owned symbols.
+ */
+static int gf16_certify_vals(const gf16_code *c, const uint16_t *cx,
+                             uint8_t *v)
+{
+    int ck, any = 0;
+
+    for (ck = 0; ck < c->n_chk; ck++) {
+        if (cx[ck] >> 8) {
+            any = 1;
+            continue;
+        }
+        if (cx[ck] & 15u)
+            return 0;
+    }
+    if (!any)
+        return 1;
+    return gf16_finish_vals(c, v);
 }
 
 /* ------------------------------------------------------------------ */
@@ -724,15 +864,26 @@ gf16_dec_stat gf16_decode(gf16_code *c, const uint8_t *recv,
 {
     gf16_dec_stat st;
     int n = c->n, nchk = c->n_chk;
-    uint16_t *cx = c->cx;
-    uint8_t *val = c->val;
-    uint16_t *queue = c->queue;
+    uint16_t *cx;
+    uint8_t *val;
+    uint16_t *queue;
     int qh = 0, qt = 0;
     int v, ck, k;
     int unknown_left = 0;
     long visits = 0;
 
     memset(&st, 0, sizeof(st));
+    if (gf16_ensure_decode(c) != 0) {
+        long tgt = target_data_only ? c->n_data : c->n;
+
+        memset(out, 0, (size_t)n);
+        st.unresolved = tgt;
+        st.target = tgt;
+        return st;
+    }
+    cx = c->cx;
+    val = c->val;
+    queue = c->queue;
     memset(cx, 0, (size_t)nchk * sizeof(uint16_t));
     for (v = 0; v < n; v++) {
         int d = c->vdeg[v];
@@ -809,11 +960,23 @@ gf16_dec_stat gf16_decode(gf16_code *c, const uint8_t *recv,
     {
         long tgt = target_data_only ? c->n_data : c->n;
         long unres = 0;
+        int all = 1;
+
+        for (v = 0; v < tgt; v++)
+            if (val[v] == 0xFF) {
+                all = 0;
+                break;
+            }
+        /* "No target erasure left" is only a candidate decode.  Certify it
+         * against every check row and every received parity symbol before
+         * returning it; a foreign graph or corrupted parity row would
+         * otherwise be delivered as payload. */
+        if (all && !gf16_certify_vals(c, cx, val))
+            memset(val, 0xFF, (size_t)n);
 
         for (v = 0; v < n; v++) {
             uint8_t x = val[v];
 
-            c->known[v] = (x != 0xFF);
             out[v] = (x == 0xFF) ? 0 : x;
             if (v < tgt && x == 0xFF)
                 unres++;
@@ -826,10 +989,7 @@ gf16_dec_stat gf16_decode(gf16_code *c, const uint8_t *recv,
     return st;
 }
 
-const uint8_t *gf16_known(const gf16_code *c)
-{
-    return c->known;
-}
+#endif /* !__KERNEL__ */
 
 /* ------------------------------------------------------------------ */
 /* 64-lane bit-sliced encoder                                          */
@@ -889,6 +1049,72 @@ static inline void gf16_mul_planes(const gf16_code *c, uint64_t out[4],
              (in[3] & m[11]);
     out[3] = (in[0] & m[12]) ^ (in[1] & m[13]) ^ (in[2] & m[14]) ^
              (in[3] & m[15]);
+}
+
+/*
+ * 64-lane residual check.  Every lane of the batch shares the erasure
+ * mask, so a check with no unknown neighbour must satisfy its equation in
+ * every lane, not only lane 0.  When parity erasures remain, walk the
+ * checks in construction order: each check's own symbol is the only
+ * possible unknown (all data and every earlier owned symbol are known),
+ * so a known own symbol is compared with the others and an erased one is
+ * filled from them.  Only the four-plane form is needed: one comparison
+ * covers all 64 codewords of the batch.
+ */
+static int gf16_finish_planes(gf16_code *c, uint64_t *planes)
+{
+    int ck, k;
+
+    for (ck = 0; ck < c->n_chk; ck++) {
+        int own = c->owned[ck];
+        uint64_t s[4] = {0, 0, 0, 0};
+
+        for (k = 0; k < c->cdeg[ck]; k++) {
+            int vv = c->cadj[(size_t)ck * c->dc_max + k];
+            uint8_t coef = c->ccoef[(size_t)ck * c->dc_max + k];
+            uint64_t t[4];
+
+            if (vv == own)
+                continue;
+            if (c->lunk[vv])
+                return 0; /* an earlier owned symbol was not completed */
+            gf16_mul_planes(c, t, planes + (size_t)vv * 4, coef);
+            s[0] ^= t[0];
+            s[1] ^= t[1];
+            s[2] ^= t[2];
+            s[3] ^= t[3];
+        }
+        if (c->lunk[own]) {
+            memcpy(planes + (size_t)own * 4, s, sizeof(s));
+            c->lunk[own] = 0;
+        } else {
+            const uint64_t *o = planes + (size_t)own * 4;
+
+            if ((o[0] ^ s[0]) | (o[1] ^ s[1]) | (o[2] ^ s[2]) |
+                (o[3] ^ s[3]))
+                return 0;
+        }
+    }
+    return 1;
+}
+
+/* Certify a batch whose target symbols are all known. */
+static int gf16_certify_planes(gf16_code *c, uint64_t *planes)
+{
+    int ck, any = 0;
+
+    for (ck = 0; ck < c->n_chk; ck++) {
+        if (c->lcnt[ck]) {
+            any = 1;
+            continue;
+        }
+        if (c->lcx[(size_t)ck * 4] | c->lcx[(size_t)ck * 4 + 1] |
+            c->lcx[(size_t)ck * 4 + 2] | c->lcx[(size_t)ck * 4 + 3])
+            return 0;
+    }
+    if (!any)
+        return 1;
+    return gf16_finish_planes(c, planes);
 }
 
 /*
@@ -1081,14 +1307,26 @@ gf16_dec_stat gf16_decode64(gf16_code *c, uint64_t *planes,
 {
     gf16_dec_stat st;
     int n = c->n, nchk = c->n_chk;
-    uint64_t *cx = c->lcx;
-    uint16_t *cnt = c->lcnt, *queue = c->lq;
-    uint8_t *unk = c->lunk;
+    uint64_t *cx;
+    uint16_t *cnt, *queue;
+    uint8_t *unk;
     int qh = 0, qt = 0;
     int v, ck, k;
     long visits = 0;
 
     memset(&st, 0, sizeof(st));
+    if (gf16_ensure_decode(c) != 0) {
+        long tgt = target_data_only ? c->n_data : c->n;
+
+        memset(planes, 0, (size_t)n * 4 * sizeof(uint64_t));
+        st.unresolved = tgt;
+        st.target = tgt;
+        return st;
+    }
+    cx = c->lcx;
+    cnt = c->lcnt;
+    queue = c->lq;
+    unk = c->lunk;
     memset(cnt, 0, (size_t)nchk * sizeof(uint16_t));
     memset(cx, 0, (size_t)nchk * 4 * sizeof(uint64_t));
     for (v = 0; v < n; v++) {
@@ -1188,6 +1426,19 @@ gf16_dec_stat gf16_decode64(gf16_code *c, uint64_t *planes,
     {
         long tgt = target_data_only ? c->n_data : c->n;
         long unres = 0;
+        int all = 1;
+
+        for (v = 0; v < tgt; v++)
+            if (unk[v]) {
+                all = 0;
+                break;
+            }
+        /* Report success only after a residual check over every lane, and
+         * compare every received or resolved parity symbol with the value
+         * the recovered data implies.  The core solve's own verify covers
+         * lane 0 only; this covers all 64. */
+        if (all && !gf16_certify_planes(c, planes))
+            memset(unk, 1, (size_t)n);
 
         for (v = 0; v < n; v++) {
             uint64_t *o = planes + (size_t)v * 4;
@@ -1204,6 +1455,8 @@ gf16_dec_stat gf16_decode64(gf16_code *c, uint64_t *planes,
     }
     return st;
 }
+
+#ifndef __KERNEL__
 
 /* ------------------------------------------------------------------ */
 /* batched peeling                                                     */
@@ -1268,10 +1521,11 @@ static void gf16_slot_finish(gf16_code *c, int cw, uint8_t *out,
                              int unknown, gf16_dec_stat *st)
 {
     int n = c->n;
+    uint16_t *cx = c->bcx + (size_t)cw * c->n_chk;
     uint8_t *val = c->bval + (size_t)cw * n;
     long tgt = target_data_only ? c->n_data : c->n;
     long unres = 0;
-    int v;
+    int v, all = 1;
 
     if (max_core > 0 && unknown > 0) {
         /* The dense core solve works on the single-slot arrays. */
@@ -1281,6 +1535,13 @@ static void gf16_slot_finish(gf16_code *c, int cw, uint8_t *out,
         gf16_core_solve(c, out, target_data_only, max_core, st);
         memcpy(val, c->val, (size_t)n);
     }
+    for (v = 0; v < tgt; v++)
+        if (val[v] == 0xFF) {
+            all = 0;
+            break;
+        }
+    if (all && !gf16_certify_vals(c, cx, val))
+        memset(val, 0xFF, (size_t)n);
     for (v = 0; v < n; v++) {
         uint8_t x = val[v];
 
@@ -1306,6 +1567,17 @@ void gf16_decode_batch(gf16_code *c, int B, const uint8_t *recv_b,
     long visits[GF16_BATCH];
     int edge_init[GF16_BATCH];
 
+    if (B > 0 && B <= GF16_BATCH && gf16_ensure_decode(c) != 0) {
+        long tgt = target_data_only ? c->n_data : c->n;
+
+        for (cw = 0; cw < B; cw++) {
+            memset(&st_b[cw], 0, sizeof(st_b[cw]));
+            memset(out_b + (size_t)cw * n, 0, (size_t)n);
+            st_b[cw].unresolved = tgt;
+            st_b[cw].target = tgt;
+        }
+        return;
+    }
     if (!c->bcx || c->batch < B || B <= 0 || B > GF16_BATCH) {
         for (cw = 0; cw < B; cw++)
             st_b[cw] = gf16_decode(c, recv_b + (size_t)cw * n,
@@ -1404,3 +1676,5 @@ void gf16_decode_batch(gf16_code *c, int B, const uint8_t *recv_b,
                          max_core, unknown[cw], &st_b[cw]);
     }
 }
+
+#endif /* !__KERNEL__ */

@@ -489,6 +489,85 @@ static void case_est_ewma_ring(void)
     }
 }
 
+/* Independent reference for p_ewma: replay the per-super block ratios from
+ * zero through the same integer recurrence. The estimator caches each
+ * sample's ppm so a late correction does not redo a 64-bit division per
+ * history entry; this model recomputes the ratio from the raw counts, so it
+ * would catch a stale cache. */
+static u32 ewma_ppm_ref(const u16 *miss, u32 n, u16 sent)
+{
+    u32 p = 0;
+    u32 i;
+
+    for (i = 0; i < n; i++)
+    {
+        u32 block = sent ? (u32)((u64)miss[i] * 1000000ull / sent) : 0;
+        int delta = (int)block - (int)p;
+
+        p = (u32)((int)p + delta / (1 << TBT_FEC_ADAPT_SCLC_EWMA_SHIFT));
+        if (p > 1000000u)
+            p = 1000000u;
+    }
+    return p;
+}
+
+/* A full ring: 70 supers leave the newest 64 resident. Correcting a
+ * resident super must replay exactly, and the cached per-sample ratio must
+ * track the decremented miss. The window holds only eight buckets, so a
+ * super whose bucket has since been reused is refused even while its ring
+ * entry survives; that is the documented generation check, not a window
+ * entry from another second. */
+static void case_est_ewma_correction(void)
+{
+    struct tbt_fec_adapt_sclc_est e;
+    u8 alive[TBT_FEC_BITMAP_BYTES];
+    u8 miss[TBT_FEC_BITMAP_BYTES];
+    u16 raw[TBT_FEC_ADAPT_SCLC_EWMA_RING + 8];
+    u64 t = SEC;
+    u16 i;
+
+    alive_all(alive);
+    tbt_fec_adapt_sclc_est_init(&e, 256);
+    tbt_fec_adapt_sclc_est_carriers(&e, 256, 0, 256);
+    for (i = 0; i < TBT_FEC_ADAPT_SCLC_EWMA_RING + 8; i++)
+    {
+        u16 miss_n = (u16)((i * 7u + 3u) % 40u);
+
+        raw[i] = miss_n;
+        mask_first(miss, miss_n);
+        tbt_fec_adapt_sclc_est_block(&e, t + (u64)i * 250 * MS, 0, 256,
+                                     miss, alive);
+        tbt_fec_adapt_sclc_est_super(&e, t + (u64)i * 250 * MS);
+    }
+    eq_u32(e.ewma_n, TBT_FEC_ADAPT_SCLC_EWMA_RING,
+           "ewma correction: the ring is full");
+    eq_u32(e.p_ewma_ppm,
+           ewma_ppm_ref(raw, TBT_FEC_ADAPT_SCLC_EWMA_RING + 8, 256),
+           "ewma correction: replay matches the raw history");
+
+    /* Super ids are 1-based and index their push order. */
+    ok(tbt_fec_adapt_sclc_est_correct_super(&e, 66),
+       "ewma correction: a resident super is corrected");
+    raw[65]--;
+    eq_u32(e.p_ewma_ppm,
+           ewma_ppm_ref(raw, TBT_FEC_ADAPT_SCLC_EWMA_RING + 8, 256),
+           "ewma correction: the cached ratio replays exactly");
+
+    ok(tbt_fec_adapt_sclc_est_correct_super(&e, 69),
+       "ewma correction: a second resident super is corrected");
+    raw[68]--;
+    eq_u32(e.p_ewma_ppm,
+           ewma_ppm_ref(raw, TBT_FEC_ADAPT_SCLC_EWMA_RING + 8, 256),
+           "ewma correction: two corrections compose exactly");
+
+    ok(!tbt_fec_adapt_sclc_est_correct_super(&e, 1),
+       "ewma correction: an evicted super is refused");
+    ok(!tbt_fec_adapt_sclc_est_correct_super(&e, 55),
+       "ewma correction: a reused bucket generation is refused");
+    ok(!tbt_fec_adapt_sclc_est_correct_super(&e, 40),
+       "ewma correction: an older resident super is also refused");
+}
+
 static void case_est_alive(void)
 {
     struct tbt_fec_adapt_sclc_est e;
@@ -1984,6 +2063,7 @@ int main(void)
     case_est_late_credit();
     case_late_ledger();
     case_est_ewma_ring();
+    case_est_ewma_correction();
     case_est_alive();
     case_est_groups();
     case_est_pauses();

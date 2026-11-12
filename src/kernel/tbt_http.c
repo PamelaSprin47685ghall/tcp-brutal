@@ -63,7 +63,13 @@ static bool http_hex_group(const char *s, size_t n)
     return true;
 }
 
-/* A dotted quad with the same no-leading-zero rule as the IPv4 host form. */
+/* A dotted quad in RFC 3986 "dec-octet" form: each octet is 0..255 in
+ * decimal, and a multi-digit octet does not start with '0'. The restriction
+ * is what gives one address exactly one spelling: "010" is decimal 10 to
+ * this parser but octal 8 to inet_aton, so accepting it would make the Host
+ * value ambiguous. The config grammar (tbt_parse.c) rejects the same form
+ * and canonicalizes through tbt_endpoint_format() before anything is
+ * emitted, so a peer never legitimately sees a leading-zero quad. */
 static bool http_quad_ok(const char *s, size_t n)
 {
     unsigned octet = 0, digits = 0, dots = 0;
@@ -165,8 +171,10 @@ static bool http_in6_ok(const char *s, size_t len)
 /* A canonical IPv4 literal, or a bracketed IPv6 literal, with an optional
  * ":port": what §3.2 means by "peer address literal". Hostnames stay refused
  * because DNS is never resolved, and a Host header that does not match the
- * connection target is worse than no carrier. Leading zeros are rejected so
- * one address has exactly one spelling. */
+ * connection target is worse than no carrier. A multi-digit octet may not
+ * start with '0' (RFC 3986 dec-octet, and the same one-spelling rule
+ * tbt_parse_ipv4() enforces on the config side), so "10.0.0.1" has exactly
+ * one accepted spelling. */
 static bool http_host_ok(const char *h)
 {
     unsigned octet = 0, port = 0;
@@ -372,13 +380,29 @@ size_t tbt_http_http_date(char *buf, size_t cap, u64 unix_secs)
     return TBT_HTTP_DATE_LEN;
 }
 
+/* The Date for one response block. A clock outside the IMF-fixdate range (a
+ * negative time64 the caller converted to u64, or a corrupt future RTC) must
+ * never make the builder fail: the far side cannot start a carrier without
+ * this block, and the NTP exchange that would correct the clock needs the
+ * tunnel this block establishes. Fall back to the Unix epoch -- a valid
+ * IMF-fixdate and the conventional "clock not set" value -- so the block
+ * keeps its exact §3.2 shape and never carries a year that is not four
+ * digits. The epoch is always representable in a 29-byte buffer. */
+static void http_resp_date(char date[TBT_HTTP_DATE_LEN], u64 unix_secs)
+{
+    if (tbt_http_http_date(date, TBT_HTTP_DATE_LEN, unix_secs) == TBT_HTTP_DATE_LEN)
+        return;
+    (void)tbt_http_http_date(date, TBT_HTTP_DATE_LEN, 0);
+}
+
 size_t tbt_http_resp_header(char *buf, size_t cap, const struct tbt_http_resp_cfg *cfg)
 {
     char date[TBT_HTTP_DATE_LEN];
     size_t off = 0;
 
-    if (!buf || !cfg || !tbt_http_http_date(date, sizeof(date), cfg->unix_secs))
+    if (!buf || !cfg)
         return 0;
+    http_resp_date(date, cfg->unix_secs);
 
     off = http_puts(buf, cap, off, "HTTP/1.1 200 OK\r\n");
     off = http_puts(buf, cap, off, "Content-Type: " TBT_HTTP_CONTENT_TYPE "\r\n");
@@ -1303,6 +1327,18 @@ size_t tbt_http_fec_frame_decode(struct tbt_http_rx *rx, const u8 *buf, size_t l
             rx->chunk_started = true;
             rx->chunk_size = rx->chunk.chunk_size;
             rx->rec_len = 0;
+            /* Only size 1 is the drip filler of §3.1.1. A chunk that cannot
+             * hold even the 32-byte legacy frame header is neither the drip
+             * nor a record, so it is the same framing error the legacy
+             * assembler already reports (tbt_http_frame_decode, and the
+             * tbt_http_chunk_feed contract: "a chunk of size 2..31 is a
+             * framing error"). Silently skipping it would let a peer mint
+             * filler chunks the other container direction rejects. */
+            if (rx->chunk_size != 1 && rx->chunk_size < TBT_HDR_LEN)
+            {
+                *err = TBT_RX_PROTO;
+                return 0;
+            }
         }
         if (blen)
         {

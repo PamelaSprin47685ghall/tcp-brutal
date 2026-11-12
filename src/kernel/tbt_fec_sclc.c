@@ -17,8 +17,9 @@
  * share the same wire block and the same decoder scratch.
  *
  * No allocation happens on the per-share path: the code object owns the
- * graph, the encoder plan, the transmitted-parity scratch, and one batch of
- * decoder scratch.
+ * graph, the encoder plan and the payload/parity scratch.  The decoder's
+ * bit-sliced scratch is allocated on the first decode and reused for every
+ * batch, so a transmit codec never carries it.
  */
 #ifdef __KERNEL__
 #include <linux/errno.h>
@@ -255,6 +256,7 @@ struct tbt_sclc
     u8 *pdeg;    /* n_chk: check degree */
 
     u64 *v;       /* n: encoder scratch, payload then parity */
+    u8 dec_ready; /* decoder scratch below is allocated on first decode */
     u64 *unk;     /* n: bit-sliced unknown mask */
     u64 *val;     /* n: bit-sliced known value */
     u64 *cnt;     /* n_chk * 4: bit-sliced unknown count */
@@ -788,6 +790,69 @@ static void sclc_decode_run(struct tbt_sclc *c)
     }
 }
 
+/*
+ * Residual/parity certification of a peeled batch.
+ *
+ * Every target payload variable being known is necessary but not
+ * sufficient: check rows may still be unsatisfied when parity symbols were
+ * erased, and a foreign graph (a peer with another seed) or corrupted
+ * parity can leave the payload bits self-consistent while the row
+ * equations fail.  Walk the checks in construction order.  The owned
+ * parity symbol is the only possible unknown at its check (all payload and
+ * every earlier owned symbol are known), so a known owned symbol is
+ * compared with the XOR of the others and an erased one is filled from
+ * them.  The comparison is the residual test: a received parity symbol
+ * that disagrees with the recovered payload fails the batch instead of
+ * being delivered as a complete share.
+ *
+ * Caller guarantees every payload variable is known.  Returns 1 when the
+ * batch is certified (and every parity variable is now known), 0 when the
+ * rows are inconsistent or an earlier owned symbol was not completed.
+ */
+static int sclc_certify(struct tbt_sclc *c)
+{
+    int ck, k, any = 0;
+
+    /*
+     * Common case: the peel already knows every variable.  The wave
+     * updates leave each check's XOR of known neighbours in xr, so a check
+     * whose bit-sliced unknown count is zero in every lane exposes its
+     * residual directly.  Only when some parity is still erased is the
+     * row walk needed.
+     */
+    for (ck = 0; ck < c->n_chk; ck++) {
+        const u64 *cnt = &c->cnt[(size_t)ck * 4];
+        u64 zero = ~(cnt[0] | cnt[1] | cnt[2] | cnt[3]);
+
+        if (zero & c->xr[ck])
+            return 0;
+        if (cnt[0] | cnt[1] | cnt[2] | cnt[3])
+            any = 1;
+    }
+    if (!any)
+        return 1;
+
+    for (ck = 0; ck < c->n_chk; ck++) {
+        int own = c->owned[ck];
+        int d = c->pdeg[ck];
+        u64 unknown = c->unk[own];
+        u64 s = 0;
+
+        for (k = 0; k < d - 1; k++) {
+            int v = c->padj[(size_t)ck * c->dcs + k];
+
+            if (c->unk[v])
+                return 0; /* an earlier owned symbol was not completed */
+            s ^= c->val[v];
+        }
+        if ((c->val[own] ^ s) & ~unknown)
+            return 0;
+        c->val[own] = (c->val[own] & ~unknown) | (s & unknown);
+        c->unk[own] = 0;
+    }
+    return 1;
+}
+
 /* Returns 1 when every payload variable is known, 0 otherwise. */
 static int sclc_decode_batch(struct tbt_sclc *c, u8 *const data[],
                              u8 *const parity[], const u8 *data_present,
@@ -807,6 +872,8 @@ static int sclc_decode_batch(struct tbt_sclc *c, u8 *const data[],
     for (v = 0; v < c->n_data; v++)
         if (c->unk[v])
             return 0;
+    if (!sclc_certify(c))
+        return 0;
     for (s = 0; s < c->n_shares; s++)
         if (!data_present[s])
             seg_scatter(data[s] + (size_t)b * 64, &c->val[s * 8]);
@@ -847,7 +914,31 @@ static void *sclc_new(u16 n, u16 m, u16 k, u16 w, size_t s, u16 d, u64 nonce)
         return NULL;
     }
 
+    /* Encoder state and the share-level bookkeeping are always needed (a
+     * transmit codec exposes is_known()/advance() before any decode).  The
+     * bit-sliced decoder scratch is allocated by sclc_ensure_decode() on
+     * the first decode, so a TX codec never pays for it. */
     c->v = sclc_alloc((size_t)c->n * sizeof(u64));
+    c->known = sclc_alloc(n);
+    c->batch_ok = sclc_alloc((size_t)c->batches);
+    if (!c->v || !c->known || !c->batch_ok)
+    {
+        sclc_graph_free(c);
+        sclc_free(c->v);
+        sclc_free(c->known);
+        sclc_free(c->batch_ok);
+        sclc_free(c);
+        return NULL;
+    }
+    return c;
+}
+
+/* Allocate the bit-sliced decoder scratch on first use.  Idempotent;
+ * returns -ENOMEM without changing the object on failure. */
+static int sclc_ensure_decode(struct tbt_sclc *c)
+{
+    if (c->dec_ready)
+        return 0;
     c->unk = sclc_alloc((size_t)c->n * sizeof(u64));
     c->val = sclc_alloc((size_t)c->n * sizeof(u64));
     c->cnt = sclc_alloc((size_t)c->n_chk * 4 * sizeof(u64));
@@ -858,14 +949,9 @@ static void *sclc_new(u16 n, u16 m, u16 k, u16 w, size_t s, u16 d, u64 nonce)
     c->stack = sclc_alloc((size_t)c->n_chk * sizeof(int));
     c->touched = sclc_alloc((size_t)c->n * sizeof(int));
     c->tflag = sclc_alloc((size_t)c->n);
-    c->known = sclc_alloc(n);
-    c->batch_ok = sclc_alloc((size_t)c->batches);
-    if (!c->v || !c->unk || !c->val || !c->cnt || !c->xr || !c->act ||
-        !c->resolve || !c->vbits || !c->stack || !c->touched || !c->tflag ||
-        !c->known || !c->batch_ok)
+    if (!c->unk || !c->val || !c->cnt || !c->xr || !c->act ||
+        !c->resolve || !c->vbits || !c->stack || !c->touched || !c->tflag)
     {
-        sclc_graph_free(c);
-        sclc_free(c->v);
         sclc_free(c->unk);
         sclc_free(c->val);
         sclc_free(c->cnt);
@@ -876,12 +962,20 @@ static void *sclc_new(u16 n, u16 m, u16 k, u16 w, size_t s, u16 d, u64 nonce)
         sclc_free(c->stack);
         sclc_free(c->touched);
         sclc_free(c->tflag);
-        sclc_free(c->known);
-        sclc_free(c->batch_ok);
-        sclc_free(c);
-        return NULL;
+        c->unk = NULL;
+        c->val = NULL;
+        c->cnt = NULL;
+        c->xr = NULL;
+        c->act = NULL;
+        c->resolve = NULL;
+        c->vbits = NULL;
+        c->stack = NULL;
+        c->touched = NULL;
+        c->tflag = NULL;
+        return -ENOMEM;
     }
-    return c;
+    c->dec_ready = 1;
+    return 0;
 }
 
 static void sclc_free_ctx(void *ctx)
@@ -968,6 +1062,8 @@ static int sclc_decode(void *ctx, u8 *data[], u8 *parity[],
     if (!c || !data || !parity || !data_present || !parity_present ||
         L != c->n_shares)
         return -EINVAL;
+    if (sclc_ensure_decode(c) != 0)
+        return -ENOMEM;
 
     for (s = 0; s < c->n_shares; s++)
     {
@@ -987,9 +1083,21 @@ static int sclc_decode(void *ctx, u8 *data[], u8 *parity[],
 
     memset(c->batch_ok, 0, (size_t)c->batches);
     for (b = 0; b < (u32)c->batches; b++)
-        if (sclc_decode_batch(c, data, parity, data_present, parity_present,
-                              b))
-            c->batch_ok[b] = 1;
+    {
+        if (!sclc_decode_batch(c, data, parity, data_present,
+                               parity_present, b))
+            break;
+        c->batch_ok[b] = 1;
+    }
+    /*
+     * Every batch runs the same graph over the same share->variable map,
+     * and a missing share becomes known only after every batch decodes.
+     * A failed batch therefore makes that outcome impossible no matter
+     * what the remaining batches hold; decoding them would only fill
+     * buffers the caller must not trust.  (A batch can also fail the
+     * residual check on corrupted/foreign parity, which is likewise a
+     * block-level failure for missing shares.)
+     */
 
     for (s = 0; s < c->n_shares; s++)
     {

@@ -242,7 +242,7 @@ static void test_bounds_table(void)
 
     case_no++;
     check(TBT_HDR_LEN == 32 && TBT_CHUNK_MAX == 8228 && TBT_REC_MAX == 8224 &&
-              TBT_CONV == 0x000d && TBT_WIRE_VERSION_V6 == 9,
+              TBT_CONV == 0x000d && TBT_WIRE_VERSION_V6 == 11,
           "design constants", NULL);
     for (i = 0; i < sizeof(want) / sizeof(want[0]); i++)
     {

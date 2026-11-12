@@ -48,6 +48,7 @@ struct sclc_bmap
 struct sclc_group
 {
     gf16_code *code;
+#ifndef __KERNEL__
     /* One batch of codeword slots for the lockstep decoder.  recv_b and
      * out_b share one buffer: the batch init reads every slot before the
      * peel writes any output. */
@@ -55,17 +56,22 @@ struct sclc_group
     u8 *erased_b;  /* GF16_BATCH * nsym bytes */
     u8 *out_b;     /* alias of recv_b */
     gf16_dec_stat *st_b; /* GF16_BATCH */
+#endif
     u64 *vp;       /* n * 4 bit planes, 64-lane encoder scratch */
     u8 *erased;    /* nsym, one mask for the whole batch */
     u16 *seq_rem;  /* max(n, m), symbol->share generator */
     u16 *seq_pos;  /* max(n, m) */
     u16 seq_idx;
+#ifndef __KERNEL__
     u8 *codebuf;   /* n symbols, encoder scratch */
+#endif
     u8 *share_bad; /* n+m bytes, 1 = a failed codeword touches the share */
     u8 *share_known;
+#ifndef __KERNEL__
     u32 *offp;     /* n counters, payload share offsets */
     u32 *offq;     /* m counters, parity share offsets */
     u32 *woff;     /* n counters, scatter offsets */
+#endif
     struct tbt_sclc_stat st;
 };
 
@@ -90,12 +96,15 @@ struct tbt_sclc_uplink
     u16 max_core;
     u8 mapping;
     u64 seed;
+#ifndef __KERNEL__
     u8 *plab; /* random mapping: C*n_data share labels */
     u8 *qlab; /* random mapping: C*n_par share labels */
+#endif
     struct sclc_group *g;
     u32 mem;
 };
 
+#ifndef __KERNEL__
 static inline u8 sclc_get_sym(const u8 *buf, u32 off)
 {
     return (u8)((buf[off >> 1] >> ((off & 1u) * 4)) & 0x0fu);
@@ -137,6 +146,7 @@ static inline u16 sclc_parity_share(const struct tbt_sclc_uplink *u, u32 code,
         return u->qlab[(size_t)code * u->n_par + j];
     return (u16)((j + code) % u->m);
 }
+#endif /* !__KERNEL__ */
 
 /* Little-endian plane bytes.  Both wire ends are little-endian; the fallback
  * keeps a big-endian host correct, just slower. */
@@ -527,12 +537,12 @@ static int sclc_bmap_build(struct tbt_sclc_uplink *u)
     u->nb = (u8)((u->codes + SCLC_BATCH_LANES - 1u) / SCLC_BATCH_LANES);
     if (!u->nb || u->nb > SCLC_MAX_BATCHES)
         return -EINVAL;
-    /* A symbol block is lanes/8 * 4 bytes.  The shipped uplink shape
-     * (block 128, L 16) leaves a tail of 16, 32, 48 or 64 lanes; 48 works
-     * when the region plan can still fill every share exactly (n=7, 11,
-     * 15, 23), and only the single-batch 48-lane shape (n=3) fails.  The
-     * region planner rejects any shape whose per-share bytes do not add
-     * up to S. */
+    /* A symbol block is lanes/8 * 4 bytes, so a batch tail must be a whole
+     * number of bytes wide.  The production shape (block 64, L 8) gives
+     * C = n*8, so every tail is a multiple of 8; other block/L pairs are
+     * accepted only when the tail lanes divide into whole plane bytes.
+     * The region planner rejects any shape whose per-share bytes do not
+     * add up to S (or exceed it for parity). */
     for (b = 0; b < u->nb; b++)
     {
         u32 left = u->codes - b * SCLC_BATCH_LANES;
@@ -570,6 +580,8 @@ static int sclc_bmap_build(struct tbt_sclc_uplink *u)
                     (dsz + psz) * 2u * sizeof(u32) + (u32)u->nb * 2u);
     return 0;
 }
+
+#ifndef __KERNEL__
 
 static uint64_t sclc_splitmix(uint64_t *x)
 {
@@ -677,6 +689,10 @@ static u32 sclc_parity_counts(const struct tbt_sclc_uplink *u, u16 *cnt)
     return max;
 }
 
+#endif /* !__KERNEL__ */
+
+#ifndef __KERNEL__
+
 static void sclc_mark_bad(struct tbt_sclc_uplink *u, struct sclc_group *g,
                           u32 code)
 {
@@ -706,6 +722,8 @@ static void sclc_mark_bad(struct tbt_sclc_uplink *u, struct sclc_group *g,
         g->share_bad[u->n + sh] = 1;
 }
 
+#endif /* !__KERNEL__ */
+
 struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
                                             const struct tbt_sclc_params *par)
 {
@@ -726,10 +744,15 @@ struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
     if (!par->rate_num || !par->rate_den ||
         par->rate_num > par->rate_den)
         return NULL;
+#ifdef __KERNEL__
+    /* The module only builds the production bit-plane map. */
+    if (par->mapping != TBT_SCLC_MAP_BITPLANE64)
+#else
     if (par->mapping != TBT_SCLC_MAP_INTERLEAVED &&
         par->mapping != TBT_SCLC_MAP_CONTIGUOUS &&
         par->mapping != TBT_SCLC_MAP_RANDOM &&
         par->mapping != TBT_SCLC_MAP_BITPLANE64)
+#endif
         return NULL;
 
     n_data = (u32)par->L * (par->block / 2);
@@ -778,6 +801,11 @@ struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
         sc_params p;
         char err[96];
         u64 seed = u->seed ^ ((u64)i << 32);
+#ifdef __KERNEL__
+        const int bp64 = 1;
+#else
+        int bp64 = u->mapping == TBT_SCLC_MAP_BITPLANE64;
+#endif
 
         memset(&p, 0, sizeof(p));
         p.block = par->block;
@@ -813,6 +841,7 @@ struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
                 if (sclc_bmap_build(u) != 0)
                     goto fail;
             }
+#ifndef __KERNEL__
             if (u->mapping == TBT_SCLC_MAP_INTERLEAVED)
             {
                 u16 cnt[TBT_FEC_MAX_SHARES];
@@ -825,39 +854,63 @@ struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
             if (u->mapping == TBT_SCLC_MAP_RANDOM &&
                 sclc_build_labels(u) != 0)
                 goto fail;
+#endif
         }
         else if ((u32)gf16_n(g->code) != u->nsym ||
                  (u32)gf16_n_par(g->code) != u->n_par)
             goto fail;
-        g->recv_b = sclc_zalloc((size_t)GF16_BATCH * u->nsym);
-        g->erased_b = sclc_zalloc((size_t)GF16_BATCH * u->nsym);
-        g->out_b = g->recv_b;
-        g->st_b = sclc_zalloc((size_t)GF16_BATCH * sizeof(gf16_dec_stat));
         g->vp = sclc_zalloc((size_t)u->nsym * 4u * sizeof(u64));
-        g->erased = sclc_zalloc((size_t)u->nsym);
-        g->seq_rem = sclc_zalloc((size_t)(u->n > u->m ? u->n : u->m) *
-                                 sizeof(u16));
-        g->seq_pos = sclc_zalloc((size_t)(u->n > u->m ? u->n : u->m) *
-                                 sizeof(u16));
-        g->codebuf = sclc_zalloc((size_t)u->nsym);
         g->share_bad = sclc_zalloc(share_bytes);
         g->share_known = sclc_zalloc(share_bytes);
-        g->offp = sclc_zalloc((size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
-        g->offq = sclc_zalloc((size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
-        g->woff = sclc_zalloc((size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
-        if (!g->recv_b || !g->erased_b || !g->st_b || !g->vp ||
-            !g->erased || !g->seq_rem || !g->seq_pos || !g->codebuf ||
-            !g->share_bad || !g->share_known || !g->offp || !g->offq ||
-            !g->woff)
+        if (bp64)
+        {
+            /* Production mapping: per-batch regions and the 64-lane peel. */
+            g->erased = sclc_zalloc((size_t)u->nsym);
+            g->seq_rem = sclc_zalloc((size_t)(u->n > u->m ? u->n : u->m) *
+                                     sizeof(u16));
+            g->seq_pos = sclc_zalloc((size_t)(u->n > u->m ? u->n : u->m) *
+                                     sizeof(u16));
+        }
+#ifndef __KERNEL__
+        else
+        {
+            /* Legacy/A-B mappings decode one codeword per slot and walk
+             * running share offsets. */
+            g->recv_b = sclc_zalloc((size_t)GF16_BATCH * u->nsym);
+            g->erased_b = sclc_zalloc((size_t)GF16_BATCH * u->nsym);
+            g->out_b = g->recv_b;
+            g->st_b = sclc_zalloc((size_t)GF16_BATCH *
+                                  sizeof(gf16_dec_stat));
+            g->codebuf = sclc_zalloc((size_t)u->nsym);
+            g->offp = sclc_zalloc((size_t)TBT_FEC_MAX_SHARES *
+                                  sizeof(u32));
+            g->offq = sclc_zalloc((size_t)TBT_FEC_MAX_SHARES *
+                                  sizeof(u32));
+            g->woff = sclc_zalloc((size_t)TBT_FEC_MAX_SHARES *
+                                  sizeof(u32));
+        }
+#endif
+        if (!g->vp || !g->share_bad || !g->share_known ||
+            (bp64 && (!g->erased || !g->seq_rem || !g->seq_pos))
+#ifndef __KERNEL__
+            ||
+            (!bp64 && (!g->recv_b || !g->erased_b || !g->st_b ||
+                       !g->codebuf || !g->offp || !g->offq || !g->woff))
+#endif
+            )
             goto fail;
         u->mem += gf16_mem(g->code) +
-                  (u32)GF16_BATCH * u->nsym * 2u +
-                  u->nsym +
-                  (u32)GF16_BATCH * (u32)sizeof(gf16_dec_stat) +
                   (u32)u->nsym * 4u * (u32)sizeof(u64) +
-                  (u32)u->nsym +
-                  (u32)(u->n > u->m ? u->n : u->m) * 2u * sizeof(u16) +
-                  (u32)TBT_FEC_MAX_SHARES * 3u * sizeof(u32);
+                  (u32)share_bytes * 2u;
+        if (bp64)
+            u->mem += (u32)u->nsym +
+                      (u32)(u->n > u->m ? u->n : u->m) * 2u * sizeof(u16);
+#ifndef __KERNEL__
+        else
+            u->mem += (u32)GF16_BATCH * u->nsym * 2u + (u32)u->nsym +
+                      (u32)GF16_BATCH * (u32)sizeof(gf16_dec_stat) +
+                      (u32)TBT_FEC_MAX_SHARES * 3u * sizeof(u32);
+#endif
     }
     return u;
 
@@ -879,24 +932,32 @@ void tbt_sclc_uplink_free(struct tbt_sclc_uplink *u)
             struct sclc_group *g = &u->g[i];
 
             gf16_free(g->code);
+#ifndef __KERNEL__
             sclc_free(g->recv_b);
             sclc_free(g->erased_b);
             sclc_free(g->st_b);
+#endif
             sclc_free(g->vp);
             sclc_free(g->erased);
             sclc_free(g->seq_rem);
             sclc_free(g->seq_pos);
+#ifndef __KERNEL__
             sclc_free(g->codebuf);
+#endif
             sclc_free(g->share_bad);
             sclc_free(g->share_known);
+#ifndef __KERNEL__
             sclc_free(g->offp);
             sclc_free(g->offq);
             sclc_free(g->woff);
+#endif
         }
         sclc_free(u->g);
     }
+#ifndef __KERNEL__
     sclc_free(u->plab);
     sclc_free(u->qlab);
+#endif
     sclc_free(u->bm);
     sclc_free(u->dcount);
     sclc_free(u->dbase);
@@ -1018,19 +1079,63 @@ static void sclc_mark_bad_batch(struct tbt_sclc_uplink *u,
             g->share_bad[u->n + s] = 1;
 }
 
+/*
+ * Can decoding a batch at or after next_b still change a share_known bit?
+ * Only an absent share that is not already proven incomplete and still has
+ * symbols in an unprocessed batch can be completed.  Present shares are
+ * already known, and a share with no remaining symbols has already had all
+ * of them scattered (or was marked bad by an earlier failed batch).
+ */
+static int sclc_share_pending(const struct tbt_sclc_uplink *u,
+                              const struct sclc_group *g, u32 next_b,
+                              const u8 *data_present,
+                              const u8 *parity_present)
+{
+    u32 s, b;
+
+    for (s = 0; s < u->n; s++)
+    {
+        if (data_present[s] || g->share_bad[s])
+            continue;
+        for (b = next_b; b < u->nb; b++)
+            if (u->dcount[(size_t)b * u->n + s])
+                return 1;
+    }
+    for (s = 0; s < u->m; s++)
+    {
+        u32 at = (u32)u->n + s;
+
+        if (parity_present[s] || g->share_bad[at])
+            continue;
+        for (b = next_b; b < u->nb; b++)
+            if (u->pcount[(size_t)b * u->m + s])
+                return 1;
+    }
+    return 0;
+}
+
 int tbt_sclc_uplink_encode(struct tbt_sclc_uplink *u, u16 group,
                            u8 *data[], u8 *parity[])
 {
     struct sclc_group *g;
-    u32 c, j, sh, off;
+    u32 j;
+#ifndef __KERNEL__
+    u32 c, sh, off;
+#endif
 
     if (!u || group >= u->groups || !data || !parity)
         return -EINVAL;
     g = &u->g[group];
     for (j = 0; j < u->m; j++)
         memset(parity[j], 0, TBT_FEC_S);
-    memset(g->offp, 0, (size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
-    memset(g->offq, 0, (size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
+#ifndef __KERNEL__
+    if (u->mapping != TBT_SCLC_MAP_BITPLANE64)
+    {
+        /* The bit-plane path walks the batch region tables instead. */
+        memset(g->offp, 0, (size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
+        memset(g->offq, 0, (size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
+    }
+#endif
 
     if (u->mapping == TBT_SCLC_MAP_BITPLANE64)
     {
@@ -1050,6 +1155,7 @@ int tbt_sclc_uplink_encode(struct tbt_sclc_uplink *u, u16 group,
         return 0;
     }
 
+#ifndef __KERNEL__
     if (u->mapping == TBT_SCLC_MAP_INTERLEAVED)
     {
         /*
@@ -1141,6 +1247,9 @@ int tbt_sclc_uplink_encode(struct tbt_sclc_uplink *u, u16 group,
         }
     }
     return 0;
+#else
+    return -EINVAL; /* construction only accepts TBT_SCLC_MAP_BITPLANE64 */
+#endif
 }
 
 /* Gather one codeword into a batch slot.  The interleaved mapping is the
@@ -1148,6 +1257,8 @@ int tbt_sclc_uplink_encode(struct tbt_sclc_uplink *u, u16 group,
  * through the shares in step.  Walking that rotation with a counter avoids
  * one integer division per symbol; only the first share needs a division
  * per codeword. */
+#ifndef __KERNEL__
+
 static void sclc_gather_slot(struct tbt_sclc_uplink *u, struct sclc_group *g,
                              u32 c, u8 *data[], const u8 *data_present,
                              u8 *parity[], const u8 *parity_present,
@@ -1245,13 +1356,18 @@ static void sclc_scatter_slot(struct tbt_sclc_uplink *u, struct sclc_group *g,
     }
 }
 
+#endif /* !__KERNEL__ */
+
 int tbt_sclc_uplink_decode(struct tbt_sclc_uplink *u, u16 group,
                            u8 *data[], u8 *parity[],
                            const u8 *data_present,
                            const u8 *parity_present)
 {
     struct sclc_group *g;
-    u32 j, c0;
+    u32 j;
+#ifndef __KERNEL__
+    u32 c0;
+#endif
     u32 missing = 0, recovered = 0;
     u32 ok = 0, failed = 0;
 
@@ -1292,9 +1408,14 @@ int tbt_sclc_uplink_decode(struct tbt_sclc_uplink *u, u16 group,
 
     memset(g->share_bad, 0, u->shares);
     memset(&g->st, 0, sizeof(g->st));
-    memset(g->offp, 0, (size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
-    memset(g->offq, 0, (size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
-    memset(g->woff, 0, (size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
+#ifndef __KERNEL__
+    if (u->mapping != TBT_SCLC_MAP_BITPLANE64)
+    {
+        memset(g->offp, 0, (size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
+        memset(g->offq, 0, (size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
+        memset(g->woff, 0, (size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
+    }
+#endif
 
     for (j = 0; j < u->n; j++)
         if (!data_present[j])
@@ -1337,16 +1458,33 @@ int tbt_sclc_uplink_decode(struct tbt_sclc_uplink *u, u16 group,
             {
                 failed += lanes;
                 sclc_mark_bad_batch(u, g, b, data_present, parity_present);
+                /*
+                 * A failed batch marks every absent share it touches.
+                 * If no absent share that is still complete has symbols in
+                 * a later batch, those batches cannot change share_known;
+                 * count their codewords as failed and stop.
+                 */
+                if (!sclc_share_pending(u, g, b + 1u, data_present,
+                                        parity_present))
+                {
+                    u32 bb;
+
+                    for (bb = b + 1u; bb < u->nb; bb++)
+                        failed += u->bm[bb].lanes;
+                    break;
+                }
             }
         }
         goto stats;
     }
 
+#ifndef __KERNEL__
     for (c0 = 0; c0 < u->codes; c0 += GF16_BATCH)
     {
         int B = (int)((u->codes - c0 < GF16_BATCH) ? u->codes - c0
                                                    : GF16_BATCH);
         int cw;
+        int failed_here = 0;
 
         for (cw = 0; cw < B; cw++)
             sclc_gather_slot(u, g, c0 + (u32)cw, data, data_present,
@@ -1372,6 +1510,7 @@ int tbt_sclc_uplink_decode(struct tbt_sclc_uplink *u, u16 group,
             else
             {
                 failed++;
+                failed_here = 1;
                 sclc_mark_bad(u, g, cc);
                 if (u->mapping == TBT_SCLC_MAP_INTERLEAVED)
                 {
@@ -1391,7 +1530,20 @@ int tbt_sclc_uplink_decode(struct tbt_sclc_uplink *u, u16 group,
                 }
             }
         }
+        /*
+         * The interleaved and random share maps touch every share with any
+         * failed codeword, so no later codeword can complete an absent
+         * share.  The contiguous A/B map marks only the ranges it touches,
+         * so it keeps walking.
+         */
+        if (failed_here && (u->mapping == TBT_SCLC_MAP_INTERLEAVED ||
+                            u->mapping == TBT_SCLC_MAP_RANDOM))
+        {
+            failed += u->codes - (c0 + (u32)B);
+            break;
+        }
     }
+#endif
 
 stats:
     for (j = 0; j < u->shares; j++)

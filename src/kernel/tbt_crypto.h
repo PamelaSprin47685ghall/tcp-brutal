@@ -19,7 +19,7 @@
  * confidentiality is needed.
  *
  * A configured `crypto_key=` is a real 256-bit pre-shared key, and wire
- * version 9 spends it on the one thing the data plane cannot: the HELLO tag.
+ * version 9+ spends it on the one thing the data plane cannot: the HELLO tag.
  * The tag proves that the sender holds the PSK, which is what lets the far
  * side accept a restarted near (a new crypto nonce) or a moved source
  * address without letting a stranger do the same. Without a configured key
@@ -89,16 +89,39 @@
 #include "tbt_uapi.h"
 
 /* Erase secret bytes so the compiler cannot drop the store. The kernel
- * provides memzero_explicit(); the host build uses a volatile loop, which no
- * optimiser may elide. Callers use this for every key copy, including the
- * temporary stack schedules, not only for the session fields. */
+ * provides memzero_explicit(); the host build uses volatile word stores (with
+ * a byte-wise head/tail for unaligned buffers), which no optimiser may elide.
+ * Callers use this for every key copy, including the temporary stack
+ * schedules, not only for the session fields. */
 static inline void tbt_memzero_explicit(void *p, size_t n)
 {
 #ifdef __KERNEL__
     memzero_explicit(p, n);
 #else
     volatile u8 *b = (volatile u8 *)p;
+#if defined(__GNUC__) || defined(__clang__)
+    /* The buffers hold u8 arrays and structs, not unsigned long objects;
+     * may_alias keeps the word stores clear of strict-aliasing UB. */
+    typedef unsigned long tbt_memzero_word __attribute__((may_alias));
+#else
+    typedef unsigned char tbt_memzero_word;
+#endif
+    volatile tbt_memzero_word *w;
 
+    /* The word loop must not fault on an unaligned pointer. Both the head and
+     * the tail are byte stores; the bulk is one volatile store per word. */
+    while (n && ((uintptr_t)b & (sizeof(tbt_memzero_word) - 1u)))
+    {
+        *b++ = 0;
+        n--;
+    }
+    w = (volatile tbt_memzero_word *)(void *)b;
+    while (n >= sizeof(tbt_memzero_word))
+    {
+        *w++ = 0;
+        n -= sizeof(tbt_memzero_word);
+    }
+    b = (volatile u8 *)(void *)w;
     while (n--)
         *b++ = 0;
 #endif
@@ -204,7 +227,15 @@ int tbt_crypto_body_xor_share(struct tbt_crypto_ctx *c, u64 seq, bool parity,
  * Fold the 40-bit sid into the 64-bit nonce (state[14]/[15]) before the
  * counter is applied: distinct flows then use distinct keystreams while the
  * counter formula and the clear header stay unchanged. sid == 0 reproduces
- * tbt_crypto_body_xor_share() exactly. */
+ * tbt_crypto_body_xor_share() exactly.
+ *
+ * PARITY domain: the low 40 bits keep the sid mapping below; the 16-bit
+ * share_index occupies state[15] bits 8..23 and bit 31 is a domain marker.
+ * sid_hi therefore occupies bits 0..7 and cannot collide with share_index,
+ * and no nonzero-sid parity mix can equal a sid==0 (single-stream) mix.
+ * A sid wider than 40 bits is refused with -EINVAL: the wire sid is 40 bits,
+ * and accepting more would make the nonce mapping ambiguous. */
+#define TBT_CRYPTO_SID_MAX ((1ULL << 40) - 1)
 int tbt_crypto_body_xor_flow(struct tbt_crypto_ctx *c, u64 sid, u64 seq,
                              bool parity, u16 share_index, u8 *payload,
                              u16 len);
@@ -302,7 +333,7 @@ int tbt_crypto_resolve_key(bool local_key_wins,
                            u8 out[TBT_CRYPTO_KEY_LEN]);
 
 /* ------------------------------------------------------------------------- */
-/* HELLO v9 authenticated generation (wire version 9).                       */
+/* HELLO authenticated generation (wire version 10; v9 body layout).         */
 
 /* The tail of the 66-byte v6 crypto block: a u64 boot_epoch at +66 and the
  * 128-bit tag at +74. Everything before +74 is inside the tag. */
@@ -310,7 +341,7 @@ int tbt_crypto_resolve_key(bool local_key_wins,
 #define TBT_CRYPTO_HELLO_EPOCH_LEN 8
 #define TBT_CRYPTO_HELLO_TAG 74
 #define TBT_CRYPTO_HELLO_TAG_LEN 16
-/* A v9 HELLO body is exactly this long; TBT_HELLO_BODY_LEN_V6 must equal it. */
+/* A v9+ HELLO body is exactly this long; TBT_HELLO_BODY_LEN_V6 must equal it. */
 #define TBT_CRYPTO_HELLO_AUTH_LEN 90
 
 /* SipHash-2-4 over `len` bytes, 8-byte key, little-endian message words. The
@@ -318,20 +349,37 @@ int tbt_crypto_resolve_key(bool local_key_wins,
  * pins them), so the tag is one primitive, not a bespoke construction. */
 u64 tbt_siphash24(const u8 key[16], const u8 *msg, size_t len);
 
-/* Write the authenticated-generation tail of a v9 HELLO. `epoch` is this
+/* Write the authenticated-generation tail of a v9/v10 HELLO. `epoch` is this
  * side's nonce generation: the near side sets it once per process, the far
  * side once per session and again on every TX-nonce rotation. `key` is the
  * configured `crypto_key=`, or NULL when the tunnel has no PSK: with no key
  * there is nothing to prove, so the tag is zero and only the epoch (which a
- * receiver must then treat as unauthenticated) is written. */
+ * receiver must then treat as unauthenticated) is written.
+ *
+ * The non-_path wrappers bind path_id 0. They exist for older callers and
+ * unit tests; production HELLO code must use the _path form, because the
+ * outer carrier index is not part of hello[0..73] and an unbound tag can be
+ * replayed under another path_id. */
 void tbt_crypto_hello_auth_fill(u8 hello[TBT_CRYPTO_HELLO_AUTH_LEN], u64 epoch,
                                 const u8 key[TBT_CRYPTO_KEY_LEN]);
 
-/* True when the tail carries this key's 128-bit tag over hello[0..73]. The
- * compare is constant time: an early exit would report how many tag bytes
- * matched. `key == NULL`, a short body, or a zero tag is false -- a zero tag
- * means "no PSK", never "matches an all-zero key". */
+/* Path-bound authenticated generation. The SipHash input is
+ * path_id || hello[0..73], so a captured body cannot be replayed under a
+ * different outer header path_id. `len` is the whole HELLO body length; a
+ * short buffer is refused (fill does nothing, ok returns false). */
+void tbt_crypto_hello_auth_fill_path(u8 *hello, size_t len, u64 epoch,
+                                     const u8 key[TBT_CRYPTO_KEY_LEN],
+                                     u8 path_id);
+
+/* True when the tail carries this key's 128-bit tag over
+ * path_id || hello[0..73]. The compare is constant time: an early exit would
+ * report how many tag bytes matched. `key == NULL`, a short body, or a zero
+ * tag is false -- a zero tag means "no PSK", never "matches an all-zero
+ * key". */
 bool tbt_crypto_hello_auth_ok(const u8 *hello, size_t len,
                               const u8 key[TBT_CRYPTO_KEY_LEN]);
+bool tbt_crypto_hello_auth_ok_path(const u8 *hello, size_t len,
+                                   const u8 key[TBT_CRYPTO_KEY_LEN],
+                                   u8 path_id);
 
 #endif /* _TBT_CRYPTO_H */

@@ -3,6 +3,13 @@
  * See tbt_fec_adapt.h for the contract. This file is pure: no allocation,
  * no kernel globals, no wire access. It compiles into the module and into
  * tests/unit/test_fec_adapt.c unchanged.
+ *
+ * The module links this file for the estimator and the shared carrier
+ * bitmap helpers, but no kernel data-plane caller runs the
+ * eval/applied/abort controller state machine: only the host test reaches
+ * it, and the wire refuses a non-INIT CFG APPLY. A mode=rlnc/grouped
+ * config is therefore normalized to adaptive=off by tbt_parse.c; the live
+ * adaptive controller is the SC-LDPC one in tbt_fec_adapt_sclc.c.
  */
 #ifdef __KERNEL__
 #include <linux/bitops.h>
@@ -289,6 +296,15 @@ void tbt_fec_adapt_init(struct tbt_fec_adapt *a, u8 cls)
     a->probe_from = cls;
     a->dwell_mul = 1;
 }
+
+/*
+ * The eval/applied/abort controller state machine is host-test-only.  The
+ * module links the estimator, the shape/class helpers and the carrier
+ * bitmap/liveness helpers, but tbt_parse.c normalizes mode=rlnc/grouped to
+ * adaptive=off and the live adaptive controller is tbt_fec_adapt_sclc.c;
+ * no kernel data-plane caller runs this state machine.
+ */
+#ifndef __KERNEL__
 
 /* Nominal upper and lower p boundary of a class, ppm. */
 static u32 tbt_fec_adapt_up_threshold(u8 cls)
@@ -606,3 +622,5 @@ void tbt_fec_adapt_abort(struct tbt_fec_adapt *a)
     a->fail_run = 0;
     a->probe_fail_run = 0;
 }
+
+#endif /* !__KERNEL__ */

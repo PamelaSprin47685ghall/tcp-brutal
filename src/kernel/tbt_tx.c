@@ -290,8 +290,26 @@ int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
         refcount_inc(&st->refs);
     fr->pinned = true;
     fr->path = path;
-    fr->gen = (path < sess->n_car && READ_ONCE(sess->car[path])) ?
-                  READ_ONCE(sess->car[path])->gen : 0;
+    /* A bare READ_ONCE() of sess->car[path] does not keep the carrier alive:
+     * a concurrent replacement unpublishes the slot and frees the object
+     * after its RCU grace period. Take a reference for the one field this
+     * frame needs; the pump still drops the frame if the slot's generation
+     * moved before the write. A two-load form was also a NULL dereference
+     * when the slot was cleared between the test and the second load. */
+    {
+        struct tbt_carrier *pc;
+
+        fr->gen = 0;
+        if (path < sess->n_car)
+        {
+            pc = tbt_carrier_get(sess, (u8)path);
+            if (pc)
+            {
+                fr->gen = READ_ONCE(pc->gen);
+                tbt_carrier_put(pc);
+            }
+        }
+    }
     fr->hdr = (struct tbt_hdr){
         .type = type,
         .body_len = len,
@@ -327,13 +345,6 @@ int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
     if (type != TBT_F_PAD)
         sess->ctl_real++;
     sess->ctl_queued++;
-    spin_unlock(&sess->tx_lock);
-    if (type == TBT_F_HELLO)
-        TBT_DIAG("HELLO queued tunnel=%llu carrier=%u gen=%u len=%u ctl_queued=%u tx_queued=%u",
-                 (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
-                 path, fr->gen, len, READ_ONCE(sess->ctl_queued),
-                 READ_ONCE(sess->tx_queued));
-    tbt_tx_wake(sess);
     /* A wake that races a running pump sets the session bit again and
      * re-arms it, so the queue scan cannot miss the frame. A control frame
      * that is the last thing a dying stream sends (the RST) would otherwise
@@ -341,8 +352,21 @@ int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
      * tick stops re-arming. The bounded pump is a delayed work, so
      * mod_delayed_work always leaves one run pending (measured:
      * near.rst_eagain, the RST queued at 12.63 s and never written while the
-     * far drained for 60 s). */
+     * far drained for 60 s).
+     *
+     * The arm is inside tx_lock on purpose: tbt_tx_pump()'s tail disarm tests
+     * the queues and cancels c->w_pump under the same lock. If the arm ran
+     * after the unlock, a finishing pump could read an empty queue, then
+     * cancel the timer this function armed a moment later, and the RST/FIN
+     * would lose its only wake source. mod_delayed_work is safe here. */
     tbt_tx_ctl_arm(sess, NULL, 0);
+    spin_unlock(&sess->tx_lock);
+    if (type == TBT_F_HELLO)
+        TBT_DIAG("HELLO queued tunnel=%llu carrier=%u gen=%u len=%u ctl_queued=%u tx_queued=%u",
+                 (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+                 path, fr->gen, len, READ_ONCE(sess->ctl_queued),
+                 READ_ONCE(sess->tx_queued));
+    tbt_tx_wake(sess);
     return 0;
 }
 
@@ -391,7 +415,19 @@ void tbt_tx_announce(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
 
     WRITE_ONCE(st->tx_open_sent, true);
     for (i = 0; i < sess->n_car; i++)
-        tbt_tx_announce_carrier(sess, st, READ_ONCE(sess->car[i]), gfp);
+    {
+        /* The slot can be replaced (and the object freed after its grace
+         * period) at any time: this path takes no pump_lock and may even
+         * allocate with GFP_KERNEL. Hold a reference across the announce;
+         * the pump validates (index, generation) before writing the OPEN. */
+        struct tbt_carrier *c = tbt_carrier_get(sess, (u8)i);
+
+        if (c)
+        {
+            tbt_tx_announce_carrier(sess, st, c, gfp);
+            tbt_carrier_put(c);
+        }
+    }
     tbt_tx_wake(sess);
 }
 
@@ -502,22 +538,31 @@ int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp,
     tbt_put_le64(body + 8, st->tx_fin_pkt_base);
     for (i = 0; i < sess->n_car; i++)
     {
-        struct tbt_carrier *c = READ_ONCE(sess->car[i]);
+        /* A stable reference, not a bare RCU slot load: this function may
+         * sleep in the frame allocation and is called without pump_lock. */
+        struct tbt_carrier *c = tbt_carrier_get(sess, (u8)i);
 
         /* A carrier that has sent HELLO can carry this stream.  It may be
          * momentarily up==0 while its OPEN is being enqueued; the pump leaves
          * a pinned frame queued until the carrier is up again, so queue the
          * FIN anyway instead of dropping it silently. */
         if (!c || !READ_ONCE(c->hello_sent) || atomic_read(&c->stopping))
+        {
+            tbt_carrier_put(c);
             continue;
+        }
         if (test_and_set_bit(i, st->tx_fin_mask))
+        {
+            tbt_carrier_put(c);
             continue;
+        }
         /* Set the in-flight bit before the frame can be seen by the pump: the
          * pump clears it on the write, and a stale bit would hide the loss of
          * the last copy. */
         set_bit(i, st->tx_fin_inflight);
         err = tbt_tx_control_pinned(sess, st, (u8)i, TBT_F_FIN, st->sid,
                                     seq, body, sizeof(body), false, gfp);
+        tbt_carrier_put(c);
         if (err)
         {
             clear_bit(i, st->tx_fin_inflight);
@@ -544,15 +589,22 @@ int tbt_tx_rst(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
 
     for (i = 0; i < sess->n_car; i++)
     {
-        struct tbt_carrier *c = READ_ONCE(sess->car[i]);
+        struct tbt_carrier *c = tbt_carrier_get(sess, (u8)i);
 
         if (!c || !READ_ONCE(c->hello_sent) || atomic_read(&c->stopping))
+        {
+            tbt_carrier_put(c);
             continue;
+        }
         if (test_and_set_bit(i, st->tx_rst_mask))
+        {
+            tbt_carrier_put(c);
             continue;
+        }
         set_bit(i, st->tx_rst_inflight);
         err = tbt_tx_control_pinned(sess, st, (u8)i, TBT_F_RST, st->sid, 0, NULL, 0,
                                     false, gfp);
+        tbt_carrier_put(c);
         if (err)
         {
             clear_bit(i, st->tx_rst_inflight);
@@ -582,11 +634,17 @@ int tbt_tx_refuse_open(struct tbt_session *sess, u16 path, u64 sid, gfp_t gfp)
 
     if (!sess || path >= sess->n_car)
         return -EINVAL;
-    c = READ_ONCE(sess->car[path]);
+    /* path < n_car <= 256, so the u8 index is exact. The reference keeps the
+     * carrier alive across the frame allocation below. */
+    c = tbt_carrier_get(sess, (u8)path);
     if (!c || !READ_ONCE(c->hello_sent) || atomic_read(&c->stopping))
+    {
+        tbt_carrier_put(c);
         return -ENOTCONN;
+    }
     err = tbt_tx_control_pinned(sess, NULL, path, TBT_F_RST, sid, 0, NULL, 0,
                                 false, gfp);
+    tbt_carrier_put(c);
     if (err)
     {
         if (err == -ENOMEM)
@@ -628,6 +686,34 @@ static bool tbt_retain_all_received(struct tbt_session *sess, struct tbt_retain 
     return true;
 }
 
+/* Both retention trimmers release one *prefix* of st->retain (the list is
+ * ordered by seq, and each loop stops at the first entry it keeps). A queued
+ * DATA frame may still point at an entry of that prefix; clear the pointer
+ * before the entry is freed, or the pump dereferences freed memory when it
+ * reads path_mask/reserve_mask. Clearing by walking tx_q once for the whole
+ * prefix turns the old O(freed x queued) into O(queued); the caller holds
+ * tx_lock and the free list entries are still allocated here.
+ *
+ * The stream check is required because tx_seq is per stream: two streams can
+ * own retain entries with the same seq. */
+static void tbt_tx_retain_unlink_queued(struct tbt_session *sess,
+                                        struct tbt_stream *st,
+                                        bool live_remaining, u64 first_live_seq)
+{
+    struct tbt_frame *fr;
+
+    list_for_each_entry(fr, &sess->tx_q, list)
+    {
+        if (!fr->ret || fr->st != st)
+            continue;
+        /* publish, retransmit and hole-injection all copy the retain seq
+         * into hdr.seq, so this is the same comparison without touching
+         * fr->ret after the free-list move. */
+        if (!live_remaining || fr->hdr.seq < first_live_seq)
+            fr->ret = NULL;
+    }
+}
+
 static void tbt_tx_retain_gc(struct tbt_session *sess, struct tbt_stream *st)
 {
     struct tbt_retain *r, *tmp;
@@ -636,6 +722,7 @@ static void tbt_tx_retain_gc(struct tbt_session *sess, struct tbt_stream *st)
     u64 now = tbt_now_ns();
     u64 replay_ns = (u64)TBT_REPLAY_MS * NSEC_PER_MSEC;
     u32 cap = sess->tunnel->cfg.replay;
+    bool freed = false;
 
     /* The ring keeps an acked frame for replay_ms so a late hole can still be
      * filled from real bytes, and evicts the oldest acked frames when the
@@ -654,18 +741,19 @@ static void tbt_tx_retain_gc(struct tbt_session *sess, struct tbt_stream *st)
             break;
         if (over && !old)
             sess->retain_drop++;
-        /* A queued copy may still point at this entry; clear it before the
-         * entry is freed. Such a copy is acked and the selection drops it on
-         * seq alone, but the path-mask read happens first. */
-        {
-            struct tbt_frame *fr;
-
-            list_for_each_entry(fr, &sess->tx_q, list)
-                if (fr->ret == r)
-                    fr->ret = NULL;
-        }
         list_move_tail(&r->list, &free);
         st->retain_bytes -= r->len;
+        freed = true;
+    }
+    if (freed)
+    {
+        bool live = !list_empty(&st->retain);
+        u64 first_live = live
+                             ? list_first_entry(&st->retain, struct tbt_retain,
+                                                list)->seq
+                             : 0;
+
+        tbt_tx_retain_unlink_queued(sess, st, live, first_live);
     }
     spin_unlock(&sess->tx_lock);
 
@@ -697,23 +785,32 @@ static void tbt_tx_retain_trim(struct tbt_session *sess, struct tbt_stream *st)
     if (st->retain_max && st->retain_bytes > st->retain_max)
     {
         u32 over = st->retain_bytes - st->retain_max;
+        bool freed = false;
 
         spin_lock(&sess->tx_lock);
         list_for_each_entry_safe(r, tmp, &st->retain, list)
         {
-            struct tbt_frame *fr;
-
             if (!over)
                 break;
-            /* A queued copy may still point at this entry; the pump writes
-             * fr->ret->path_mask after the free (UAF). */
-            list_for_each_entry(fr, &sess->tx_q, list)
-                if (fr->ret == r)
-                    fr->ret = NULL;
             list_move_tail(&r->list, &free);
             st->retain_bytes -= r->len;
             over = over > r->len ? over - r->len : 0;
             sess->retain_drop++;
+            freed = true;
+        }
+        if (freed)
+        {
+            bool live = !list_empty(&st->retain);
+            u64 first_live = live
+                                 ? list_first_entry(&st->retain,
+                                                    struct tbt_retain,
+                                                    list)->seq
+                                 : 0;
+
+            /* A queued copy may still point at a released entry; the pump
+             * writes fr->ret->path_mask after the free (UAF). One pass over
+             * tx_q, not one per entry. */
+            tbt_tx_retain_unlink_queued(sess, st, live, first_live);
         }
         spin_unlock(&sess->tx_lock);
     }
@@ -801,6 +898,7 @@ static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
         struct tbt_carrier *c = tbt_carrier_get(sess, (u8)i);
         struct sock *sk;
         u32 srtt = 0, mdev = 0;
+        u32 mss = 0;
         u64 rate = 0;
         u32 wnd = 0, cwnd = 0;
 
@@ -816,6 +914,7 @@ static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
             rate = tbt_car_delivery_bps(tp);
             wnd = READ_ONCE(tp->snd_wnd);
             cwnd = READ_ONCE(tp->snd_cwnd);
+            mss = READ_ONCE(tp->mss_cache);
             tbt_carrier_sk_put(sk);
             n_live++;
         }
@@ -823,8 +922,18 @@ static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
         if (!srtt)
             srtt = READ_ONCE(c->rtt_us);
         /* A carrier without a BBR sample still advertises a window; use it as
-         * the rate floor instead of dropping the carrier from the aggregate. */
-        rate = tbt_tx_car_rate(rate, srtt, wnd, cwnd);
+         * the rate floor instead of dropping the carrier from the aggregate.
+         * snd_cwnd is in MSS-sized packets while the helper's contract (and
+         * its host tests) is bytes: convert before the max(), or a young
+         * app-limited carrier with snd_wnd < snd_cwnd underestimates its
+         * rate by the MSS factor and collapses the auto window. */
+        {
+            u64 cwnd_bytes = (u64)cwnd * (mss ? mss : 1);
+
+            if (cwnd_bytes > U32_MAX)
+                cwnd_bytes = U32_MAX;
+            rate = tbt_tx_car_rate(rate, srtt, wnd, (u32)cwnd_bytes);
+        }
         tbt_carrier_put(c);
         if (!srtt || !rate)
             continue;
@@ -937,20 +1046,20 @@ static u32 tbt_tx_window(struct tbt_session *sess)
  * that is already filling the path. */
 static void tbt_tx_window_update(struct tbt_session *sess)
 {
-    struct tbt_cfg *cfg = &sess->tunnel->cfg;
-    u64 need = tbt_tx_reorder_floor(sess->n_car);
     u32 old = sess->tx_window;
     u32 win;
     u64 now = tbt_now_ns();
     bool recent_loss = sess->last_loss_ns &&
                        now - sess->last_loss_ns < NSEC_PER_SEC;
 
-    /* Auto mode: grow the receiver's reorder budget with the carrier count,
-     * or the sender stays capped at the single-flow 8 MiB while 256 carriers
-     * advertise far more. An explicit tx_window_bytes leaves the operator's
-     * rx_reorder_bytes untouched. */
-    if (!cfg->tx_window_bytes && cfg->rx_reorder_bytes < need)
-        WRITE_ONCE(cfg->rx_reorder_bytes, (u32)need);
+    /* Auto mode used to grow the receiver's budget by rewriting
+     * cfg->rx_reorder_bytes in the parsed tunnel configuration. That made
+     * /proc/net/tbtun/config render a value the operator never wrote, so a
+     * `cat config > backup; cat backup > config` restore pinned the grown
+     * budget. The effective budget is now derived (cfg.rx_reorder_bytes or
+     * tbt_tx_reorder_floor(n_car), whichever is larger) by both the sender
+     * cap in tbt_tx_window() and the receiver checks in tbt_rx.c; the parsed
+     * config stays immutable. */
     win = tbt_tx_window(sess);
     /* Grow at once: the anti-self-lock rule is that a full window with no
      * loss for 1 s must reach k x B, and growing at once dominates the
@@ -1077,106 +1186,6 @@ void tbt_tx_path_lost(struct tbt_session *sess, u8 index)
     if (index >= sess->n_car || index >= TBT_MAX_CARRIERS_LIMIT)
         return;
     set_bit(index, sess->path_lost_mask);
-    tbt_fbk_kick(sess, true);
-}
-
-/* ARQ entry for "a stalled path pauses, it does not repath". It has no caller
- * today: ARQ still takes tbt_carrier_lost() (kill the carrier and repath its
- * frames), and FEC has no struct tbt_retain entries for this function to drop.
- * Keep it for the day ARQ switches to the pause semantics; the FEC container
- * deliberately does not call it.
- *
- * When that switch happens, this drops the frames only the stalled path
- * carried, together with their queued copies, so the loss does not turn into a
- * repath through the back door. It never sets retx_now (that is
- * tbt_tx_path_lost()'s rule) and never advances tx_ack: the peer may still
- * deliver those bytes from another copy, and the receiver's own ack is the only
- * thing allowed to move the window.
- *
- * Must run from the 50 ms carrier poll, never from atomic context. The pump's
- * retransmit candidates and write batch hold struct tbt_retain pointers
- * outside tx_lock, so pump_lock serialises this drop with them; the entries
- * are unlinked under tx_lock and freed after it is dropped. */
-void tbt_tx_path_stalled(struct tbt_session *sess, u8 index)
-{
-    struct tbt_stream **snap;
-    struct tbt_retain *r, *rtmp;
-    struct tbt_frame *fr, *ftmp;
-    LIST_HEAD(free);
-    LIST_HEAD(drop);
-    u16 bit;
-    int n, i;
-
-    if (!sess || index >= READ_ONCE(sess->n_car) ||
-        index >= TBT_MAX_CARRIERS_LIMIT)
-        return;
-    if (READ_ONCE(sess->closing))
-        return;
-
-    snap = kmalloc_array(TBT_STREAM_SNAP_MAX, sizeof(*snap), GFP_KERNEL);
-    if (!snap)
-        return;
-    /* The retention arrays are 16 slots wide; a FEC v6 path has no ARQ
-     * retention entries to drop. */
-    bit = index < TBT_ARQ_MAX_PATHS ? BIT(index) : 0;
-
-    mutex_lock(&sess->pump_lock);
-    n = tbt_session_stream_snapshot(sess, snap, TBT_STREAM_SNAP_MAX);
-    spin_lock(&sess->tx_lock);
-    for (i = 0; i < n; i++)
-    {
-        struct tbt_stream *st = snap[i];
-        u64 ack = READ_ONCE(st->tx_ack);
-
-        list_for_each_entry_safe(r, rtmp, &st->retain, list)
-        {
-            bool had = bit && (r->path_mask & bit);
-
-            if (bit)
-            {
-                r->path_mask &= ~bit;
-                r->reserve_mask &= ~bit;
-            }
-            /* Keep a frame that still has another copy, and one the peer has
-             * already delivered (the retention GC owns that one). A fresh
-             * entry that never reached this path has no bit and is untouched:
-             * its frame is still owned by tx_q. */
-            if (!had || r->path_mask || r->seq + r->len <= ack)
-                continue;
-
-            /* The frame had no copy on another path. Its queued copies must
-             * die with the entry: writing them on another path would be the
-             * repath this rule forbids. */
-            list_for_each_entry_safe(fr, ftmp, &sess->tx_q, list)
-            {
-                if (fr->ret != r)
-                    continue;
-                list_del(&fr->list);
-                sess->tx_queued -= fr->len;
-                tbt_tx_frame_drop_account(sess, fr);
-                list_add_tail(&fr->list, &drop);
-            }
-            list_move_tail(&r->list, &free);
-            st->retain_bytes -= r->len;
-            sess->stall_drop++;
-        }
-    }
-    spin_unlock(&sess->tx_lock);
-    mutex_unlock(&sess->pump_lock);
-
-    list_for_each_entry_safe(r, rtmp, &free, list)
-    {
-        list_del(&r->list);
-        kfree(r);
-    }
-    list_for_each_entry_safe(fr, ftmp, &drop, list)
-    {
-        list_del(&fr->list);
-        tbt_frame_free(fr);
-    }
-    for (i = 0; i < n; i++)
-        tbt_stream_put(snap[i]);
-    kfree(snap);
     tbt_fbk_kick(sess, true);
 }
 
@@ -1710,6 +1719,13 @@ void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st)
 
     if (!st)
         return;
+    /* This runs from the FBK receive path, which does not hold pump_lock.
+     * Every sess->car[]/c-> reach below (the RTT scan, the per-path gate and
+     * the helpers they call) must be covered by an RCU read-side section:
+     * tbt_carrier_release() frees a replaced carrier after one grace period.
+     * GFP_ATOMIC allocations are legal here; nothing in this function may
+     * sleep. */
+    rcu_read_lock();
     now = tbt_now_ns();
     spin_lock(&sess->tx_lock);
     /* tx_ack moves under sess->lock, not tx_lock: reading it before the lock
@@ -1751,13 +1767,24 @@ void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st)
      * evidence, and the lag is "records we wrote below its high-water that the
      * peer's count does not account for". */
     {
+        /* Snapshot each live path once, then scan the retention list once:
+         * the old form re-walked the whole list for every path, i.e.
+         * O(n_car x retain) under tx_lock on every FBK. The counters below
+         * are the same ones it read, just read once per gate. */
+        struct
+        {
+            bool active;
+            u8 gen;
+            u64 uack;
+            u64 data_frames;
+            u64 recv_cnt;
+            u64 tail;
+        } ps[TBT_ARQ_MAX_PATHS] = {};
         bool lost = false;
 
         for (i = 0; i < sess->n_car && i < TBT_ARQ_MAX_PATHS; i++)
         {
             struct tbt_carrier *c = READ_ONCE(sess->car[i]);
-            struct tbt_retain *q;
-            u64 tail = 0, sent_below, lag;
 
             if (!c || !atomic_read(&c->up))
                 continue;
@@ -1766,33 +1793,60 @@ void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st)
              * do. */
             if (READ_ONCE(c->state) == TBT_CAR_SPARE)
                 continue;
-            list_for_each_entry(q, &st->retain, list)
+            ps[i].active = true;
+            ps[i].gen = (u8)(c->gen & 0xf);
+            ps[i].uack = READ_ONCE(c->uack);
+            ps[i].data_frames = READ_ONCE(c->data_frames);
+            ps[i].recv_cnt = READ_ONCE(c->recv_cnt);
+        }
+        list_for_each_entry(r, &st->retain, list)
+        {
+            u16 bits = r->path_mask;
+
+            while (bits)
             {
-                if ((q->path_mask & BIT(i)) &&
-                    (c->gen & 0xf) == q->path_gen[i] &&
-                    q->path_end[i] <= READ_ONCE(c->uack))
+                unsigned int p = (unsigned int)__ffs(bits);
+
+                bits &= (u16)(bits - 1);
+                if (p >= sess->n_car || p >= TBT_ARQ_MAX_PATHS)
                     continue;
-                if ((q->path_mask & BIT(i)) &&
-                    (c->gen & 0xf) == q->path_gen[i])
-                    tail++;
+                if (!ps[p].active || ps[p].gen != r->path_gen[p])
+                    continue;
+                if (r->path_end[p] > ps[p].uack)
+                    ps[p].tail++;
             }
-            sent_below = READ_ONCE(c->data_frames) >= tail
-                             ? READ_ONCE(c->data_frames) - tail
+        }
+        for (i = 0; i < sess->n_car && i < TBT_ARQ_MAX_PATHS; i++)
+        {
+            struct tbt_carrier *c;
+            u64 sent_below, lag;
+
+            if (!ps[i].active)
+                continue;
+            sent_below = ps[i].data_frames >= ps[i].tail
+                             ? ps[i].data_frames - ps[i].tail
                              : 0;
-            lag = sent_below > READ_ONCE(c->recv_cnt)
-                      ? sent_below - READ_ONCE(c->recv_cnt)
+            lag = sent_below > ps[i].recv_cnt
+                      ? sent_below - ps[i].recv_cnt
                       : 0;
-            WRITE_ONCE(c->recv_lag, lag);
-            /* Confirmed loss ratio: records we wrote below the peer's
-             * high-water that its recv_cnt does not account for, over those
-             * records. A clean carrier reads exactly 0; a frame in our own
-             * queue is not in the denominator (it is above the high-water). */
-            c->loss_ppm = sent_below
-                              ? (s32)(lag * 1000000ULL / sent_below)
-                              : 0;
+            /* The snapshot may name a replaced slot now; only write the
+             * gauges when the same (index, generation) is still published. */
+            c = READ_ONCE(sess->car[i]);
+            if (c && (c->gen & 0xf) == ps[i].gen)
+            {
+                WRITE_ONCE(c->recv_lag, lag);
+                /* Confirmed loss ratio: records we wrote below the peer's
+                 * high-water that its recv_cnt does not account for, over
+                 * those records. A clean carrier reads exactly 0; a frame in
+                 * our own queue is not in the denominator (it is above the
+                 * high-water). */
+                c->loss_ppm = sent_below
+                                  ? (s32)(lag * 1000000ULL / sent_below)
+                                  : 0;
+            }
             if (!(hole->path_mask & BIT(i)))
             {
-                if (READ_ONCE(c->uack) < hole->path_end[i])
+                if (ps[i].uack < hole->path_end[i])
                 {
                     gate = false;
                     break;
@@ -1800,7 +1854,7 @@ void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st)
                 continue;
             }
             /* Old generation: the path loss already re-sends these frames. */
-            if ((c->gen & 0xf) != hole->path_gen[i])
+            if (ps[i].gen != hole->path_gen[i])
                 continue;
             if (lag)
                 lost = true;
@@ -1916,6 +1970,7 @@ unlock:
     spin_unlock(&sess->tx_lock);
     if (wake)
         tbt_tx_wake(sess);
+    rcu_read_unlock();
 }
 
 /* How long a stream may wait on the peer before it is reset. One rule serves
@@ -2817,25 +2872,41 @@ static void tbt_tx_ctl_put(struct tbt_session *sess, struct tbt_frame *fr)
 
 /* Wake a carrier's 2 ms pump. A stopping carrier's w_pump returns early, so
  * prefer any live one; when none exists the replacement/FBK work owns the
- * next attempt. */
+ * next attempt.
+ *
+ * A non-NULL `pref` is only supplied by the pump, which holds pump_lock, so
+ * it stays alive for this call. The fallback scan is reached from
+ * tbt_tx_control_pinned() without that lock, so it must take a reference:
+ * a bare sess->car[] load can outlive the slot's grace period. */
 static void tbt_tx_ctl_arm(struct tbt_session *sess, struct tbt_carrier *pref,
                            unsigned int ms)
 {
     struct tbt_carrier *c = pref;
+    bool held = false;
     int i;
 
     if (!c || atomic_read(&c->stopping) || !atomic_read(&c->connected))
         c = NULL;
     for (i = 0; !c && i < sess->n_car; i++)
     {
-        struct tbt_carrier *it = READ_ONCE(sess->car[i]);
+        struct tbt_carrier *it = tbt_carrier_get(sess, (u8)i);
 
-        if (it && !atomic_read(&it->stopping) &&
-            atomic_read(&it->connected))
+        if (!it)
+            continue;
+        if (!atomic_read(&it->stopping) && atomic_read(&it->connected))
+        {
             c = it;
+            held = true;
+            break;
+        }
+        tbt_carrier_put(it);
     }
     if (c)
+    {
         mod_delayed_work(TBT_WQ, &c->w_pump, msecs_to_jiffies(ms));
+        if (held)
+            tbt_carrier_put(c);
+    }
 }
 
 /* Put a pinned frame back on the queue after a transient failure. The bound is
@@ -3031,18 +3102,49 @@ int tbt_tx_pump(struct tbt_session *sess)
         {
             u64 now = tbt_now_ns();
             u64 burst = (u64)2 * sess->n_car * TBT_CHUNK_MAX;
+            u64 last = sess->last_refill_ns;
+            u64 dt, add;
 
-            if (!sess->last_refill_ns)
+            if (!last)
             {
                 sess->tokens = burst;
+                sess->last_refill_ns = now;
             }
-            else
+            else if (now > last)
             {
-                sess->tokens += (u64)rate * (now - sess->last_refill_ns) / NSEC_PER_SEC;
-                if (sess->tokens > burst)
+                dt = now - last;
+                if (sess->tokens >= burst ||
+                    dt > (burst - sess->tokens) * NSEC_PER_SEC / rate)
+                {
+                    /* The bucket would be full: the sub-token remainder is
+                     * irrelevant, so restart the accounting window. */
                     sess->tokens = burst;
+                    sess->last_refill_ns = now;
+                }
+                else
+                {
+                    add = (u64)rate * dt / NSEC_PER_SEC;
+                    sess->tokens += add;
+                    if (sess->tokens > burst)
+                        sess->tokens = burst;
+                    /* Advance only the time the whole tokens above account
+                     * for and keep the fractional remainder for the next
+                     * pass. Overwriting last_refill_ns with `now` every pass
+                     * discarded that remainder; with a low tunnel_rate and
+                     * a pump that runs faster than one token period the
+                     * integer increment was always 0, so the bucket starved
+                     * forever after the initial burst. */
+                    if (add)
+                        sess->last_refill_ns +=
+                            add * (u64)NSEC_PER_SEC / rate;
+                }
             }
-            sess->last_refill_ns = now;
+            else if (now < last)
+            {
+                /* A timestamp from another CPU can read slightly ahead;
+                 * restart the window rather than stalling the bucket. */
+                sess->last_refill_ns = now;
+            }
         }
     }
     tbt_tx_window_update(sess);
@@ -3395,7 +3497,13 @@ int tbt_tx_pump(struct tbt_session *sess)
                     set_bit(c->index, blocked);
                     if (sk->sk_socket)
                         set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
-                    schedule_delayed_work(&c->w_pump, msecs_to_jiffies(2));
+                    /* One workqueue for c->w_pump: tbt_tx_ctl_arm() and
+                     * tbt_carrier_arm_pump() queue it on TBT_WQ. A
+                     * delayed_work queued on system_wq first could not then
+                     * be re-armed on TBT_WQ (the second queue is refused),
+                     * silently losing the 2 ms fallback. */
+                    mod_delayed_work(TBT_WQ, &c->w_pump,
+                                     msecs_to_jiffies(2));
                     sess->pump_hw_armed++;
                     sess->dbg_pump_hiwat++;
                     tbt_carrier_sk_put(sk);
@@ -3805,8 +3913,17 @@ ctl_fail:
             {
                 if (sk->sk_socket)
                     clear_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
-                if (cancel_delayed_work(&c->w_pump))
+                /* Cancel only when the session has no work left, and do it
+                 * under tx_lock: tbt_tx_control_pinned() queues its frame
+                 * and arms this same w_pump in one tx_lock section. Without
+                 * the shared lock, a finishing pump could read an empty
+                 * queue here, then cancel the 0 ms arm a dying stream just
+                 * made, and the final RST/FIN would never be written. */
+                spin_lock(&sess->tx_lock);
+                if (!sess->tx_queued && !sess->ctl_real &&
+                    cancel_delayed_work(&c->w_pump))
                     sess->pump_hw_disarmed++;
+                spin_unlock(&sess->tx_lock);
             }
             tbt_carrier_sk_put(sk);
         }
@@ -4337,15 +4454,22 @@ void tbt_fbk_work(struct work_struct *w)
              * still drives retransmission, close and hole timers. */
             for (ci = 0; ci < sess->n_car; ci++)
             {
-                struct tbt_carrier *fc = READ_ONCE(sess->car[ci]);
+                /* This runs in the FBK work item, not under pump_lock: take
+                 * a reference so a concurrent replacement cannot free the
+                 * carrier between the load and the field reads. */
+                struct tbt_carrier *fc = tbt_carrier_get(sess, (u8)ci);
 
                 if (!fc || !atomic_read(&fc->up))
+                {
+                    tbt_carrier_put(fc);
                     continue;
+                }
                 sig = sig * 131 + (u64)ci;
                 sig = sig * 131 + READ_ONCE(fc->gen);
                 sig = sig * 131 + READ_ONCE(fc->rx_bytes);
                 sig = sig * 131 + READ_ONCE(fc->rx_frames);
                 sig = sig * 131 + READ_ONCE(fc->peer_gen);
+                tbt_carrier_put(fc);
             }
             if (READ_ONCE(st->rx_next) != st->fbk_last_rx_next ||
                 sig != st->fbk_sig || state != st->fbk_last_state ||

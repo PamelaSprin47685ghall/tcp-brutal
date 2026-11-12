@@ -316,6 +316,8 @@ void tbt_fec_adapt_sclc_est_recompute(struct tbt_fec_adapt_sclc_est *e)
     e->p_ewma_ppm = sent ? (u32)((u64)miss * 1000000ull / sent) : 0;
 }
 
+static void tbt_fec_adapt_sclc_replay_from(struct tbt_fec_adapt_sclc_est *e,
+                                           u32 first);
 static void tbt_fec_adapt_sclc_replay_ewma(struct tbt_fec_adapt_sclc_est *e);
 
 bool tbt_fec_adapt_sclc_est_correct_miss(struct tbt_fec_adapt_sclc_est *e,
@@ -332,49 +334,69 @@ bool tbt_fec_adapt_sclc_est_correct_miss(struct tbt_fec_adapt_sclc_est *e,
 bool tbt_fec_adapt_sclc_est_correct_super(struct tbt_fec_adapt_sclc_est *e,
                                           u64 super_id)
 {
-    u8 i;
+    struct tbt_fec_adapt_sclc_sample *smp;
+    u32 off;
+    u64 age;
 
-    if (!e)
+    if (!e || !super_id || !e->ewma_n || super_id > e->super_id)
         return false;
-    for (i = 0; i < e->ewma_n; i++)
-    {
-        struct tbt_fec_adapt_sclc_sample *smp =
-            &e->ewma_ring[(e->ewma_head + i) %
-                          TBT_FEC_ADAPT_SCLC_EWMA_RING];
+    /* Pushes assign consecutive ids and the ring keeps a contiguous suffix
+     * of them, so the sample is located without scanning. */
+    age = e->super_id - super_id;
+    if (age >= e->ewma_n)
+        return false;
+    off = e->ewma_n - 1u - (u32)age;
+    smp = &e->ewma_ring[(e->ewma_head + off) %
+                        TBT_FEC_ADAPT_SCLC_EWMA_RING];
+    if (!smp->used || smp->super_id != super_id ||
+        !smp->miss || smp->bucket >= TBT_FEC_ADAPT_SCLC_BUCKETS ||
+        e->win[smp->bucket].start_ns != smp->bucket_start_ns ||
+        !e->win[smp->bucket].miss)
+        return false;
+    smp->miss--;
+    smp->p_block_ppm = smp->sent
+                           ? (u32)((u64)smp->miss * 1000000ull /
+                                   smp->sent)
+                           : 0;
+    e->win[smp->bucket].miss--;
+    tbt_fec_adapt_sclc_replay_from(e, off);
+    return true;
+}
 
-        if (!smp->used || smp->super_id != super_id)
-            continue;
-        if (!smp->miss || smp->bucket >= TBT_FEC_ADAPT_SCLC_BUCKETS ||
-            e->win[smp->bucket].start_ns != smp->bucket_start_ns ||
-            !e->win[smp->bucket].miss)
-            return false;
-        smp->miss--;
-        e->win[smp->bucket].miss--;
-        tbt_fec_adapt_sclc_replay_ewma(e);
-        return true;
+/* Replay the EWMA ring from sample `first` to the tail. A sample's
+ * p_before_ppm is the exact state before it, so a late correction only has
+ * to replay the suffix that follows the corrected sample: the samples
+ * before it are unchanged. Every step uses the cached p_block_ppm, so a
+ * correction costs no 64-bit division. */
+static void tbt_fec_adapt_sclc_replay_from(struct tbt_fec_adapt_sclc_est *e,
+                                           u32 first)
+{
+    struct tbt_fec_adapt_sclc_sample *smp;
+    u32 p;
+    u32 i;
+
+    if (first >= e->ewma_n)
+        return;
+    smp = &e->ewma_ring[(e->ewma_head + first) %
+                        TBT_FEC_ADAPT_SCLC_EWMA_RING];
+    p = first ? smp->p_before_ppm : e->ewma_anchor_ppm;
+    for (i = first; i < e->ewma_n; i++)
+    {
+        int delta = (int)smp->p_block_ppm - (int)p;
+
+        smp->p_before_ppm = p;
+        p = (u32)((int)p + delta / (1 << TBT_FEC_ADAPT_SCLC_EWMA_SHIFT));
+        if (p > 1000000u)
+            p = 1000000u;
+        smp = &e->ewma_ring[(e->ewma_head + i + 1) %
+                            TBT_FEC_ADAPT_SCLC_EWMA_RING];
     }
-    return false;
+    e->p_ewma_ppm = p;
 }
 
 static void tbt_fec_adapt_sclc_replay_ewma(struct tbt_fec_adapt_sclc_est *e)
 {
-    u32 p = e->ewma_anchor_ppm;
-    u8 i;
-
-    for (i = 0; i < e->ewma_n; i++)
-    {
-        struct tbt_fec_adapt_sclc_sample *smp =
-            &e->ewma_ring[(e->ewma_head + i) %
-                          TBT_FEC_ADAPT_SCLC_EWMA_RING];
-        u32 p_block = smp->sent ?
-                      (u32)((u64)smp->miss * 1000000ull / smp->sent) : 0;
-        int delta = (int)p_block - (int)p;
-
-        p = (u32)((int)p + delta / (1 << TBT_FEC_ADAPT_SCLC_EWMA_SHIFT));
-        if (p > 1000000u)
-            p = 1000000u;
-    }
-    e->p_ewma_ppm = p;
+    tbt_fec_adapt_sclc_replay_from(e, 0);
 }
 
 static void tbt_fec_adapt_sclc_push_sample(struct tbt_fec_adapt_sclc_est *e,
@@ -386,9 +408,8 @@ static void tbt_fec_adapt_sclc_push_sample(struct tbt_fec_adapt_sclc_est *e,
     {
         smp = &e->ewma_ring[e->ewma_head];
         {
-            u32 p_block = smp->sent ?
-                          (u32)((u64)smp->miss * 1000000ull / smp->sent) : 0;
-            int delta = (int)p_block - (int)e->ewma_anchor_ppm;
+            int delta = (int)smp->p_block_ppm -
+                        (int)e->ewma_anchor_ppm;
 
             e->ewma_anchor_ppm =
                 (u32)((int)e->ewma_anchor_ppm +
@@ -404,6 +425,7 @@ static void tbt_fec_adapt_sclc_push_sample(struct tbt_fec_adapt_sclc_est *e,
     smp->bucket_start_ns = e->win[bucket].start_ns;
     smp->sent = sent;
     smp->miss = miss;
+    smp->p_block_ppm = sent ? (u32)((u64)miss * 1000000ull / sent) : 0;
     smp->bucket = bucket;
     smp->used = true;
     e->ewma_n++;

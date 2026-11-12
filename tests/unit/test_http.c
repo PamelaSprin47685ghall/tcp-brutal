@@ -1037,6 +1037,16 @@ static void test_http_date(void)
        "date cap 29 writes exactly 29 bytes", NULL);
     ok(tbt_http_http_date(buf, sizeof(buf), 253402300800ULL) == 0, "year 10000 is refused",
        NULL);
+    /* 0 is the epoch itself and must always serialize. A pre-1970 clock
+     * reaches this unit as a huge u64 because the caller's time64_t is
+     * negative; the strict formatter refuses it like any unrepresentable
+     * value, and tbt_http_resp_header() applies the documented epoch
+     * fallback (test_resp_header). */
+    ok(tbt_http_http_date(buf, sizeof(buf), 0) == TBT_HTTP_DATE_LEN &&
+           memcmp(buf, "Thu, 01 Jan 1970 00:00:00 GMT", TBT_HTTP_DATE_LEN) == 0,
+       "epoch 0 is always representable", NULL);
+    ok(tbt_http_http_date(buf, sizeof(buf), (u64)(-31536000LL)) == 0,
+       "pre-1970 time cast to u64 is refused", NULL);
     ok(tbt_http_http_date(buf, sizeof(buf), (u64)-1) == 0, "huge epoch is refused", NULL);
     ok(tbt_http_http_date(NULL, TBT_HTTP_DATE_LEN, 0) == 0, "NULL date buffer is refused", NULL);
 }
@@ -1172,6 +1182,7 @@ static void test_request(void)
             "[::1", "[::1]x", "[1::2::3]:80", "[1:2:3:4:5:6:7:8:9]:80",
             "[::1]:0", "[::1]:65536", "[::1]:080", "[gggg::1]:80",
             "[:]:80", "[::1]:", "[]:80",
+            "[::ffff:192.0.02.1]:80", "[::ffff:010.0.2.1]:80",
         };
 
         good = 1;
@@ -1389,6 +1400,28 @@ static void test_req_parse(void)
                    make_req(mut, sizeof(mut), "10.0.0.256", "abcd234567abcdefghijklmnop", NULL)
                        ? mut
                        : "");
+    /* RFC 3986 dec-octet: a multi-digit octet has no leading zero, so one
+     * address has exactly one spelling. tbt_parse_ipv4() refuses the same
+     * form on the config side, and tbt_endpoint_format() canonicalizes
+     * before emission, so a design peer never sends one; a peer that does is
+     * ambiguous ("010" is decimal 10 here but octal 8 to inet_aton). */
+    expect_req_bad("request: leading-zero Host octet",
+                   make_req(mut, sizeof(mut), "010.0.0.1", "abcd234567abcdefghijklmnop", NULL)
+                       ? mut
+                       : "");
+    expect_req_bad("request: leading-zero final Host octet",
+                   make_req(mut, sizeof(mut), "203.0.113.09", "abcd234567abcdefghijklmnop", NULL)
+                       ? mut
+                       : "");
+    {
+        struct tbt_http_req z;
+        size_t m = make_req(mut, sizeof(mut), "0.0.0.0", "abcd234567abcdefghijklmnop", NULL);
+
+        memset(&z, 0, sizeof(z));
+        ok(m && tbt_http_req_parse(mut, m, &z, &err) == m && err == TBT_HTTP_OK &&
+               z.host_len == 7 && !memcmp(z.host, "0.0.0.0", 7),
+           "request parser accepts the single-zero octet", NULL);
+    }
     expect_req_bad("request: short X-Request-Id",
                    make_req(mut, sizeof(mut), "203.0.113.9", "short", NULL) ? mut : "");
     expect_req_bad("request: uppercase X-Request-Id",
@@ -1886,9 +1919,38 @@ static void test_resp_header(void)
     ok(n && strstr(buf, "Date: Thu, 01 Jan 1970 00:00:00 GMT\r\n") != NULL,
        "response Date follows the epoch", NULL);
 
-    cfg.unix_secs = 253402300800ULL;
-    ok(tbt_http_resp_header(buf, sizeof(buf), &cfg) == 0,
-       "out-of-range response Date is refused", NULL);
+    /* A clock outside 1970..9999 must not poison the carrier: the far side
+     * needs this block before the NTP exchange that would correct the clock,
+     * so the builder substitutes the epoch and still emits a complete, valid
+     * block. Inputs: year 10000, a pre-1970 time as the caller's negative
+     * time64 converted to u64, and u64 -1 (also what time(NULL) returns on
+     * failure). */
+    {
+        static const u64 bad_epochs[] = {
+            253402300800ULL, /* 10000-01-01 00:00:00 UTC */
+            (u64)(-31536000LL), /* 1969-01-01 00:00:00 UTC */
+            (u64)-1, /* 1969-12-31 23:59:59 UTC, or a failed clock read */
+        };
+
+        good = 1;
+        for (i = 0; i < sizeof(bad_epochs) / sizeof(bad_epochs[0]); i++)
+        {
+            cfg.unix_secs = bad_epochs[i];
+            n = tbt_http_resp_header(buf, sizeof(buf) - 1, &cfg);
+            if (!n)
+            {
+                good = 0;
+                break;
+            }
+            buf[n] = '\0';
+            memset(&r, 0, sizeof(r));
+            if (!strstr(buf, "Date: Thu, 01 Jan 1970 00:00:00 GMT\r\n") ||
+                tbt_http_resp_parse(buf, n, &r, &err) != n || err != TBT_HTTP_OK ||
+                r.status != 200 || !r.chunked || !r.keep_alive)
+                good = 0;
+        }
+        ok(good, "out-of-range response Date falls back to the epoch", NULL);
+    }
     ok(tbt_http_resp_header(NULL, sizeof(buf), &cfg) == 0, "NULL response buffer is refused",
        NULL);
     ok(tbt_http_resp_header(buf, sizeof(buf), NULL) == 0, "NULL response cfg is refused", NULL);
@@ -3564,6 +3626,43 @@ static void test_fec_http(void)
         ok(err == TBT_RX_OK && out_len == sizeof(rec), "drip before fec is skipped", NULL);
     }
 
+    /* Only size 1 is the drip. A chunk of size 2..31 is neither the drip nor
+     * long enough for a frame header, so the FEC assembler must report the
+     * same permanent framing error the legacy assembler reports instead of
+     * skipping it as filler. */
+    for (i = 2; i < TBT_HDR_LEN; i++)
+    {
+        char line[8];
+        size_t o = 0;
+        int ln = snprintf(line, sizeof(line), "%x\r\n", i);
+
+        tbt_http_chunk_reset(&rx.chunk);
+        rx.chunk_started = false;
+        rx.rec_len = 0;
+        memcpy(two + o, line, (size_t)ln);
+        o += (size_t)ln;
+        memset(two + o, 'A', i);
+        o += i;
+        memcpy(two + o, "\r\n0\r\n\r\n", 7);
+        o += 7;
+        m = tbt_http_fec_frame_decode(&rx, two, o, &out, &out_len, &err);
+        ok(m == 0 && err == TBT_RX_PROTO && out == NULL && out_len == 0,
+           "fec chunk size 2..31 is a framing error", NULL);
+    }
+    {
+        /* The verdict follows the announced size, so it cannot be dodged by
+         * splitting the body: the first run of a size-16 chunk is PROTO. */
+        static const char partial[] = "10\r\nA";
+
+        tbt_http_chunk_reset(&rx.chunk);
+        rx.chunk_started = false;
+        rx.rec_len = 0;
+        m = tbt_http_fec_frame_decode(&rx, (const u8 *)partial,
+                                      sizeof(partial) - 1, &out, &out_len, &err);
+        ok(m == 0 && err == TBT_RX_PROTO,
+           "fec undersized chunk is PROTO before its body completes", NULL);
+    }
+
     /* Control record (ACK, 16-byte body) uses the same chunk path. */
     tbt_http_chunk_reset(&rx.chunk);
     rx.chunk_started = false;
@@ -3758,6 +3857,27 @@ static void test_fec_http(void)
                "eight-record stream round-trips", NULL);
             pos8 += used;
         }
+    }
+
+    /* The terminating 0-chunk ends one message, not the carrier. The decoder
+     * reports NEED_MORE (never PROTO) and leaves the parser DONE; the
+     * documented contract is that the caller observes tbt_http_rx_done() and
+     * calls tbt_http_rx_new_message() before the next header block. A feed
+     * while DONE consumes nothing. */
+    {
+        tbt_http_rx_new_message(&rx);
+        m = tbt_http_fec_frame_decode(&rx, (const u8 *)"0\r\n\r\n", 5, &out,
+                                      &out_len, &err);
+        ok(m == 5 && err == TBT_RX_NEED_MORE && tbt_http_rx_done(&rx) &&
+               out == NULL && out_len == 0,
+           "fec terminator completes the message without a record", NULL);
+        m = tbt_http_fec_frame_decode(&rx, (const u8 *)"0\r\n\r\n", 5, &out,
+                                      &out_len, &err);
+        ok(m == 0 && err == TBT_RX_NEED_MORE && tbt_http_rx_done(&rx),
+           "fec decoder consumes nothing while DONE", NULL);
+        tbt_http_rx_new_message(&rx);
+        ok(!tbt_http_rx_done(&rx) && rx.chunk.state == TBT_HTTP_CHUNK_SIZE,
+           "fec reset returns to the chunk stage for the next message", NULL);
     }
 }
 

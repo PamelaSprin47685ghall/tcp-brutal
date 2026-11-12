@@ -1,6 +1,6 @@
 /* test_wire_compat.c - cross-version wire refusal regression.
  *
- * The 0.10.0 wire (TBT_CONV 0x000d, TBT_FEC_CONV 0x100c, HELLO v9) is a hard
+ * The current wire (TBT_CONV 0x000d, TBT_FEC_CONV 0x100c, HELLO v11) is a hard
  * cutover: a peer from 0.7.0 or older must be refused by the first record,
  * never guessed at. This test builds the historical byte vectors and feeds
  * them to the same functions the receive path runs:
@@ -427,9 +427,9 @@ static void test_legacy_framing(void)
 static void test_hello_versions(void)
 {
     ok(TBT_CONV == 0x000du && TBT_FEC_CONV == 0x100cu &&
-           TBT_WIRE_VERSION_V6 == 9,
-       "0.10.0 wire constants",
-       "the current constants are not the v13 ARQ / 0x100c FEC cut");
+           TBT_WIRE_VERSION_V6 == 11,
+       "path-bound wire constants",
+       "the current constants are not the v13 ARQ / 0x100c / v11 HELLO cut");
 
     expect_hello_refused(1, TBT_HELLO_BODY_LEN, "HELLO v1 (0.1.x/0.2.x ARQ)");
     expect_hello_refused(2, TBT_HELLO_BODY_LEN_V6, "HELLO v2 (0.2.x FEC)");
@@ -442,10 +442,14 @@ static void test_hello_versions(void)
      * so the version byte is the only gate that keeps the two revisions
      * apart; pin that here with the frozen 0.8 length. */
     expect_hello_refused(8, 66, "HELLO v8 (0.8.0 FEC, 66-byte body)");
+    expect_hello_refused(9, TBT_HELLO_BODY_LEN_V6,
+                         "HELLO v9 (0.10.0, path-unbound tag)");
+    expect_hello_refused(10, TBT_HELLO_BODY_LEN_V6,
+                         "HELLO v10 (0.10.0, replayable generation)");
     expect_hello_refused(99, TBT_HELLO_BODY_LEN_V6, "HELLO v99 (future)");
 
     expect_hello_ok(TBT_WIRE_VERSION_V6, TBT_HELLO_BODY_LEN_V6, true,
-                    TBT_ROLE_FAR, "HELLO v9 passes the FEC gate");
+                    TBT_ROLE_FAR, "HELLO v11 passes the FEC gate");
     expect_hello_ok(TBT_WIRE_VERSION, TBT_HELLO_BODY_LEN, false,
                     TBT_ROLE_FAR, "HELLO v1 still passes the ARQ gate");
 
@@ -478,6 +482,41 @@ static void test_hello_versions(void)
                             TBT_HELLO_BODY_LEN_V6 + 1,
                             "one-byte-long HELLO is refused");
     }
+}
+
+/* tbt_hello_epoch_admit() is the v11 join policy: the far side applies it to
+ * the epoch of every PSK-proved HELLO, with the path's stored high-water and
+ * the epoch of the carrier still installed in the slot. */
+static void test_hello_freshness(void)
+{
+    /* First authenticated HELLO on an empty path. */
+    ok(tbt_hello_epoch_admit(false, 0, false, 0, 100),
+       "freshness: first epoch on an empty path", NULL);
+
+    /* The per-path high-water refuses a replay even when the slot is empty:
+     * the old carrier may have died after a captured HELLO was recorded. */
+    ok(!tbt_hello_epoch_admit(true, 100, false, 0, 99),
+       "freshness: epoch below the path high-water", NULL);
+    ok(!tbt_hello_epoch_admit(true, 100, false, 0, 100),
+       "freshness: epoch equal to the path high-water", NULL);
+    ok(tbt_hello_epoch_admit(true, 100, false, 0, 101),
+       "freshness: epoch above the path high-water", NULL);
+
+    /* A live carrier is superseded only by a strictly newer incarnation,
+     * regardless of the four-bit generation ring. */
+    ok(!tbt_hello_epoch_admit(true, 7, true, 7, 7),
+       "freshness: equal epoch cannot replace a live carrier", NULL);
+    ok(!tbt_hello_epoch_admit(false, 0, true, 7, 7),
+       "freshness: live-carrier floor applies without a high-water", NULL);
+    ok(tbt_hello_epoch_admit(true, 7, true, 7, 8),
+       "freshness: newer epoch replaces a live carrier", NULL);
+
+    /* A dead slot has no live floor, but a high-water replay is still
+     * refused; a dead slot with no high-water accepts an equal old epoch. */
+    ok(!tbt_hello_epoch_admit(true, 7, false, 7, 7),
+       "freshness: dead slot still refuses a high-water replay", NULL);
+    ok(tbt_hello_epoch_admit(false, 0, false, 7, 7),
+       "freshness: dead slot with no high-water accepts the epoch", NULL);
 }
 
 static void test_hello_crypto(void)
@@ -690,6 +729,7 @@ int main(void)
 {
     test_legacy_framing();
     test_hello_versions();
+    test_hello_freshness();
     test_hello_crypto();
     test_fec_headers();
     test_fec_short_records();

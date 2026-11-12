@@ -21,7 +21,7 @@ struct sock;
 struct tbt_cc_info
 {
     u64 max_bw_bps;  /* windowed-max delivery estimate */
-    u64 pacing_bps;  /* last rate written to sk_pacing_rate */
+    u64 pacing_bps;  /* last rate written to sk_pacing_rate, probe gain included */
     u32 clamp_hits;  /* ssthresh calls raised above the reno half */
     u32 loss_ppm;    /* effective p: pinned value or the pushed measurement */
     bool hold;       /* the carrier's idle hold owns the window */

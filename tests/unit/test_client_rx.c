@@ -1,5 +1,5 @@
 /* test_client_rx.c - the near-side receive state machine under markers,
- * short blocks, per-block n/m and an 8-slot window.
+ * short blocks, per-block n/m and the 66-slot / 64-replay-block window.
  *
  * The engine's receive functions are static, so this test includes the
  * translation unit directly and drives flow_rx_store()/flow_rx_check() with
@@ -20,6 +20,10 @@
 #define TBT_CLIENT_TEST_HOOKS 1
 #include "tbt_client_engine.h"
 #include "tbt_client_engine.c"
+
+/* The HELLO tag binds the outer carrier path; every HELLO in this test drives
+ * path 0. The production receive path passes the real header path_id. */
+#define hello_crypto(e, body, len) hello_crypto((e), (body), (len), 0)
 
 #include <stdio.h>
 #include <string.h>
@@ -1266,6 +1270,49 @@ static int wire_drain(u8 *types, int max)
     return count;
 }
 
+/* Decode the HELLO records a fake near has written and report the epoch,
+ * type and header path of each. Used by the freshness test, which must see
+ * the bytes on the wire rather than an engine counter. */
+static int hello_drain(u64 *epochs, u8 *types, u8 *paths, int max)
+{
+    static struct tbt_http_rx rx;
+    static u8 buf[1 << 16];
+    ssize_t n;
+    size_t off = 0;
+    int count = 0;
+
+    if (tx_peer_fd < 0)
+        return 0;
+    tbt_http_rx_new_message(&rx);
+    n = read(tx_peer_fd, buf, sizeof(buf));
+    if (n <= 0)
+        return 0;
+    while (off < (size_t)n && count < max)
+    {
+        struct tbt_rec rec;
+        int err = TBT_RX_NEED_MORE;
+        size_t used;
+
+        memset(&rec, 0, sizeof(rec));
+        used = tbt_http_frame_decode(&rx, buf + off, (size_t)n - off, &rec,
+                                     &err);
+        if (err == TBT_RX_OK && rec.hdr.type == TBT_F_HELLO &&
+            rec.body_len >= TBT_CRYPTO_HELLO_EPOCH + 8)
+        {
+            epochs[count] = tbt_le64(rec.body + TBT_CRYPTO_HELLO_EPOCH);
+            types[count] = rec.hdr.type;
+            paths[count] = rec.hdr.path_id;
+            count++;
+        }
+        else if (err == TBT_RX_PROTO)
+            break;
+        off += used;
+        if (!used)
+            break;
+    }
+    return count;
+}
+
 /* One drain, then report which close controls were on the wire. */
 static void wire_close_controls(bool *rst, bool *fin)
 {
@@ -1356,7 +1403,19 @@ static struct flow *tx_flow_new(void)
     tx_e.tx_n = 8;
     tx_e.tx_m = 24;
     tx_e.tx_groups = 8;
-    return flow_alloc(&tx_e, 1, -1, true, NULL);
+    {
+        struct flow *tx = flow_alloc(&tx_e, 1, -1, true, NULL);
+
+        /* Every TX test below drives an already-admitted flow: the OPEN was
+         * sent and acknowledged, so the application read gate is open. */
+        if (tx)
+        {
+            tx->open_sent = true;
+            tx->open_acked = true;
+            tx->tx_ready_at_ns = 0;
+        }
+        return tx;
+    }
 }
 
 /* A fresh RX flow that matches the TX shape and seed. */
@@ -1543,7 +1602,8 @@ static void test_tx_idle_short_then_long(void)
 }
 
 /* Tx credit: a one-block peer grant is stop-and-wait; a seven-block grant
- * converts to seven blocks for both groups=1 and groups=8. */
+ * converts to seven blocks for both groups=1 and groups=8; a 64-block grant
+ * still stops at the replay ring's 63-block span. */
 static void test_tx_peer_credit(void)
 {
     struct flow *tx = tx_flow_new();
@@ -1562,10 +1622,18 @@ static void test_tx_peer_credit(void)
     tx->tx_seq = 0;
     CHECK(tx->tx_credit_shares / block_shares == 7,
           "peer7: groups=8 converts to seven blocks");
-    tx->tx_seq = 4 * (u64)tx->groups * tx->n;
-    CHECK(flow_tx_credit_ok(tx), "peer7: four-block local cap is open");
-    tx->tx_seq = 4 * (u64)tx->groups * tx->n + 1;
-    CHECK(!flow_tx_credit_ok(tx), "peer7: beyond the four-block cap stops");
+    tx->tx_seq = 7 * (u64)tx->groups * tx->n;
+    CHECK(flow_tx_credit_ok(tx), "peer7: all seven granted blocks fit");
+    tx->tx_seq = 7 * (u64)tx->groups * tx->n + 1;
+    CHECK(!flow_tx_credit_ok(tx), "peer7: beyond the grant stops");
+
+    /* The receiver's 64-block grant cannot exceed the local replay ring:
+     * 63 unacknowledged blocks fit, the 64th would wrap it. */
+    tx->tx_credit_shares = 64 * block_shares;
+    tx->tx_seq = 63 * (u64)tx->groups * tx->n;
+    CHECK(flow_tx_credit_ok(tx), "ring: 63 outstanding blocks fit");
+    tx->tx_seq = 63 * (u64)tx->groups * tx->n + 1;
+    CHECK(!flow_tx_credit_ok(tx), "ring: the 64th block would wrap");
 
     /* groups=1 downlink: the same seven-block conversion. */
     tx->groups = 1;
@@ -1573,12 +1641,17 @@ static void test_tx_peer_credit(void)
     tx->m = 128;
     block_shares = (u64)tx->groups * (tx->n + tx->m);
     tx->tx_credit_shares = 7 * block_shares;
-    tx->tx_seq = 4 * (u64)tx->groups * tx->n;
+    tx->tx_seq = 7 * (u64)tx->groups * tx->n;
     CHECK(tx->tx_credit_shares / block_shares == 7,
           "peer7: groups=1 converts to seven blocks");
-    CHECK(flow_tx_credit_ok(tx), "peer7: groups=1 four-block cap is open");
-    tx->tx_seq = 4 * (u64)tx->groups * tx->n + 1;
-    CHECK(!flow_tx_credit_ok(tx), "peer7: groups=1 stops at the cap");
+    CHECK(flow_tx_credit_ok(tx), "peer7: groups=1 seven blocks fit");
+    tx->tx_seq = 7 * (u64)tx->groups * tx->n + 1;
+    CHECK(!flow_tx_credit_ok(tx), "peer7: groups=1 stops at the grant");
+    tx->tx_credit_shares = 64 * block_shares;
+    tx->tx_seq = 63 * (u64)tx->groups * tx->n;
+    CHECK(flow_tx_credit_ok(tx), "ring: groups=1 63 blocks fit");
+    tx->tx_seq = 63 * (u64)tx->groups * tx->n + 1;
+    CHECK(!flow_tx_credit_ok(tx), "ring: groups=1 stops at 63");
     flow_free(&tx_e, tx);
     tx_clear_carriers();
 }
@@ -1618,6 +1691,16 @@ static void test_tx_block_credit(void)
     CHECK(!flow_tx_block_credit_ok(tx),
           "blocks: seven unacked blocks remain the limit");
     CHECK(tx->tx_cur_len == 0, "blocks: no partial state after the seal");
+
+    /* A 64-block peer grant is still billed against the 63-block ring. */
+    tx->tx_credit_shares = 64 * block_shares;
+    tx->tx_ack_next = 0;
+    tx->tx_block = TBT_REPLAY_BLOCKS - 2;
+    CHECK(flow_tx_block_credit_ok(tx),
+          "blocks: 63-block ring accepts the 63rd outstanding block");
+    tx->tx_block = TBT_REPLAY_BLOCKS - 1;
+    CHECK(!flow_tx_block_credit_ok(tx),
+          "blocks: the 64th outstanding block would wrap the ring");
     flow_free(&tx_e, tx);
     tx_clear_carriers();
 }
@@ -1849,6 +1932,7 @@ static void test_rx_rst_aborts_app(void)
     memset(&c, 0, sizeof(c));
     c.e = &tx_e;
     c.index = 0;
+    c.hello_recv = true; /* the record rides a joined carrier */
     CHECK(handle_record(&tx_e, &c, rec, sizeof(rec)) == 0,
           "rx rst: the record is accepted");
     CHECK(tx->dead, "rx rst: the flow is aborted");
@@ -1920,6 +2004,10 @@ static void test_app_eof_sends_fin(void)
     flow_app_read(tx);
     CHECK(shutdown(sv[1], SHUT_WR) == 0, "app eof: half-close the sender");
     flow_app_read(tx);
+    CHECK(tx->app_eof && !tx->dead,
+          "app eof: EOF is recorded, not an abort");
+    CHECK(!tx->fin_sent, "app eof: FIN waits for the TX gate");
+    flow_tick(tx, now_ns());
     CHECK(tx->fin_sent && !tx->dead, "app eof: EOF sends FIN, not an abort");
     CHECK(tx->app_fd == sv[0], "app eof: the fd stays for the downlink");
     wire_close_controls(&rst, &fin);
@@ -2749,10 +2837,10 @@ static void test_fbk_commit(void)
     CHECK(f.rx_credit_bad == 0, "fbk: credit invariant holds");
 }
 
-/* The sender may carry one started block past a slots-2 grant. Nine ring
- * slots make the grant seven blocks and leave the sender's eight-block lead
- * inside the ring; eight slots let the first block outside arrive whole as
- * rx_window_drop. */
+/* The sender may carry one started block past a slots-2 grant. The ring has
+ * two slots of slack over the grant, so a block that started inside the
+ * grant finishes inside the ring; the first block outside is refused whole
+ * as rx_window_drop. */
 static void test_credit_headroom(void)
 {
     uint32_t credit;
@@ -2768,10 +2856,12 @@ static void test_credit_headroom(void)
     CHECK(last_ack_credit() == (int)credit,
           "credit: the ACK carries the same grant");
 
-    /* The first share of block 9 is outside a nine-slot ring at next 0. */
+    /* The first share past the ring is outside at next 0. */
     send_data(0, 0, 128, 128, 0, 0, TBT_FEC_S, false);
-    send_data(9, 9u * 128, 128, 128, 0, 0, TBT_FEC_S, false);
-    CHECK(f.rx_window_drop == 1, "credit: block next+9 is outside the ring");
+    send_data(TBT_RX_SLOTS, (u64)TBT_RX_SLOTS * 128, 128, 128, 0, 0,
+              TBT_FEC_S, false);
+    CHECK(f.rx_window_drop == 1,
+          "credit: block next+slots is outside the ring");
 }
 
 /* The controller sees a first-attempt success as zero missing DATA shares,
@@ -2964,6 +3054,26 @@ static void test_flow_table_refusal(void)
     CHECK(tx_e.flow_accepted == TBT_FLOW_MAX,
           "table: accepted counter reaches the limit");
     CHECK(tx_e.flow_peak == TBT_FLOW_MAX, "table: peak reaches the limit");
+    {
+        /* The larger window must not allocate its block buffers per flow:
+         * every RX slot and replay slot is still untouched, so the 64 MiB
+         * of in-flight capacity is paid only by the blocks actually used. */
+        bool lazy = true;
+
+        for (i = 0; i < TBT_FLOW_MAX; i++)
+        {
+            struct flow *g = tx_e.flow[i];
+            int k;
+
+            for (k = 0; k < TBT_RX_SLOTS; k++)
+                if (g->rx[k].used || g->rx[k].g)
+                    lazy = false;
+            for (k = 0; k < TBT_REPLAY_BLOCKS; k++)
+                if (g->replay[k].used || g->replay[k].recs)
+                    lazy = false;
+        }
+        CHECK(lazy, "table: eight flows hold no block buffers");
+    }
     why = 0;
     f = flow_alloc(&tx_e, 100, -1, true, &why);
     CHECK(f == NULL && why == -ENOSPC,
@@ -2988,9 +3098,9 @@ static void test_flow_table_refusal(void)
  * Wire v9: the PSK-authenticated HELLO tail.
  * ------------------------------------------------------------------ */
 
-static void mk_hello_v9(struct engine *e, u8 *body, u8 role,
-                        const u8 session_nonce[16], const u8 tx_nonce[8],
-                        u64 epoch, const u8 *psk)
+static void mk_hello_path(struct engine *e, u8 *body, u8 role,
+                          const u8 session_nonce[16], const u8 tx_nonce[8],
+                          u64 epoch, const u8 *psk, u8 path)
 {
     memset(body, 0, TBT_HELLO_BODY_LEN_V6);
     body[0] = TBT_WIRE_VERSION_V6;
@@ -3001,7 +3111,15 @@ static void mk_hello_v9(struct engine *e, u8 *body, u8 role,
     body[22] = (u8)(e->cfg.cfg.profile & 3);
     tbt_crypto_hello_fill(body, e->crypto_on, TBT_CRYPTO_KEY_ID_NONE, tx_nonce,
                           NULL);
-    tbt_crypto_hello_auth_fill(body, epoch, psk);
+    tbt_crypto_hello_auth_fill_path(body, TBT_HELLO_BODY_LEN_V6, epoch, psk,
+                                    path);
+}
+
+static void mk_hello_v9(struct engine *e, u8 *body, u8 role,
+                        const u8 session_nonce[16], const u8 tx_nonce[8],
+                        u64 epoch, const u8 *psk)
+{
+    mk_hello_path(e, body, role, session_nonce, tx_nonce, epoch, psk, 0);
 }
 
 /* Seal one uplink frame at (sid, seq) under `nonce` and open it with the
@@ -3113,11 +3231,13 @@ static void test_hello_reincarnation(void)
     }
     e.tx_rotate = false; /* handle_hello() consumes it */
 
-    /* A replayed generation 1 after generation 2: valid tag, older epoch. */
+    /* A replayed generation 1 after generation 2: valid tag, older epoch.
+     * The generation high-water rejects it outright, before it can reach the
+     * carrier table. */
     mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_a, n1, 1000, psk);
-    CHECK(hello_crypto(&e, body, sizeof(body)) == 0 &&
+    CHECK(hello_crypto(&e, body, sizeof(body)) != 0 &&
               memcmp(e.rx_nonce, n2, sizeof(n2)) == 0 && e.peer_epoch == 2000,
-          "v9: a replayed HELLO cannot roll the nonce back");
+          "v9: a replayed older generation is refused without state change");
     CHECK(rx_opens(&e, n2, plain, 7, 9),
           "v9: the replay left the RX context intact");
 
@@ -3207,8 +3327,8 @@ static void test_hello_reincarnation_off(void)
 
     /* A replayed generation 2 carries a valid tag but an older epoch. */
     mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_a, n1, 2000, psk);
-    CHECK(hello_crypto(&e, body, sizeof(body)) == 0,
-          "v9-off: a replay is not a crypto error");
+    CHECK(hello_crypto(&e, body, sizeof(body)) != 0,
+          "v9-off: a replayed older generation is refused");
     CHECK(hello_session_nonce(&e, body) != 0 &&
               memcmp(e.session_nonce, sess_b, sizeof(sess_b)) == 0,
           "v9-off: a replayed HELLO cannot rename the session");
@@ -3231,6 +3351,328 @@ static void test_hello_reincarnation_off(void)
     CHECK(hello_session_nonce(&e, body) != 0 &&
               memcmp(e.session_nonce, sess_a, sizeof(sess_a)) == 0,
           "v9: a pinned nonce= is never renamed");
+}
+
+/* The far's admission gate must let an authenticated newer generation
+ * through even when it names a new session nonce (a restarted near without
+ * nonce=), while a replayed older generation is refused before
+ * hello_crypto() touches the live carrier's slot or crypto state. */
+static void test_far_psk_reincarnation(void)
+{
+    static struct carrier c;
+    static struct carrier c2;
+    struct tbt_rec rec;
+    u8 body[TBT_HELLO_BODY_LEN_V6];
+    u8 psk[TBT_CRYPTO_KEY_LEN];
+    u8 n1[TBT_CRYPTO_NONCE_LEN], n2[TBT_CRYPTO_NONCE_LEN];
+    u8 sess_a[16], sess_b[16];
+    size_t i;
+
+    for (i = 0; i < sizeof(psk); i++)
+        psk[i] = (u8)(i * 3 + 11);
+    memset(n1, 0x31, sizeof(n1));
+    memset(n2, 0x42, sizeof(n2));
+    memset(sess_a, 0x11, sizeof(sess_a));
+    memset(sess_b, 0x22, sizeof(sess_b));
+
+    clear_engine();
+    e.near = false;
+    e.n_car = 1;
+    e.crypto_on = false; /* the PSK tag alone decides the generation */
+    e.psk = true;
+    e.key_owned = true;
+    e.key_id = TBT_CRYPTO_KEY_ID_NONE;
+    memcpy(e.key, psk, sizeof(psk));
+    memcpy(e.session_nonce, sess_a, sizeof(sess_a));
+    e.session_nonce_set = true;
+    e.peer_epoch = 1000;
+    e.peer_epoch_set = true;
+
+    memset(&rec, 0, sizeof(rec));
+    rec.hdr.type = TBT_F_HELLO;
+    rec.hdr.path_id = 0;
+    rec.body_len = TBT_HELLO_BODY_LEN_V6;
+    rec.body = body;
+    memset(&c, 0, sizeof(c));
+    c.e = &e;
+    c.index = -1;
+    c.hello_sent = true; /* this test does not drive the wire */
+
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_b, n2, 2000, psk);
+    CHECK(handle_hello(&e, &c, &rec) == 0,
+          "far: an authenticated newer generation is accepted");
+    CHECK(e.session_nonce_set && !memcmp(e.session_nonce, sess_b,
+                                         sizeof(sess_b)),
+          "far: the restarted near renames the session nonce");
+    CHECK(e.car[0] == &c && c.index == 0 && c.hello_recv,
+          "far: the accepted HELLO takes the slot");
+
+    /* A replayed generation 1 on a fresh connection: valid tag, older epoch,
+     * and a nonce that no longer matches. Drop the whole connection; the
+     * live carrier and slot stay untouched. */
+    memset(&c2, 0, sizeof(c2));
+    c2.e = &e;
+    c2.index = -1;
+    c2.hello_sent = true;
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_a, n1, 500, psk);
+    CHECK(handle_hello(&e, &c2, &rec) == -EPROTO,
+          "far: a replayed older generation is refused");
+    CHECK(e.car[0] == &c && c2.index == -1 && !c2.hello_recv,
+          "far: the replay cannot replace or take a slot");
+    CHECK(e.peer_epoch == 2000,
+          "far: the replay cannot lower the generation high-water");
+}
+
+/* Version 11: the far keeps a per-path high-water of authenticated HELLO
+ * epochs. An equal or older epoch on the same path is a replay even though
+ * its tag is valid; a strictly newer epoch replaces a live carrier; a
+ * non-PSK HELLO has no authenticated epoch and keeps the old replacement
+ * rule. The epoch of a rejected HELLO must not raise the high-water. */
+static void test_hello_epoch_path_replay(void)
+{
+    static struct carrier c1, c2, c3, c4;
+    struct tbt_rec rec;
+    u8 body[TBT_HELLO_BODY_LEN_V6];
+    u8 psk[TBT_CRYPTO_KEY_LEN];
+    u8 n1[TBT_CRYPTO_NONCE_LEN], n2[TBT_CRYPTO_NONCE_LEN];
+    u8 sess[16];
+    size_t i;
+
+    for (i = 0; i < sizeof(psk); i++)
+        psk[i] = (u8)(i * 7 + 5);
+    memset(n1, 0x31, sizeof(n1));
+    memset(n2, 0x42, sizeof(n2));
+    memset(sess, 0x55, sizeof(sess));
+
+    clear_engine();
+    e.near = false;
+    e.n_car = 2;
+    e.crypto_on = false; /* the tag is the only epoch authority */
+    e.psk = true;
+    e.key_owned = true;
+    e.key_id = TBT_CRYPTO_KEY_ID_NONE;
+    memcpy(e.key, psk, sizeof(psk));
+    memcpy(e.session_nonce, sess, sizeof(sess));
+    e.session_nonce_set = true;
+
+    memset(&rec, 0, sizeof(rec));
+    rec.hdr.type = TBT_F_HELLO;
+    rec.hdr.path_id = 0;
+    rec.body_len = TBT_HELLO_BODY_LEN_V6;
+    rec.body = body;
+
+    /* Generation 1000 joins path 0. */
+    memset(&c1, 0, sizeof(c1));
+    c1.e = &e;
+    c1.index = -1;
+    c1.hello_sent = true;
+    mk_hello_path(&e, body, TBT_ROLE_NEAR, sess, n1, 1000, psk, 0);
+    CHECK(handle_hello(&e, &c1, &rec) == 0,
+          "path epoch: the first authenticated HELLO joins");
+    CHECK(e.car[0] == &c1 && c1.index == 0 && c1.hello_epoch == 1000,
+          "path epoch: the joined carrier names its epoch");
+    CHECK(e.peer_hello_epoch_valid[0] && e.peer_hello_epoch[0] == 1000,
+          "path epoch: the high-water is published after the join");
+
+    /* (a) An exact replay on the same path, with a valid tag and the same
+     * session nonce, is refused before it can touch the live carrier. */
+    memset(&c2, 0, sizeof(c2));
+    c2.e = &e;
+    c2.index = -1;
+    c2.hello_sent = true;
+    CHECK(handle_hello(&e, &c2, &rec) == -EPROTO,
+          "path epoch: an equal-epoch replay is refused");
+    CHECK(e.car[0] == &c1 && !c1.dead && c2.index == -1 &&
+              !c2.hello_recv && e.peer_hello_epoch[0] == 1000,
+          "path epoch: the replay leaves the live carrier and high-water");
+
+    /* An older epoch is the other half of the replay rule. */
+    mk_hello_path(&e, body, TBT_ROLE_NEAR, sess, n1, 900, psk, 0);
+    CHECK(handle_hello(&e, &c2, &rec) == -EPROTO &&
+              e.car[0] == &c1 && e.peer_hello_epoch[0] == 1000,
+          "path epoch: an older epoch cannot replace the live carrier");
+
+    /* (b) A legitimate reconnect with a strictly newer epoch does replace
+     * the live carrier. */
+    memset(&c3, 0, sizeof(c3));
+    c3.e = &e;
+    c3.index = -1;
+    c3.hello_sent = true;
+    mk_hello_path(&e, body, TBT_ROLE_NEAR, sess, n2, 2000, psk, 0);
+    CHECK(handle_hello(&e, &c3, &rec) == 0,
+          "path epoch: a newer epoch replaces a live carrier");
+    CHECK(e.car[0] == &c3 && c3.index == 0 && c1.dead &&
+              c3.hello_epoch == 2000 && e.peer_hello_epoch[0] == 2000,
+          "path epoch: the replacement owns the slot and raises the mark");
+
+    /* A slot that is already dead still refuses its own duplicate epoch:
+     * the path high-water, not the slot occupant, is the replay authority. */
+    carrier_close(&e, &c3);
+    memset(&c4, 0, sizeof(c4));
+    c4.e = &e;
+    c4.index = -1;
+    c4.hello_sent = true;
+    mk_hello_path(&e, body, TBT_ROLE_NEAR, sess, n2, 2000, psk, 0);
+    CHECK(handle_hello(&e, &c4, &rec) == -EPROTO,
+          "path epoch: an equal epoch cannot refill a dead slot");
+    CHECK(e.car[0] == NULL && e.peer_hello_epoch[0] == 2000,
+          "path epoch: the refused refill leaves the slot empty");
+
+    /* Another path has its own high-water, and a carrier HELLO may arrive
+     * after a higher epoch from a different path: with the cipher off the
+     * shared session nonce proves it is the same incarnation, so a lower
+     * epoch is not a replay and path 1's own high-water decides. */
+    rec.hdr.path_id = 1;
+    mk_hello_path(&e, body, TBT_ROLE_NEAR, sess, n2, 1500, psk, 1);
+    memset(&c4, 0, sizeof(c4));
+    c4.e = &e;
+    c4.index = -1;
+    c4.hello_sent = true;
+    CHECK(handle_hello(&e, &c4, &rec) == 0,
+          "path epoch: a reordered same-session epoch is accepted");
+    CHECK(e.car[1] == &c4 && e.peer_hello_epoch_valid[1] &&
+              e.peer_hello_epoch[1] == 1500 &&
+              e.peer_hello_epoch[0] == 2000 && e.peer_epoch == 2000,
+          "path epoch: path marks stay independent under reordering");
+
+    /* Non-PSK keeps TOFU: no authenticated epoch exists, so an equal-epoch
+     * replacement of a live carrier is still admitted. */
+    clear_engine();
+    e.near = false;
+    e.n_car = 1;
+    e.crypto_on = false;
+    memcpy(e.session_nonce, sess, sizeof(sess));
+    e.session_nonce_set = true;
+    rec.hdr.path_id = 0;
+    memset(&c1, 0, sizeof(c1));
+    c1.e = &e;
+    c1.index = -1;
+    c1.hello_sent = true;
+    mk_hello_path(&e, body, TBT_ROLE_NEAR, sess, n1, 1000, NULL, 0);
+    CHECK(handle_hello(&e, &c1, &rec) == 0 && e.car[0] == &c1,
+          "path epoch: a non-PSK HELLO keeps TOFU");
+    memset(&c2, 0, sizeof(c2));
+    c2.e = &e;
+    c2.index = -1;
+    c2.hello_sent = true;
+    CHECK(handle_hello(&e, &c2, &rec) == 0 &&
+              e.car[0] == &c2 && c1.dead,
+          "path epoch: non-PSK equal epochs still replace the slot");
+    CHECK(!e.peer_hello_epoch_valid[0],
+          "path epoch: a non-PSK HELLO publishes no authenticated mark");
+}
+
+/* With the cipher on, the matching crypto nonce identifies a carrier of the
+ * same incarnation. A later carrier whose HELLO was overtaken by a higher
+ * epoch on another path must still join; only a changed nonce needs a
+ * strictly newer epoch. */
+static void test_hello_epoch_same_nonce_reorder(void)
+{
+    static struct carrier c1, c2;
+    struct tbt_rec rec;
+    u8 body[TBT_HELLO_BODY_LEN_V6];
+    u8 psk[TBT_CRYPTO_KEY_LEN];
+    u8 n1[TBT_CRYPTO_NONCE_LEN];
+    u8 sess[16];
+    size_t i;
+
+    for (i = 0; i < sizeof(psk); i++)
+        psk[i] = (u8)(i * 5 + 9);
+    memset(n1, 0x6a, sizeof(n1));
+    memset(sess, 0x77, sizeof(sess));
+
+    clear_engine();
+    e.near = false;
+    e.n_car = 2;
+    e.crypto_on = true;
+    e.psk = true;
+    e.key_owned = true;
+    e.key_id = TBT_CRYPTO_KEY_ID_NONE;
+    memcpy(e.key, psk, sizeof(psk));
+    memcpy(e.session_nonce, sess, sizeof(sess));
+    e.session_nonce_set = true;
+
+    memset(&rec, 0, sizeof(rec));
+    rec.hdr.type = TBT_F_HELLO;
+    rec.hdr.path_id = 0;
+    rec.body_len = TBT_HELLO_BODY_LEN_V6;
+    rec.body = body;
+
+    memset(&c1, 0, sizeof(c1));
+    c1.e = &e;
+    c1.index = -1;
+    c1.hello_sent = true;
+    mk_hello_path(&e, body, TBT_ROLE_NEAR, sess, n1, 2000, psk, 0);
+    CHECK(handle_hello(&e, &c1, &rec) == 0,
+          "nonce reorder: the first carrier installs the crypto nonce");
+    CHECK(e.rx_ready && !memcmp(e.rx_nonce, n1, sizeof(n1)) &&
+              e.peer_epoch == 2000,
+          "nonce reorder: the session is pinned to generation 2000");
+
+    rec.hdr.path_id = 1;
+    memset(&c2, 0, sizeof(c2));
+    c2.e = &e;
+    c2.index = -1;
+    c2.hello_sent = true;
+    mk_hello_path(&e, body, TBT_ROLE_NEAR, sess, n1, 1500, psk, 1);
+    CHECK(handle_hello(&e, &c2, &rec) == 0,
+          "nonce reorder: a matching nonce admits the older path HELLO");
+    CHECK(e.car[1] == &c2 && e.peer_hello_epoch_valid[1] &&
+              e.peer_hello_epoch[1] == 1500 && e.peer_epoch == 2000 &&
+              !memcmp(e.rx_nonce, n1, sizeof(n1)),
+          "nonce reorder: the join moves no nonce and keeps the high-water");
+
+    /* The same lower epoch on path 1 again is still a replay. */
+    rec.hdr.path_id = 1;
+    memset(&c2, 0, sizeof(c2));
+    c2.e = &e;
+    c2.index = -1;
+    c2.hello_sent = true;
+    CHECK(handle_hello(&e, &c2, &rec) == -EPROTO,
+          "nonce reorder: the path high-water still refuses an equal epoch");
+}
+
+/* Every carrier HELLO names a fresh epoch, even when the crypto generation
+ * did not move: the far's per-path high-water would otherwise refuse the
+ * second carrier of one connection. */
+static void test_hello_epoch_fresh_per_carrier(void)
+{
+    u64 epochs[3];
+    u8 types[3];
+    u8 want_path[3];
+    int n, i;
+
+    CHECK(TBT_REPLAY_BLOCKS == 64 && TBT_RX_SLOTS == 66,
+          "window: replay ring 64, receive ring 66");
+
+    clear_engine();
+    memset(&tx_e, 0, sizeof(tx_e));
+    tx_e.near = true;
+    tx_e.crypto_on = false;
+    tx_e.epoch = 5000; /* the nonce clock, which must not be reused here */
+    tx_e.hello_epoch = tx_e.epoch;
+    tx_fake_carriers();
+
+    CHECK(carrier_send_hello(&tx_e, tx_e.car[0]) == 0 &&
+              carrier_send_hello(&tx_e, tx_e.car[0]) == 0 &&
+              carrier_send_hello(&tx_e, tx_e.car[1]) == 0,
+          "hello epoch: three carrier HELLOs are written");
+    n = hello_drain(epochs, types, want_path, 3);
+    CHECK(n == 3, "hello epoch: all three decode from the wire");
+    for (i = 0; i < n && i < 3; i++)
+    {
+        CHECK(types[i] == TBT_F_HELLO, "hello epoch: the record is HELLO");
+        CHECK(epochs[i] > tx_e.epoch && epochs[i] < TBT_EPOCH_LIMIT,
+              "hello epoch: the wire epoch is a fresh valid generation");
+        if (i)
+            CHECK(epochs[i] > epochs[i - 1],
+                  "hello epoch: each HELLO strictly advances");
+    }
+    CHECK(n < 2 || want_path[0] == 0, "hello epoch: first carrier path 0");
+    CHECK(n < 3 || (want_path[1] == 0 && want_path[2] == 1),
+          "hello epoch: the path follows the carrier index");
+
+    tx_clear_carriers();
 }
 
 /* A restarted client must not open with the retired fixed sid 1: the far
@@ -3265,6 +3707,759 @@ static void test_sid_incarnation_seed(void)
     next = engine_sid_next(&a);
     CHECK(next != sa && (next >> 40) == 0,
           "sid: the counter advances inside 40 bits");
+}
+
+/* A broken realtime clock must not name a generation the far side records
+ * as an all-time high-water: a pre-1970 tv_sec cast to u64 is just under
+ * 2^64, and every later restart (after the clock is repaired) would then be
+ * refused as an older generation. A rotation must also keep moving after an
+ * NTP step back, and saturation must never wrap the generation to 0. */
+static void test_epoch_clock_clamp(void)
+{
+    struct timespec ts;
+    /* Volatile inputs keep the constant folder from proving every CHECK at
+     * build time and dropping the runtime assertions. */
+    volatile time_t bad = -1;
+    volatile time_t far_ahead = (time_t)(TBT_EPOCH_MAX_SECS + 1);
+    volatile time_t past_limit = 9223372037; /* us conversion crosses 2^63/1000 */
+    volatile time_t last_sec = 9223372036;
+    volatile time_t good = 1700000000;
+    volatile u64 lo = 100;
+    volatile u64 hi = 200;
+    volatile u64 last = TBT_EPOCH_LIMIT - 1;
+
+    memset(&ts, 0, sizeof(ts));
+    ts.tv_sec = bad;
+    ts.tv_nsec = 500000000;
+    CHECK(epoch_from_realtime(ts) == 0,
+          "epoch: a pre-1970 sample names no generation");
+    ts.tv_sec = far_ahead;
+    ts.tv_nsec = 0;
+    CHECK(epoch_from_realtime(ts) == 0,
+          "epoch: a sample whose us conversion would wrap names none");
+    ts.tv_sec = past_limit;
+    ts.tv_nsec = 0;
+    CHECK(epoch_from_realtime(ts) == 0,
+          "epoch: a sample at or above the signed-ns limit names none");
+    ts.tv_sec = last_sec;
+    ts.tv_nsec = 854774999;
+    CHECK(epoch_from_realtime(ts) == TBT_EPOCH_LIMIT - 1,
+          "epoch: the last representable microsecond is still emitted");
+    ts.tv_sec = good;
+    ts.tv_nsec = 250000000;
+    CHECK(epoch_from_realtime(ts) == 1700000000ull * 1000000ull + 250000ull,
+          "epoch: a sane sample converts to microseconds");
+
+    CHECK(epoch_advance(lo, hi) == 200,
+          "epoch: a later realtime sample advances");
+    CHECK(epoch_advance(hi, lo) == 201,
+          "epoch: a backwards step still advances");
+    CHECK(epoch_advance(hi, 0) == 201,
+          "epoch: an unusable sample still advances");
+    CHECK(epoch_advance(last, 0) == last,
+          "epoch: saturation never wraps to 0 or crosses the limit");
+    CHECK(epoch_now() != 0, "epoch: the live clock always names a generation");
+    CHECK(epoch_now() < TBT_EPOCH_LIMIT,
+          "epoch: the live clock stays below the receiver limit");
+}
+
+/* A peer whose realtime clock is pre-1970 advertises a signed-to-unsigned
+ * cast as its HELLO epoch: an old client casts seconds (~2^64), an old
+ * kernel casts nanoseconds before dividing, landing in [2^63/1000,
+ * 2^64/1000) with the TOP BIT CLEAR. The client records peer epochs as a
+ * generation high-water, so accepting either class would refuse every later
+ * restart of that peer, even after its clock is repaired. Refuse the HELLO
+ * before it can move any state; the last representable generation still
+ * works, and the bound itself is refused. */
+static void test_hello_epoch_limit(void)
+{
+    u8 body[TBT_HELLO_BODY_LEN_V6];
+    u8 psk[TBT_CRYPTO_KEY_LEN];
+    u8 n1[TBT_CRYPTO_NONCE_LEN], n2[TBT_CRYPTO_NONCE_LEN];
+    u8 sess[16];
+    size_t i;
+
+    for (i = 0; i < sizeof(psk); i++)
+        psk[i] = (u8)(i * 7 + 5);
+    memset(sess, 0x33, sizeof(sess));
+    memset(n1, 0x44, sizeof(n1));
+    memset(n2, 0x55, sizeof(n2));
+
+    clear_engine();
+    e.near = false;
+    e.crypto_on = false; /* the high-water exists with the cipher off */
+    e.psk = true;
+    e.key_owned = true;
+    e.key_id = TBT_CRYPTO_KEY_ID_NONE;
+    memcpy(e.key, psk, sizeof(psk));
+
+    /* 1969-12-31 through the old kernel's ns-then-divide cast: bit 63 is
+     * clear, so a top-bit-only guard would miss it. */
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess, n1, 18446744072709551ull,
+                psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == -EPROTO,
+          "epoch: the old kernel ns-cast generation is refused");
+    CHECK(!e.peer_epoch_set,
+          "epoch: the ns-cast refusal left no high-water");
+
+    /* 1969 through the old client's seconds-then-scale cast (~2^64). */
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess, n1, 18446744073708551616ull,
+                psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == -EPROTO,
+          "epoch: the old client seconds-cast generation is refused");
+
+    /* The last representable microsecond is accepted, which also proves the
+     * refused values above did not poison the high-water. */
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess, n2, TBT_EPOCH_LIMIT - 1, psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == 0 &&
+              e.peer_epoch == TBT_EPOCH_LIMIT - 1,
+          "epoch: the last representable generation is accepted");
+
+    /* The bound itself is newer, so the older-generation check cannot be
+     * what refuses it; the unsigned-cast guard must. */
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess, n1, TBT_EPOCH_LIMIT, psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == -EPROTO &&
+              e.peer_epoch == TBT_EPOCH_LIMIT - 1,
+          "epoch: the bound itself is refused without moving the high-water");
+}
+
+/* The far side answers the near's HTTP request with a Date built from
+ * time(NULL). A pre-1970 clock makes that negative, and its u64 cast is a
+ * year past 9999 that the renderer rejects: the header build returned 0,
+ * carrier_send_http_header() returned -EINVAL and the carrier was closed on
+ * the first request. Clamping keeps a plausible, renderable Date. */
+static void test_http_date_clamp(void)
+{
+    char hdr[TBT_HTTP_RESP_MAX];
+    struct tbt_http_resp_cfg rc;
+
+    rc.unix_secs = http_date_secs((time_t)-1);
+    CHECK(rc.unix_secs == 0 &&
+              tbt_http_resp_header(hdr, sizeof(hdr), &rc) != 0,
+          "http: a pre-1970 clock still renders a Date");
+    rc.unix_secs = http_date_secs((time_t)(TBT_CLIENT_HTTP_DATE_MAX + 1));
+    CHECK(rc.unix_secs == TBT_CLIENT_HTTP_DATE_MAX &&
+              tbt_http_resp_header(hdr, sizeof(hdr), &rc) != 0,
+          "http: a clock past 9999 still renders a Date");
+    rc.unix_secs = http_date_secs((time_t)1700000000);
+    CHECK(rc.unix_secs == 1700000000ull &&
+              tbt_http_resp_header(hdr, sizeof(hdr), &rc) != 0,
+          "http: a sane clock passes through");
+}
+
+/* An app socket that stays readable behind an exhausted TX window must leave
+ * the poll set: EPOLLIN is level-triggered, so leaving it armed makes
+ * epoll_wait return on every loop iteration (a core at 100%). flow_tick()
+ * must restore it when the peer's ACK opens the window, or the tail waits
+ * forever. */
+static void test_app_credit_poll_cycle(void)
+{
+    struct flow *tx = tx_flow_new();
+    struct epoll_event ev;
+    int sv[2];
+    int epfd;
+    char ch = 'x';
+    u64 block_pkts = (u64)tx->groups * tx->n;
+
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, sv))
+        abort();
+    epfd = epoll_create1(EPOLL_CLOEXEC);
+    CHECK(epfd >= 0, "credit: epoll instance");
+    if (epfd < 0)
+        return;
+    if (write(sv[1], &ch, 1) != 1)
+        abort();
+    tx_e.epfd = epfd;
+    tx->app_fd = sv[0];
+    /* The one-block grant is fully outstanding: credit_ok is still true at
+     * the edge, but no further packet may be read. */
+    tx->tx_credit_shares = (u64)tx->groups * (tx->n + tx->m);
+    tx->tx_seq = block_pkts;
+    tx->tx_ack_next = 0;
+    flow_app_poll_set(tx, EPOLLIN | EPOLLRDHUP);
+    CHECK(tx->app_armed && epoll_wait(epfd, &ev, 1, 0) == 1,
+          "credit: a readable fd is armed first");
+
+    flow_app_read(tx);
+    CHECK(!tx->app_armed, "credit: an exhausted window disarms the fd");
+    CHECK(epoll_wait(epfd, &ev, 1, 0) == 0,
+          "credit: no level-triggered wakeup remains");
+    CHECK(tx->tx_cur_len == 0 && tx->tx_seq == block_pkts,
+          "credit: no byte was read past the window");
+
+    /* The peer grants the full window: the next tick must re-arm the fd. */
+    tx->tx_credit_shares = 7 * (u64)tx->groups * (tx->n + tx->m);
+    flow_tick(tx, now_ns());
+    CHECK(tx->app_armed, "credit: the tick re-arms after the ACK");
+    CHECK(epoll_wait(epfd, &ev, 1, 0) == 1,
+          "credit: the readable fd wakes again (no lost wakeup)");
+    flow_app_read(tx);
+    CHECK(tx->tx_cur_len == 1, "credit: the granted window consumes the byte");
+
+    flow_free(&tx_e, tx);
+    close(sv[0]);
+    close(sv[1]);
+    close(epfd);
+}
+
+/* A peer that closes with bytes still unread sets EPOLLHUP. That is not an
+ * error: the credit gate may have deferred the read, and resetting the app
+ * here dropped the tail (the loopback ECONNRESET flake). EOF itself needs no
+ * credit, so a zero-length peek finalizes a drained socket immediately. */
+static void test_app_hup_keeps_unread_tail(void)
+{
+    struct flow *tx = tx_flow_new();
+    u8 data[TBT_FEC_S];
+    int sv[2];
+    u64 block_pkts = (u64)tx->groups * tx->n;
+
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, sv))
+        abort();
+    memset(data, 0x5c, sizeof(data));
+    if (write(sv[1], data, sizeof(data)) != (ssize_t)sizeof(data))
+        abort();
+    (void)shutdown(sv[1], SHUT_WR);
+    tx->app_fd = sv[0];
+    tx->tx_credit_shares = (u64)tx->groups * (tx->n + tx->m);
+    tx->tx_seq = block_pkts; /* window fully spent */
+    tx->tx_ack_next = 0;
+    tx_e.epfd = -1;
+
+    flow_target_event(tx, EPOLLIN | EPOLLRDHUP | EPOLLHUP);
+    CHECK(!tx->dead, "hup: an unread tail is not a reset");
+    CHECK(!tx->app_eof, "hup: the EOF stays behind the pending bytes");
+    CHECK(!tx->app_armed, "hup: the stalled fd leaves the poll set");
+    CHECK(tx->tx_cur_len == 0 && tx->tx_seq == block_pkts,
+          "hup: the stalled fd consumes nothing");
+
+    /* Credit returns: drain the share, observe EOF, then finish and send. */
+    tx->tx_credit_shares = 7 * (u64)tx->groups * (tx->n + tx->m);
+    flow_tick(tx, now_ns());
+    flow_target_event(tx, EPOLLIN | EPOLLRDHUP | EPOLLHUP);
+    CHECK(tx->tx_bytes == TBT_FEC_S, "hup: the tail is delivered");
+    CHECK(tx->app_eof && !tx->dead, "hup: the EOF is applied after the tail");
+    flow_tick(tx, now_ns());
+    CHECK(tx->fin_sent, "hup: the deferred FIN follows");
+
+    flow_free(&tx_e, tx);
+    close(sv[0]);
+    close(sv[1]);
+}
+
+/* The drained-socket case: zero pending bytes and a hangup. The peek sees
+ * the peer's EOF even though the window is closed, and EOF needs no credit. */
+static void test_app_hup_clean_eof_without_credit(void)
+{
+    struct flow *tx = tx_flow_new();
+    int sv[2];
+    u64 block_pkts = (u64)tx->groups * tx->n;
+
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, sv))
+        abort();
+    (void)shutdown(sv[1], SHUT_WR);
+    tx->app_fd = sv[0];
+    tx->tx_credit_shares = (u64)tx->groups * (tx->n + tx->m);
+    tx->tx_seq = block_pkts;
+    tx->tx_ack_next = 0;
+    tx_e.epfd = -1;
+
+    flow_target_event(tx, EPOLLHUP);
+    CHECK(tx->app_eof && !tx->dead,
+          "hup: a clean EOF is applied without credit");
+    flow_tick(tx, now_ns());
+    CHECK(tx->fin_sent, "hup: the EOF sends FIN once the gate opens");
+    flow_free(&tx_e, tx);
+    close(sv[0]);
+    close(sv[1]);
+}
+
+/* A carrier that terminates its chunked message and starts a new one (a
+ * proxy or an HTTP-aware peer may do this) must not wedge: the decoder
+ * reports NEED_MORE with the parser DONE, and the next bytes are a fresh
+ * header block. */
+static void test_carrier_http_terminator_reset(void)
+{
+    static const char resp[] = "HTTP/1.1 200 OK\r\n\r\n";
+    struct carrier c;
+    struct tbt_hdr h;
+    struct tbt_http_out out;
+    u8 buf[512];
+    size_t o = 0;
+
+    clear_engine();
+    e.near = true;
+    memset(&c, 0, sizeof(c));
+    c.e = &e;
+    c.index = 0;
+    tbt_http_rx_new_message(&c.rx);
+
+    memset(&h, 0, sizeof(h));
+    h.type = TBT_F_PAD;
+    h.conv = TBT_CONV;
+    h.body_len = 0;
+    out.hdr = &h;
+    out.body = NULL;
+
+    memcpy(buf + o, resp, sizeof(resp) - 1);
+    o += sizeof(resp) - 1;
+    o += tbt_http_frame_encode((char *)buf + o, sizeof(buf) - o, &out);
+    CHECK(o > sizeof(resp) - 1, "http: the first PAD chunk encodes");
+    memcpy(buf + o, "0\r\n\r\n", 5);
+    o += 5;
+    memcpy(buf + o, resp, sizeof(resp) - 1);
+    o += sizeof(resp) - 1;
+    o += tbt_http_frame_encode((char *)buf + o, sizeof(buf) - o, &out);
+    CHECK(o < sizeof(buf), "http: two messages fit");
+
+    memcpy(c.rbuf, buf, o);
+    c.rlen = o;
+    CHECK(carrier_process(&e, &c) == 0,
+          "http: the post-terminator message is parsed");
+    CHECK(c.rx_records == 2, "http: both PAD records are delivered");
+    CHECK(c.rlen == 0, "http: the whole buffer is consumed");
+    CHECK(c.http_hdr_done, "http: the carrier is back in the chunk stage");
+}
+
+/* OPEN is only meaningful after HELLO joined the carrier, only for the
+ * configured target, and never for the zero sid. A refused OPEN must not
+ * close the carrier; a failed target connect must reset the flow instead of
+ * leaking its slot. */
+static void test_open_gate_and_target(void)
+{
+    struct tbt_hdr h;
+    struct carrier c;
+    u8 body[TBT_OPEN_BODY_LEN];
+    u8 rec[TBT_HDR_LEN + TBT_OPEN_BODY_LEN];
+    int i;
+
+    clear_engine();
+    e.near = false;
+    e.n_car = 4;
+    /* The far allocates a flow with its own TX shape before it dials. */
+    e.tx_shape.variant = TBT_FEC_SCLC_UP;
+    e.tx_shape.n = 8;
+    e.tx_shape.m = 24;
+    e.tx_shape.groups = 8;
+    e.tx_shape.block = TBT_FEC_SCLC_BLOCK_UP;
+    e.tx_shape.L = TBT_FEC_SCLC_L_UP;
+    e.tx_shape.rate_ppm = 250;
+    e.tx_shape.rate_256 = 64;
+    e.tx_n = 8;
+    e.tx_m = 24;
+    e.tx_groups = 8;
+    e.tx_seed = 1;
+    e.cfg.cfg.target_port = tbt_port_be16(443);
+    memset(body, 0, sizeof(body));
+    tbt_put_le16(body + TBT_OPEN_ROUTE_SLOT, 0);
+    tbt_put_le16(body + TBT_OPEN_TARGET_PORT, 0);
+    memset(&h, 0, sizeof(h));
+    h.type = TBT_F_OPEN;
+    h.body_len = sizeof(body);
+    h.conv = TBT_CONV;
+    h.sid_lo = 7;
+
+#define OPEN_REC()                                                          \
+    do                                                                      \
+    {                                                                       \
+        tbt_raw_put_hdr(rec, &h, sizeof(body));                              \
+        memcpy(rec + TBT_HDR_LEN, body, sizeof(body));                       \
+    } while (0)
+
+    memset(&c, 0, sizeof(c));
+    c.e = &e;
+    c.index = 0;
+    OPEN_REC();
+    CHECK(handle_record(&e, &c, rec, sizeof(rec)) == -EPROTO,
+          "open: a record before HELLO is refused");
+    CHECK(e.flow_accepted == 0 && e.flow[0] == NULL,
+          "open: no flow and no target connect before HELLO");
+
+    c.hello_recv = true;
+    tbt_put_le16(body + TBT_OPEN_TARGET_PORT, 8080);
+    OPEN_REC();
+    CHECK(handle_record(&e, &c, rec, sizeof(rec)) == 0,
+          "open: a foreign target is dropped, not a carrier fault");
+    CHECK(e.flow_accepted == 0 && e.flow[0] == NULL,
+          "open: a foreign target creates no flow");
+
+    tbt_put_le16(body + TBT_OPEN_ROUTE_SLOT, 1);
+    tbt_put_le16(body + TBT_OPEN_TARGET_PORT, 0);
+    OPEN_REC();
+    CHECK(handle_record(&e, &c, rec, sizeof(rec)) == 0 &&
+              e.flow_accepted == 0,
+          "open: an unsupported mapping slot is refused");
+
+    tbt_put_le16(body + TBT_OPEN_ROUTE_SLOT, 0);
+    h.sid_lo = 0;
+    OPEN_REC();
+    CHECK(handle_record(&e, &c, rec, sizeof(rec)) == 0 &&
+              e.flow_accepted == 0,
+          "open: sid 0 is the no-stream sentinel");
+    h.sid_lo = 7;
+
+    /* Matching the configured port reaches the connect path. An unsupported
+     * target family makes connect fail synchronously: the flow must be
+     * reset and then released, not left with app_fd = -1. */
+    tbt_put_le16(body + TBT_OPEN_TARGET_PORT, 443);
+    e.cfg.cfg.target.family = 99;
+    clear_pending();
+    OPEN_REC();
+    CHECK(handle_record(&e, &c, rec, sizeof(rec)) == 0,
+          "open: a failed connect is not a carrier fault");
+    CHECK(e.flow_accepted == 1 && e.flow[0] != NULL,
+          "open: the flow was allocated");
+    CHECK(e.flow[0] && e.flow[0]->dead && e.flow[0]->app_fd == -1,
+          "open: a failed connect resets the flow");
+    CHECK(e.npending == 1 && e.pending[0].rec[0] == TBT_F_RST,
+          "open: the near side is told with RST");
+    if (e.flow[0])
+        flow_tick(e.flow[0], now_ns());
+    CHECK(e.flow[0] == NULL && e.flow_freed == 1,
+          "open: the reset flow releases its slot");
+
+    for (i = 0; i < TBT_FLOW_MAX; i++)
+        CHECK(e.flow[i] == NULL, "open: no slot leaked");
+#undef OPEN_REC
+}
+
+/* The sparse probe asks for a block the sender may never have built. Asking
+ * forever on an idle flow is a NACK every retry interval for the life of the
+ * connection; three unanswered probes stop it, a later share proves the
+ * sender moved on, and a delivered FIN ends the questions entirely. */
+static void test_sparse_probe_cap(void)
+{
+    u64 ids[16];
+    u64 t;
+    int i;
+
+    clear_engine();
+    set_downlink_shape();
+    e.rtt_us = 0;
+    clear_pending();
+    t = now_ns();
+    f.rx_hole_ns = t;
+    f.rx_probe_ns = 0;
+    f.rx_probe_block = f.rx_next_block;
+    f.rx_probe_tries = 0;
+    t += TBT_NACK_FIRST_NS + 2ull * TBT_NACK_RETRY_NS + 1000000ull;
+    for (i = 0; i < 6; i++)
+    {
+        clear_pending();
+        flow_rx_nack(&f, t);
+        if (i == 0)
+            CHECK(count_nacks(ids, 16) == 1, "probe: the first probe is sent");
+        t += TBT_NACK_PROBE_NS + 1000000ull;
+    }
+    clear_pending();
+    flow_rx_nack(&f, t);
+    CHECK(count_nacks(ids, 16) == 0,
+          "probe: an idle frontier stops after three unanswered probes");
+    CHECK(f.rx_probe_tries == TBT_NACK_PROBE_MAX &&
+              f.rx_sparse_probe == TBT_NACK_PROBE_MAX,
+          "probe: the cap is exactly the module's");
+
+    /* A later block proves the sender built the frontier: ask again. */
+    marker_block(1, 128, 128, 128);
+    clear_pending();
+    f.rx_probe_ns = 0;
+    t += TBT_NACK_PROBE_NS + 1000000ull;
+    flow_rx_nack(&f, t);
+    CHECK(count_nacks(ids, 16) >= 1,
+          "probe: a sender ahead is asked again");
+
+    /* The stream end is delivered: no probe may name a block past it. */
+    f.peer_fin_end_set = true;
+    f.peer_fin_end = f.rx_ack_frontier;
+    clear_pending();
+    f.rx_probe_ns = 0;
+    flow_rx_nack(&f, t + TBT_NACK_PROBE_NS + 1000000ull);
+    CHECK(count_nacks(ids, 16) == 0,
+          "probe: a delivered FIN stops every request");
+}
+
+/* The FIN body names the packet after the sender's last DATA packet in wire
+ * sequence space. An idle-sealed short block leaves rx_next_deliver (real
+ * packet count) permanently behind that frontier; the half-close must use
+ * the block-aligned wire frontier instead or the target never sees EOF. */
+static void test_fin_frontier_after_idle_seal(void)
+{
+    struct flow *rf = &f;
+    u8 drain[TBT_FEC_S];
+    int sv[2];
+    bool eof = false;
+    int i;
+
+    clear_engine();
+    /* Block 0 is one idle-sealed 3-byte share plus seven markers; block 1
+     * is full and starts at seq0 = groups*n = 64 (the padding jump). */
+    send_data(0, 0, 8, 24, 0, 0, 3, true);
+    send_parity(0, 0, 8, 24, 0, 1, 3);
+    for (i = 1; i < 8; i++)
+        send_marker(0, 0, 8, 24, (u16)i);
+    full_block(1, 64, 8, 24);
+    CHECK(rf->rx_next_block == 2, "fin: both blocks delivered");
+    CHECK(rf->rx_next_deliver == 65,
+          "fin: the real-packet cursor lags the wire jump");
+    CHECK(rf->rx_ack_frontier == 128,
+          "fin: the wire frontier reaches the FIN's end");
+
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, sv))
+        abort();
+    rf->app_fd = sv[0];
+    rf->fin_recv = true;
+    rf->peer_fin_end_set = true;
+    rf->peer_fin_end = 128;
+    CHECK(rf->rx_next_deliver < rf->peer_fin_end,
+          "fin: the old count frontier could never reach the FIN");
+    flow_out_flush(rf);
+    CHECK(rf->fin_applied,
+          "fin: the short-block stream applies its FIN");
+    for (;;)
+    {
+        ssize_t n;
+
+        do
+            n = read(sv[1], drain, sizeof(drain));
+        while (n < 0 && errno == EINTR);
+        if (n > 0)
+            continue;
+        eof = n == 0;
+        break;
+    }
+    CHECK(eof, "fin: the target write side sees EOF");
+    close(sv[1]);
+    rf->app_fd = -1;
+}
+
+/* OPEN and FEC_CFG are resent until the peer proves it has them; a record
+ * lost with the carrier that carried it otherwise stalls the stream. */
+static void test_open_cfg_retry(void)
+{
+    struct flow *tx = tx_flow_new();
+    u8 types[64];
+    u8 body[TBT_FEC_FBK_LEN];
+    struct tbt_fec_fbk fb;
+    u64 t0 = 1000000000ull;
+    int n, i;
+    int opens, cfgs;
+
+    tx->open_sent = false;
+    tx->open_acked = false;
+    tx->cfg_acked = false;
+    tx_fake_carriers();
+    tx_e.up_count = 1;
+
+    flow_tick(tx, t0);
+    n = wire_drain(types, 64);
+    opens = cfgs = 0;
+    for (i = 0; i < n; i++)
+    {
+        opens += types[i] == TBT_F_OPEN;
+        cfgs += types[i] == TBT_FEC_CFG;
+    }
+    CHECK(opens == 1 && cfgs == 1, "retry: the first tick sends OPEN+CFG");
+
+    flow_tick(tx, t0 + 1000000ull);
+    n = wire_drain(types, 64);
+    CHECK(n == 0, "retry: nothing is resent inside the interval");
+
+    flow_tick(tx, t0 + TBT_CTL_RETRY_NS);
+    n = wire_drain(types, 64);
+    opens = cfgs = 0;
+    for (i = 0; i < n; i++)
+    {
+        opens += types[i] == TBT_F_OPEN;
+        cfgs += types[i] == TBT_FEC_CFG;
+    }
+    CHECK(opens == 1 && cfgs == 1,
+          "retry: an unacknowledged OPEN and CFG are resent");
+
+    /* The far echoes OPEN and ACKs the CFG: both retries stop. */
+    tx->open_acked = true;
+    memset(&fb, 0, sizeof(fb));
+    fb.flags = TBT_FEC_FBK_F_CFG_ACK;
+    CHECK(tbt_fec_fbk_pack(&fb, body) == 0, "retry: CFG_ACK packs");
+    handle_fbk(tx, body);
+    CHECK(tx->cfg_acked, "retry: the ACK stops the CFG retry");
+    flow_tick(tx, t0 + 2ull * TBT_CTL_RETRY_NS);
+    n = wire_drain(types, 64);
+    CHECK(n == 0, "retry: acknowledged control records stay quiet");
+
+    flow_free(&tx_e, tx);
+    tx_clear_carriers();
+}
+
+/* A FIN that ctl_send() could not even park must not latch fin_sent: the
+ * retry in flow_tick sends it as soon as a carrier (or queue slot) returns. */
+static void test_fin_latch_retry(void)
+{
+    struct flow *tx = tx_flow_new();
+    bool rst, fin;
+    int i;
+
+    tx_fake_carriers();
+    for (i = 0; i < TBT_CAR_MAX; i++)
+        tx_e.car[i]->up = false;
+    tx_e.npending = TBT_CTL_PENDING; /* the control queue is full */
+    tx->app_eof = true;
+    tx->tx_finished = true;
+    tx->tx_pkt_base_set = true;
+    CHECK(flow_send_fin(tx) != 0 && !tx->fin_sent,
+          "fin: a refused queue does not latch the FIN");
+
+    tx_e.npending = 0;
+    tx_e.car[0]->up = true;
+    flow_tick(tx, now_ns() + TBT_CTL_RETRY_NS);
+    CHECK(tx->fin_sent, "fin: the retry queues the FIN once a carrier returns");
+    wire_close_controls(&rst, &fin);
+    CHECK(fin && !rst, "fin: the retried FIN reaches the wire");
+
+    flow_free(&tx_e, tx);
+    tx_clear_carriers();
+}
+
+/* Key material must come from getrandom(); a failed draw aborts instead of
+ * falling back to the public xorshift state. */
+static void test_csprng_failure_fatal(void)
+{
+    clear_engine();
+    e.near = true;
+    test_fail_csprng = true;
+    CHECK(engine_init_session_nonce(&e) == -EIO,
+          "csprng: a failed draw is a fatal error");
+    CHECK(!e.session_nonce_set, "csprng: no xorshift fallback nonce");
+    test_fail_csprng = false;
+    CHECK(engine_init_session_nonce(&e) == 0 && e.session_nonce_set,
+          "csprng: the next draw fills the nonce");
+}
+
+/* profile=raw is the module's unframed container; this engine frames every
+ * carrier as HTTP. It must refuse the profile instead of advertising it in
+ * HELLO and mis-framing both directions. */
+static void test_raw_profile_rejected(void)
+{
+    struct tbt_engine_cfg cfg;
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.cfg.role = TBT_ROLE_NEAR;
+    cfg.cfg.mode = 3;
+    cfg.cfg.carriers = 256;
+    cfg.cfg.profile = 3;
+    CHECK(tbt_engine_run(&cfg) == -EINVAL,
+          "raw: profile=3 is refused at startup");
+}
+
+/* The ACK grant is also the application backlog bound: a slow reader must
+ * throttle the peer instead of letting flow_out_append() hit TBT_OUT_CAP and
+ * reset the stream. The minimum grant is one block (the sender's stop-and-
+ * wait floor), and a drained reader restores the full window. */
+static void test_rx_credit_backpressure(void)
+{
+    u64 block_bytes;
+    u64 full;
+    int sv[2];
+
+    clear_engine();
+    set_downlink_shape();
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, sv))
+        abort();
+    f.app_fd = sv[0];
+    block_bytes = (u64)f.rx_groups * f.rx_n * TBT_FEC_S;
+    full = (u64)(TBT_RX_SLOTS - 2) * (u64)f.rx_groups *
+           ((u32)f.rx_n + f.rx_m);
+
+    clear_pending();
+    CHECK(flow_send_ack(&f) == 0 && last_ack_credit() == (int)full,
+          "backlog: a drained reader grants the full window");
+
+    /* Withhold credit once the backlog reaches the whole grant: the sender
+     * must fall back to the one-block stop-and-wait floor. */
+    f.out_len = (size_t)((u64)(TBT_RX_SLOTS - 2) * block_bytes);
+    f.out_off = 0;
+    clear_pending();
+    CHECK(flow_send_ack(&f) == 0 &&
+              last_ack_credit() == (int)(f.rx_groups * (f.rx_n + f.rx_m)),
+          "backlog: a deep queue withholds credit down to one block");
+
+    f.out_off = f.out_len;
+    clear_pending();
+    CHECK(flow_send_ack(&f) == 0 && last_ack_credit() == (int)full,
+          "backlog: draining restores the full grant");
+
+    f.out_len = f.out_off = 0;
+    f.app_fd = -1;
+    close(sv[0]);
+    close(sv[1]);
+}
+
+/* A partial carrier write leaves a dead front in wbuf. When a following
+ * record does not fit at the tail but does fit after compaction, the queue
+ * must move the live bytes down instead of reporting EAGAIN. */
+static void test_carrier_queue_compaction(void)
+{
+    struct carrier c;
+    u8 rec[1000];
+    char fill[4096];
+    int sv[2];
+    int buf = 4096;
+    size_t live;
+
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, sv))
+        abort();
+    (void)setsockopt(sv[0], SOL_SOCKET, SO_SNDBUF, &buf, sizeof(buf));
+    memset(fill, 0x5a, sizeof(fill));
+    for (;;)
+    {
+        ssize_t n = write(sv[0], fill, sizeof(fill));
+
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            break;
+        if (n <= 0)
+            abort();
+    }
+    memset(&c, 0, sizeof(c));
+    c.e = &tx_e;
+    c.fd = sv[0];
+    c.index = 0;
+    c.woff = 4096;
+    c.wlen = sizeof(c.wbuf) - 500;
+    live = c.wlen - c.woff;
+    memset(rec, 0x22, sizeof(rec));
+    CHECK(carrier_queue(&c, rec, sizeof(rec)) == 0,
+          "carrier: a dead front is compacted, not EAGAIN");
+    CHECK(c.woff == 0 && c.wlen == live + sizeof(rec),
+          "carrier: the record follows the compacted bytes");
+    close(sv[0]);
+    close(sv[1]);
+}
+
+/* The 32-share GF(16) uplink block emits a ten-row parity floor on a short
+ * seal. Asking min(real, m) left a lost share with no covering row; the
+ * shared NACK limit helper names the rows the sender really emitted. */
+static void test_nack_uplink_parity_floor(void)
+{
+    const u8 *nack;
+    u64 t;
+
+    clear_engine();
+    e.rtt_us = 0;
+    send_data(0, 0, 8, 24, 0, 0, TBT_FEC_S, false);
+    send_parity(0, 0, 8, 24, 0, 5, 0);
+    clear_pending();
+    t = now_ns() + TBT_NACK_FIRST_NS + 2ull * TBT_NACK_RETRY_NS +
+        1000000ull;
+    flow_rx_nack(&f, t);
+    nack = nack_for_group(0);
+    CHECK(nack != NULL, "nack floor: the short uplink block is requested");
+    if (!nack)
+        return;
+    CHECK(nack_bit_count(nack) == 13,
+          "nack floor: four DATA gaps plus nine missing rows");
+    CHECK(nack_names(nack, 1) && nack_names(nack, 4) &&
+              !nack_names(nack, 5),
+          "nack floor: only the DATA gaps below the cut are named");
+    CHECK(nack_names(nack, 8 + 9) && !nack_names(nack, 8 + 10),
+          "nack floor: ten rows are named, no row past the floor");
 }
 
 int main(void)
@@ -3318,7 +4513,28 @@ int main(void)
     test_flow_table_refusal();
     test_hello_reincarnation();
     test_hello_reincarnation_off();
+    test_far_psk_reincarnation();
+    test_hello_epoch_path_replay();
+    test_hello_epoch_same_nonce_reorder();
+    test_hello_epoch_fresh_per_carrier();
     test_sid_incarnation_seed();
+    test_epoch_clock_clamp();
+    test_hello_epoch_limit();
+    test_http_date_clamp();
+    test_app_credit_poll_cycle();
+    test_app_hup_keeps_unread_tail();
+    test_app_hup_clean_eof_without_credit();
+    test_carrier_http_terminator_reset();
+    test_open_gate_and_target();
+    test_sparse_probe_cap();
+    test_fin_frontier_after_idle_seal();
+    test_open_cfg_retry();
+    test_fin_latch_retry();
+    test_csprng_failure_fatal();
+    test_raw_profile_rejected();
+    test_rx_credit_backpressure();
+    test_carrier_queue_compaction();
+    test_nack_uplink_parity_floor();
 
     printf("test_client_rx: %d checks, %d failures\n", checks, failures);
     free(f.out);

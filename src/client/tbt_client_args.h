@@ -39,8 +39,10 @@ int tbt_client_us_strip(char *line, size_t cap, struct tbt_client_us *us,
 int tbt_client_us_argv(int argc, char **argv, int start,
                        struct tbt_client_us *us);
 
-/* Read the first non-blank, non-comment line of path into line. Returns 0,
- * -ENODATA when the file holds no line, or another negative errno. */
+/* Read the first non-blank, non-comment line of path into line, with its
+ * CR/LF terminator removed. Returns 0, -ENODATA when the file holds no line,
+ * -E2BIG when a line does not fit, -EINVAL when cap cannot hold a line, or
+ * another negative errno for an open or read failure. */
 int tbt_client_config_read(const char *path, char *line, size_t cap);
 
 /* Join argv[start..] into the kernel line and remove userspace keys. Returns
@@ -48,5 +50,17 @@ int tbt_client_config_read(const char *path, char *line, size_t cap);
  * value. */
 int tbt_client_line_build(int argc, char **argv, int start, char *line,
                           size_t cap, struct tbt_client_us *us);
+
+/* Append ` role=near` when line has no whitespace-delimited token that
+ * begins with `role=`. A `role` inside another key or value does not count.
+ * Returns 0, or -E2BIG when the append does not fit cap (line unchanged). */
+int tbt_client_role_default(char *line, size_t cap);
+
+/* Reject a parsed tunnel line the userspace engine cannot honor. It always
+ * runs the fec=on SC-LDPC data plane and has no map=, srcaddrs=, dev=,
+ * portblock= or tunnel_rate= support; profile= is left to the engine's
+ * framing. Returns 0 when the line can run, or -1 with *why naming the first
+ * unsupported value (a static string). A NULL `why` is allowed. */
+int tbt_client_cfg_check(const struct tbt_cfg *cfg, const char **why);
 
 #endif /* _TBT_CLIENT_ARGS_H */

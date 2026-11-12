@@ -31,6 +31,7 @@
 #define TBT_WINDOW_MAX 268435456u  /* tx_window_bytes, same ceiling as replay */
 #define TBT_STALL_MAX 3600000u     /* carrier_stall_ms, one hour */
 #define TBT_INFLATE_MAX 1000000u  /* 1000.000 */
+#define TBT_SCLC_UP_SHARES 32u    /* GF(16) uplink: n + m == 32 */
 
 static int tbt_fail(struct tbt_parse_error *e, const char *key, const char *why)
 {
@@ -140,6 +141,7 @@ static int tbt_parse_ipv4(const char *s, __be32 *out, struct tbt_parse_error *e)
 
     for (i = 0; i < 4; i++)
     {
+        const char *octet = p;
         unsigned v = 0;
         int digits = 0;
 
@@ -156,6 +158,12 @@ static int tbt_parse_ipv4(const char *s, __be32 *out, struct tbt_parse_error *e)
                 return tbt_fail(e, NULL, "hostname refused: DNS is never resolved, use an IPv4 literal");
             return tbt_fail(e, NULL, "expected an IPv4 literal");
         }
+        /* One address has exactly one spelling. A leading zero is ambiguous
+         * ("010" is decimal 10 to this parser but octal 8 to inet_aton), so
+         * a multi-digit octet may not start with '0'. The HTTP Host parser
+         * (tbt_http.c) applies the same rule; keep the two in step. */
+        if (digits > 1 && *octet == '0')
+            return tbt_fail(e, NULL, "IPv4 octet has a leading zero");
         b[i] = (u8)v;
         if (i < 3)
         {
@@ -356,6 +364,10 @@ static int tbt_parse_addr(const char *s, struct tbt_addr *addr, __be16 *port,
         *colon = '\0';
         if (strchr(buf, ':'))
             return tbt_fail(e, NULL, "an IPv6 literal must be bracketed: [addr]:port");
+        /* Zero the union first: a repeated endpoint key may follow an IPv6
+         * literal, and leaving its tail in the struct makes the parsed
+         * config differ from the one the canonical render parses back. */
+        memset(&addr->u, 0, sizeof(addr->u));
         addr->family = TBT_AF_INET;
         if (tbt_parse_ipv4(buf, &addr->u.v4, e))
             return TBT_PARSE_EINVAL;
@@ -500,6 +512,7 @@ static int tbt_parse_srcaddr_one(const char *s, struct tbt_addr *out,
     }
     if (strchr(s, ':'))
         return tbt_parse_ipv6(s, out, e);
+    memset(&out->u, 0, sizeof(out->u));
     out->family = TBT_AF_INET;
     return tbt_parse_ipv4(s, &out->u.v4, e);
 }
@@ -514,6 +527,9 @@ static int tbt_parse_srcaddrs(const char *v, struct tbt_cfg *cfg, struct tbt_par
     if (strlen(v) >= sizeof(buf))
         return tbt_fail(e, NULL, "srcaddrs is too long");
     memcpy(buf, v, strlen(v) + 1);
+    /* A repeated key replaces the list; clear the old entries so the parsed
+     * struct matches the one the shorter canonical list parses back into. */
+    memset(cfg->srcaddrs, 0, sizeof(cfg->srcaddrs));
     cfg->nsrc = 0;
     while ((tok = tbt_next_tok(&p)))
     {
@@ -567,6 +583,9 @@ static int tbt_parse_map(const char *v, struct tbt_cfg *cfg,
     if (strlen(v) >= sizeof(buf))
         return tbt_fail(e, "map", "map list is too long");
     memcpy(buf, v, strlen(v) + 1);
+    /* A repeated map= replaces the list, including the entries the new,
+     * shorter list no longer covers. */
+    memset(cfg->maps, 0, sizeof(cfg->maps));
     cfg->nmap = 0;
     while (*p)
     {
@@ -601,7 +620,7 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
 {
     char *tok;
     u64 id;
-    int have_listen = 0, have_peer = 0, have_target = 0, have_window = 0;
+    int have_listen = 0, have_peer = 0, have_target = 0;
     bool have_crypto = false, have_adaptive = false;
 
     memset(cfg, 0, sizeof(*cfg));
@@ -620,7 +639,7 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     cfg->max_inflate_milli = 2000;
     cfg->hole_budget_ms = 0; /* auto: the receiver derives it from the RTT */
     cfg->rx_reorder_bytes = 67108864;
-    cfg->tx_window_bytes = 67108864;
+    cfg->tx_window_bytes = 0; /* auto: BBR-derived, capped by rx_reorder */
     cfg->tx_retain_bytes = 0; /* unlimited */
     cfg->carrier_stall_ms = 0; /* auto: derived from the measured RTO */
     /* T0 §2.4: crypto follows fec unless crypto= is explicit. Resolved
@@ -742,7 +761,6 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
                 cfg->tx_window_bytes > TBT_WINDOW_MAX)
                 return tbt_fail(e, key, "tx_window_bytes must be 0..268435456 bytes"
                                            " and no more than rx_reorder_bytes");
-            have_window = 1;
         }
         else if (!strcmp(key, "tx_retain_bytes"))
         {
@@ -766,8 +784,9 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         }
         else if (!strcmp(key, "adaptive"))
         {
-            /* The control law chooses n/m; the configured pair is the
-             * initial shape and the upper hint (design §4.5). */
+            /* The SC-LDPC control law chooses n/m; the configured pair is
+             * the initial shape (design §4.5). The value is resolved after
+             * the key loop, where a controllerless mode turns it off. */
             if (!strcmp(val, "on"))
                 cfg->adaptive = 1;
             else if (!strcmp(val, "off"))
@@ -866,9 +885,17 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         cfg->crypto = cfg->fec;
     if (cfg->crypto && !cfg->fec)
         return tbt_fail(e, "crypto", "crypto=on requires fec=on");
-    /* Adaptive is meaningful only where a control law runs. Unset, it
-     * follows fec; mode=3 defaults on only for a split on the shipped rate
-     * ladder, so a special fixed test shape still parses as adaptive=off. */
+    /* Adaptive is meaningful only where a data-plane controller can commit
+     * a new split. mode=sc-ldpc owns one on both ends
+     * (tbt_fec_adapt_sclc_tick() plus the FBK m_target). The GF(2)
+     * mode=rlnc/grouped plane has none: tbt_fec_adapt_eval() has no
+     * data-plane caller, the TX applies an FBK m_target only when
+     * tx->sclc_codec exists, and the wire refuses an APPLY CFG. Unset,
+     * adaptive follows fec for mode=3 only, and only for a split the
+     * shipped rate ladder can build. An explicit adaptive=on on a
+     * controllerless mode is normalized off too, so the canonical line and
+     * /proc c13 report the shape actually in force instead of a flag that
+     * moves nothing. */
     if (!have_adaptive)
     {
         u16 shares = (u16)(cfg->n + cfg->m);
@@ -893,11 +920,33 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
              * adaptive and is then refused as an unsupported profile. */
             ladder = shipped &&
                      tbt_fec_adapt_sclc_buildable(variant, cfg->n, cfg->m);
+            /* The adaptive profiles also pin the codeword block: the
+             * 256-share downlink runs block=256/L=8, the 32-share GF(16)
+             * uplink block=64/L=8. A line that names another block or L
+             * (w=512/L=16, the fixed L16/block512 shape) is not an
+             * adaptive profile. Without this, the inferred adaptive=on
+             * made the adaptive validator reject the line the comment
+             * above promises parses as adaptive=off. 0 is auto, so only
+             * an explicit value can mismatch. */
+            if (ladder)
+            {
+                u16 block = shares == TBT_FEC_MAX_SHARES
+                                ? TBT_FEC_SCLC_BLOCK_DOWN
+                                : TBT_FEC_SCLC_BLOCK_UP;
+                u16 L = shares == TBT_FEC_MAX_SHARES ? TBT_FEC_SCLC_L_DOWN
+                                                     : TBT_FEC_SCLC_L_UP;
+
+                if ((cfg->w && cfg->w != block) ||
+                    (cfg->L && cfg->L != L))
+                    ladder = false;
+            }
         }
-        cfg->adaptive = cfg->fec && (cfg->mode != 3 || ladder);
+        cfg->adaptive = cfg->fec && cfg->mode == 3 && ladder;
     }
     if (cfg->adaptive && !cfg->fec)
         return tbt_fail(e, "adaptive", "adaptive=on requires fec=on");
+    if (have_adaptive && cfg->adaptive && cfg->mode != 3)
+        cfg->adaptive = 0;
     if (!cfg->role)
         return tbt_fail(e, "role", "tunnel needs role=near or role=far");
     if (!have_listen)
@@ -946,10 +995,21 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     if (cfg->mode == 3 && cfg->w && cfg->w != 64 && cfg->w != 256 &&
         cfg->w != 512)
         return tbt_fail(e, "w", "sc-ldpc w must be 64, 256 or 512");
+    /* w=0 follows the split the line names: a 32-share group is the GF(16)
+     * uplink (block 64), everything else starts from the downlink block. */
     if (!cfg->w)
-        cfg->w = cfg->mode == 3 ? 256 : (u16)(2 * cfg->n);
+        cfg->w = cfg->mode != 3
+                     ? (u16)(2 * cfg->n)
+                     : (u16)(cfg->n + cfg->m == TBT_SCLC_UP_SHARES
+                                 ? TBT_FEC_SCLC_BLOCK_UP
+                                 : TBT_FEC_SCLC_BLOCK_DOWN);
     if (cfg->mode != 3 && cfg->w < cfg->n)
         return tbt_fail(e, "w", "w must be 0 or at least n");
+    /* L exists only for mode=3 (the renderer emits it there). Clearing a
+     * stray value on any other mode keeps the parsed struct identical to
+     * the struct its canonical line parses back into. */
+    if (cfg->mode != 3)
+        cfg->L = 0;
     /* An explicit carriers= is used as written. An omitted one starts at
      * n + m, except grouped FEC: it starts at the largest whole number of
      * groups that fits TBT_FEC_DEFAULT_GROUPED_CARRIERS, because 64 carriers
@@ -1042,13 +1102,8 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     }
     /* A sender window above the peer's reorder budget kills the stream on the
      * first frame past that budget, so the two keys are checked together once
-     * both are known; the line may name them in either order. */
-    /* Both defaults are 64 MiB. A line that lowers rx_reorder_bytes without
-     * naming tx_window_bytes gets the matching smaller sender window instead
-     * of failing the cross-check; an explicit tx_window_bytes is still
-     * validated against rx_reorder_bytes. */
-    if (!have_window && cfg->tx_window_bytes > cfg->rx_reorder_bytes)
-        cfg->tx_window_bytes = cfg->rx_reorder_bytes;
+     * both are known; the line may name them in either order. 0 is auto and
+     * the data plane caps its own result at rx_reorder_bytes. */
     if (cfg->tx_window_bytes > cfg->rx_reorder_bytes)
         return tbt_fail(e, "tx_window_bytes", "tx_window_bytes must be 0..268435456 bytes"
                                                 " and no more than rx_reorder_bytes");
@@ -1094,8 +1149,9 @@ static int tbt_parse_nonce(const char *s, u8 out[16])
 }
 
 /* Interface name for SO_BINDTODEVICE: 1..IFNAMSIZ-1 bytes, no whitespace,
- * control characters or '/'. The kernel's dev_valid_name() has the same
- * shape; keeping the check here makes the canonical line portable. */
+ * control characters, '/', ':' or the "." / ".." spellings. The kernel's
+ * dev_valid_name() has the same shape; keeping the check here makes the
+ * canonical line portable and refuses a name bind can only fail on. */
 static int tbt_parse_dev(const char *s, char out[IFNAMSIZ])
 {
     size_t len, i;
@@ -1109,9 +1165,14 @@ static int tbt_parse_dev(const char *s, char out[IFNAMSIZ])
     {
         unsigned char c = (unsigned char)s[i];
 
-        if (c <= ' ' || c == 0x7f || c == '/')
+        if (c <= ' ' || c == 0x7f || c == '/' || c == ':')
             return -EINVAL;
     }
+    if (!strcmp(s, ".") || !strcmp(s, ".."))
+        return -EINVAL;
+    /* A repeated dev= may be shorter; do not leave the old name's tail in
+     * the struct, or it would differ from the canonical line's reparse. */
+    memset(out, 0, IFNAMSIZ);
     memcpy(out, s, len);
     out[len] = '\0';
     return 0;
@@ -1221,7 +1282,7 @@ int tbt_parse_line(char *line, struct tbt_cmd *out, struct tbt_parse_error *e)
         if (e)
         {
             e->key = NULL;
-            e->why = "line is longer than 1023 bytes";
+            e->why = "line is TBT_LINE_MAX bytes or longer";
         }
         return TBT_PARSE_E2BIG;
     }

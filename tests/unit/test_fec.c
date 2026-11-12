@@ -2384,7 +2384,7 @@ static void test_wire_version(void)
 
     memset(hello, 0, sizeof(hello));
     hello[0] = TBT_WIRE_VERSION_V6;
-    ok(hello[0] == 9, "0.10.0 FEC HELLO names version 9", NULL);
+    ok(hello[0] == 11, "freshness FEC HELLO names version 11", NULL);
     hello[0] = 7;
     ok(hello[0] != TBT_WIRE_VERSION_V6,
        "0.7.0 HELLO version 7 is refused", NULL);
@@ -2776,6 +2776,16 @@ static void test_params(void)
     ok_int(tbt_fec_params_check(&par), -EINVAL, "params groups=0");
     ok_int(tbt_fec_params_grouped(0, 0, 8, &par), -EINVAL, "params_grouped 0 groups");
     ok_int(tbt_fec_params_grouped(0, 33, 8, &par), -EINVAL, "params_grouped 33x8");
+
+    /* n+m must be refused when it only fits after a u16 wrap: 65535+5 =
+     * 65540, which truncated to u16 is 4 and would match a 4-share group. */
+    ok_int(tbt_fec_params_grouped(0, 32, 8, &par), 0, "grouped for wrap check");
+    par.n = 65535;
+    par.m = 5;
+    par.group_size = 4;
+    par.groups = 1;
+    ok_int(tbt_fec_params_check(&par), -EINVAL,
+           "params n+m beyond 16 bits cannot wrap");
 }
 
 /* ------------------------------------------------------------------ *
@@ -3149,6 +3159,15 @@ static void test_replay(void)
        "credit window plus slack fits the ring", NULL);
     ok_u32(tbt_fec_replay_k_for(256, 128, 128, TBT_FEC_S), 0,
            "over-budget shape has no K");
+    /* The explicit-K constructor enforces the same shape and budget bounds
+     * as k_for(); an oversized plane must not be admitted by a caller that
+     * names K itself. */
+    ok(tbt_fec_replay_new_k(256, 128, 128, TBT_FEC_S, 1) == NULL,
+       "explicit K refuses an over-budget shape", NULL);
+    ok(tbt_fec_replay_new_k(257, 4, 4, TBT_FEC_S, 1) == NULL,
+       "explicit K refuses more than 256 groups", NULL);
+    ok(tbt_fec_replay_new_k(1, 65535, 5, TBT_FEC_S, 1) == NULL,
+       "explicit K refuses a wrapped share bound", NULL);
     r = tbt_fec_replay_new(32, 4, 4, TBT_FEC_S);
     ok(r != NULL, "production replay ring allocated", NULL);
     ok_u32(tbt_fec_replay_k(r), 66, "production replay K=66");
@@ -3191,6 +3210,28 @@ static void test_tail_guard(void)
            "parity win_len wins over the tail");
     ok_u32(tbt_fec_blk_real_len_from_tail(0, 4, false, 0, 4, 0, 2, true), 4,
            "unknown total keeps n");
+}
+
+/* A parity row named by the sender must exist in the codec's parity plane.
+ * The 32-share uplink split has an m >= 11 wire gate, but the helper is also
+ * called by the client and by tests with raw n/m; a ten-row floor must never
+ * raise the count past m or name a share index at or above n+m. */
+static void test_tx_parity_rows(void)
+{
+    ok_u32(tbt_fec_tx_parity_count(1, 30, 2, true), 2,
+           "parity rows: floor clamped to the two built rows");
+    ok_u32(tbt_fec_tx_parity_count(2, 30, 2, true), 2,
+           "parity rows: a two-share block keeps its two rows");
+    ok_u32(tbt_fec_tx_parity_count(1, 27, 5, true), 5,
+           "parity rows: floor clamped to five buried rows");
+    ok_u32(tbt_fec_tx_parity_count(1, 21, 11, true), 10,
+           "parity rows: the floor is reachable at m=11");
+    ok_u32(tbt_fec_tx_parity_count(11, 21, 11, true), 11,
+           "parity rows: a full block keeps every row");
+    ok_u32(tbt_fec_tx_parity_count(1, 8, 24, true), 10,
+           "parity rows: the normal uplink floor is unchanged");
+    ok_u32(tbt_fec_nack_parity_limit(true, 1, 30, 2, true), 2,
+           "parity rows: a NACK names no row the codec lacks");
 }
 
 static void test_parity_only(void)
@@ -3440,6 +3481,75 @@ static void test_replay_alloc_balance(void)
     }
 }
 
+/* A replay plane reused from the hot pool keeps its old bytes; the
+ * descriptor rows, not a zeroed plane, are what make an unwritten share
+ * unreadable. The same block id is stored before and after the reset so a
+ * stale descriptor would otherwise pass the block_id check. */
+static void test_replay_plane_reuse(void)
+{
+    struct tbt_fec_replay *r;
+    u8 stale[TBT_FEC_HDR_LEN + 64];
+    u8 fresh[TBT_FEC_HDR_LEN];
+    u8 out[TBT_FEC_HDR_LEN + 64];
+    size_t i;
+
+    r = tbt_fec_replay_new(1, 4, 4, 64);
+    ok(r != NULL, "plane reuse: ring", NULL);
+    memset(stale, 0xa5, sizeof(stale));
+    ok_int(tbt_fec_replay_store(r, 6, 0, 0, stale, sizeof(stale)), 0,
+           "plane reuse: full-share record stored");
+    /* The reset returns the plane to the hot pool without zeroing it. */
+    tbt_fec_replay_reset(r);
+    memset(fresh, 0x3c, sizeof(fresh));
+    ok_int(tbt_fec_replay_store(r, 6, 0, 1, fresh, sizeof(fresh)), 0,
+           "plane reuse: same block id reuses the plane");
+
+    /* Share 0 was never written in this incarnation; its stale descriptor
+     * row must have been cleared with the plane. */
+    memset(out, 0x5a, sizeof(out));
+    ok_int(tbt_fec_replay_get(r, 6, 0, 0, out, sizeof(out)), -ENODATA,
+           "plane reuse: an unwritten slot stays unreadable");
+    for (i = 0; i < sizeof(out); i++)
+        if (out[i] != 0x5a)
+            break;
+    ok(i == sizeof(out), "plane reuse: no stale byte reached the caller", NULL);
+
+    memset(out, 0, sizeof(out));
+    ok_int(tbt_fec_replay_get(r, 6, 0, 1, out, sizeof(out)), sizeof(fresh),
+           "plane reuse: the written share still reads back");
+    ok(!memcmp(out, fresh, sizeof(fresh)),
+       "plane reuse: the written share is byte-exact", NULL);
+    tbt_fec_replay_free(r);
+}
+
+/* A codec band matrix allocation failure must fail construction. The old
+ * rank helper returned 0 on allocation failure, which looked like "this band
+ * has no rank"; the picker then fell through to a narrower band, so two ends
+ * could build different matrices under memory pressure. */
+static void test_band_alloc_failure(void)
+{
+    struct tbt_fec_rlnc *ctx, *failed;
+    long before = tbt_fec_host_live_allocs();
+
+    /* d == 6 lets band 3 pass the row-weight screen, so construction probes
+     * its rank matrix. */
+    ctx = tbt_fec_rlnc_new(8, 4, 8, 16, 64, 6, 0x51);
+    ok(ctx != NULL, "band: baseline shape builds", NULL);
+    ok(tbt_fec_rlnc_new(65535, 5, 8, 16, 64, 6, 0x51) == NULL,
+       "rlnc: a wrapped n+m is refused", NULL);
+
+    /* Let the context allocation succeed and fail the first rank matrix. */
+    tbt_fec_host_alloc_fail_after(1);
+    failed = tbt_fec_rlnc_new(8, 4, 8, 16, 64, 6, 0x51);
+    tbt_fec_host_alloc_fail_after(-1);
+    ok(failed == NULL, "band: rank allocation failure fails construction", NULL);
+
+    tbt_fec_rlnc_free(ctx);
+    tbt_fec_rlnc_free(failed);
+    ok(tbt_fec_host_live_allocs() == before,
+       "band: failed construction leaks nothing", NULL);
+}
+
 /* A rate switch moves the TX shape origin to the next block boundary while
  * blocks built before it are still in flight. The peer's ACK frontier then
  * lags the new origin; a block-id frontier computed from it is 0 and every
@@ -3500,6 +3610,8 @@ static void test_replay_ack_across_switch(void)
 
 int main(void)
 {
+    test_band_alloc_failure();
+    test_replay_plane_reuse();
     test_replay_alloc_balance();
     test_replay_ack_across_switch();
     test_header_roundtrip();
@@ -3531,6 +3643,7 @@ int main(void)
     test_framing();
     test_replay();
     test_tail_guard();
+    test_tx_parity_rows();
     test_parity_only();
     test_nack_pacing();
     test_nack_dedup();

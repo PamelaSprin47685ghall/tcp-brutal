@@ -109,7 +109,7 @@ struct sc_code {
     int n_super; /* check supernodes used: L (causal) or L+4 (native) */
     int n_base;  /* base check supernodes owned by one parity each */
     int n, n_data, n_par, n_chk, n_extra;
-    int dl_max, dc_max;
+    int dc_max;
     long edges;
 
     int *voff; /* n + 1 */
@@ -117,12 +117,6 @@ struct sc_code {
     int *vadj; /* edges */
     int *cadj; /* edges */
     int *owned; /* n_chk: parity variable solved by this check, -1 if none */
-
-    /* decoder scratch */
-    uint8_t *known;
-    int8_t *val;
-    uint16_t *cx; /* per check: low byte XOR of known values, high byte unknowns */
-    int *queue;
 
     size_t mem_bytes;
 };
@@ -146,18 +140,7 @@ void sc_free(sc_code *c)
     sclc_free(c->vadj);
     sclc_free(c->cadj);
     sclc_free(c->owned);
-    sclc_free(c->known);
-    sclc_free(c->val);
-    sclc_free(c->cx);
-    sclc_free(c->queue);
     sclc_free(c);
-}
-
-int sc_data_var(const sc_code *c, int k)
-{
-    if (k < 0 || k >= c->n_data)
-        return -1;
-    return k; /* payload variables occupy 0 .. n_data-1 */
 }
 
 void sc_get_graph(const sc_code *c, sc_graph *out)
@@ -166,6 +149,9 @@ void sc_get_graph(const sc_code *c, sc_graph *out)
     out->n_data = c->n_data;
     out->n_par = c->n_par;
     out->n_chk = c->n_chk;
+    out->n_base = c->n_base;
+    out->n_extra = c->n_extra;
+    out->m = c->m;
     out->edges = c->edges;
     out->dc_max = c->dc_max;
     out->voff = c->voff;
@@ -173,16 +159,6 @@ void sc_get_graph(const sc_code *c, sc_graph *out)
     out->vadj = c->vadj;
     out->cadj = c->cadj;
     out->owned = c->owned;
-}
-
-int sc_systematic(const sc_code *c)
-{
-    return c->par.term != SC_TERM_NATIVE;
-}
-
-const uint8_t *sc_known_bits(const sc_code *c)
-{
-    return c->known;
 }
 
 /*
@@ -584,22 +560,6 @@ sc_code *sc_build(const sc_params *p, char *err, size_t errlen)
         }
     }
 
-    /* ---- decoder scratch and statistics ------------------------- */
-    c->known = zalloc((size_t)c->n, 1);
-    c->val = zalloc((size_t)c->n, 1);
-    c->cx = zalloc((size_t)c->n_chk, sizeof(uint16_t));
-    c->queue = zalloc((size_t)c->n_chk, sizeof(int));
-    if (!c->known || !c->val || !c->cx || !c->queue) {
-        snprintf(err, errlen, "out of memory");
-        goto fail;
-    }
-
-    c->dl_max = 0;
-    for (i = 0; i < c->n; i++) {
-        int d = c->voff[i + 1] - c->voff[i];
-        if (d > c->dl_max)
-            c->dl_max = d;
-    }
     c->dc_max = 0;
     for (i = 0; i < c->n_chk; i++) {
         int d = c->coff[i + 1] - c->coff[i];
@@ -610,8 +570,6 @@ sc_code *sc_build(const sc_params *p, char *err, size_t errlen)
     mem = (size_t)(c->n + 1) * sizeof(int) +
           (size_t)(c->n_chk + 1) * sizeof(int) +
           (size_t)edges * 2 * sizeof(int) +
-          (size_t)c->n_chk * sizeof(int) + (size_t)c->n * 2 +
-          (size_t)c->n_chk * sizeof(uint16_t) +
           (size_t)c->n_chk * sizeof(int) + sizeof(*c);
     c->mem_bytes = mem;
 
@@ -630,153 +588,4 @@ fail:
     sclc_free(ec);
     sc_free(c);
     return NULL;
-}
-
-/* ------------------------------------------------------------------ */
-/* encoder                                                             */
-/* ------------------------------------------------------------------ */
-
-int sc_encode(sc_code *c, uint8_t *code)
-{
-    int a, b, j, k;
-
-    if (c->par.term == SC_TERM_NATIVE)
-        return -1;
-
-    for (a = 0; a < c->n_base; a++) {
-        for (b = 0; b < c->m; b++) {
-            int ck = a * c->m + b;
-            int p = c->owned[ck];
-            uint8_t x = 0;
-            if (p < 0)
-                return -1;
-            for (k = c->coff[ck]; k < c->coff[ck + 1]; k++) {
-                int v = c->cadj[k];
-                if (v != p)
-                    x ^= (uint8_t)(code[v] & 1u);
-            }
-            code[p] = x;
-        }
-    }
-    for (j = 0; j < c->n_extra; j++) {
-        int ck = c->n_base * c->m + j;
-        int p = c->owned[ck];
-        uint8_t x = 0;
-        if (p < 0)
-            return -1;
-        for (k = c->coff[ck]; k < c->coff[ck + 1]; k++) {
-            int v = c->cadj[k];
-            if (v != p)
-                x ^= (uint8_t)(code[v] & 1u);
-        }
-        code[p] = x;
-    }
-    return 0;
-}
-
-int sc_verify(const sc_code *c, const uint8_t *code)
-{
-    int ck, k;
-    for (ck = 0; ck < c->n_chk; ck++) {
-        uint8_t x = 0;
-        for (k = c->coff[ck]; k < c->coff[ck + 1]; k++)
-            x ^= (uint8_t)(code[c->cadj[k]] & 1u);
-        if (x != 0)
-            return ck + 1;
-    }
-    return 0;
-}
-
-/* ------------------------------------------------------------------ */
-/* peeling decoder                                                     */
-/* ------------------------------------------------------------------ */
-
-sc_dec_stat sc_decode(sc_code *c, const uint8_t *recv, const uint8_t *erased,
-                      uint8_t *out, int target_data_only)
-{
-    sc_dec_stat st;
-    int n = c->n, nchk = c->n_chk;
-    uint8_t *known = c->known;
-    int8_t *val = c->val;
-    uint16_t *cx = c->cx;
-    int *queue = c->queue;
-    int qh = 0, qt = 0;
-    int v, ck;
-    long visits = 0;
-
-    memset(cx, 0, (size_t)nchk * sizeof(uint16_t));
-    for (v = 0; v < n; v++) {
-        int k;
-        if (erased[v]) {
-            val[v] = -1;
-            for (k = c->voff[v]; k < c->voff[v + 1]; k++)
-                cx[c->vadj[k]] += 0x100u;
-        } else {
-            uint8_t x = (uint8_t)(recv[v] & 1u);
-            val[v] = (int8_t)x;
-            for (k = c->voff[v]; k < c->voff[v + 1]; k++)
-                cx[c->vadj[k]] ^= x;
-        }
-    }
-    for (ck = 0; ck < nchk; ck++) {
-        visits += c->coff[ck + 1] - c->coff[ck];
-        if ((cx[ck] >> 8) == 1)
-            queue[qt++] = ck;
-    }
-
-    st.rounds = 0;
-    while (qh < qt) {
-        int end = qt;
-        st.rounds++;
-        while (qh < end) {
-            int k0, k1, k, uv = -1;
-            uint8_t x;
-            ck = queue[qh++];
-            if ((cx[ck] >> 8) != 1)
-                continue;
-            k0 = c->coff[ck];
-            k1 = c->coff[ck + 1];
-            for (k = k0; k < k1; k++) {
-                int vv = c->cadj[k];
-                visits++;
-                if (val[vv] < 0) {
-                    uv = vv;
-                    break;
-                }
-            }
-            if (uv < 0) {
-                cx[ck] = 0;
-                continue;
-            }
-            x = (uint8_t)cx[ck];
-            val[uv] = (int8_t)x;
-            cx[ck] = 0;
-            for (k = c->voff[uv]; k < c->voff[uv + 1]; k++) {
-                int c2 = c->vadj[k];
-                visits++;
-                if (c2 == ck)
-                    continue;
-                cx[c2] = (uint16_t)((cx[c2] - 0x100u) ^ x);
-                if ((cx[c2] >> 8) == 1)
-                    queue[qt++] = c2;
-            }
-        }
-    }
-
-    {
-        long tgt = target_data_only ? c->n_data : c->n;
-        long unres = 0;
-        for (v = 0; v < tgt; v++)
-            if (val[v] < 0)
-                unres++;
-        st.unresolved = unres;
-        st.target = tgt;
-        st.resolved = tgt - unres;
-    }
-    st.edge_visits = visits;
-    for (v = 0; v < n; v++) {
-        known[v] = (val[v] >= 0);
-        out[v] = (uint8_t)(val[v] < 0 ? 0 : val[v]);
-    }
-    return st;
 }

@@ -75,16 +75,34 @@ static void tbt_accept_one(struct tbt_listener *l)
         // becomes the public end of a stream. A far tunnel's listener faces
         // carriers: the accepted socket IS the carrier. Either way the socket
         // is never exposed to userspace.
-        err = t->cfg.role == TBT_ROLE_FAR
-                  ? tbt_carrier_adopt(t, newsock)
-                  : tbt_stream_start(t->sess, newsock, l->slot);
+        if (t->cfg.role == TBT_ROLE_FAR)
+        {
+            err = tbt_carrier_adopt(t, newsock);
+        }
+        else
+        {
+            /* This child inherited tbt_ready() and sk_user_data = l from the
+             * listener. Until tbt_sock_attach() installs the stream's
+             * callbacks, every byte the application sends into the accepted
+             * socket fires tbt_ready() and schedules l->w_accept: a false
+             * listener wakeup for as long as the connection waits in
+             * sess->pending (up to the FEC close handshake wait). Restore the
+             * core callbacks before the hand-off. The socket then holds no
+             * reference to the listener, so a late softirq can never queue
+             * work against a listener being torn down. */
+            tbt_sk_ops_restore(newsock->sk, &l->def_ops);
+            err = tbt_stream_start(t->sess, newsock, l->slot);
+        }
         if (err)
         {
             pr_warn_ratelimited("tbtun: tunnel %llu refused an incoming connection: %d\n",
                                 t->cfg.id, err);
-            /* This child inherited tbt_ready() and sk_user_data = l.  It is
-             * not a listener.  Restore core callbacks and close it with RST,
-             * or it can call module text after this tunnel is freed. */
+            /* A refused near child was already restored above; a refused
+             * carrier may still carry the inherited tbt_ready() and
+             * sk_user_data = l if adopt failed before installing its own
+             * callbacks. Restore is idempotent. Close with RST and never
+             * leave module text (or the listener pointer) on a socket that
+             * can outlive this tunnel. */
             tbt_sk_ops_restore(newsock->sk, &l->def_ops);
             tbt_sock_abort_on_close(newsock);
             sock_release(newsock);
@@ -128,6 +146,7 @@ static int tbt_listener_start(struct tbt_listener *l, u8 slot, u16 port)
     struct sockaddr_storage ss;
     int alen = tbt_addr_to_sockaddr(&t->cfg.listen, tbt_port_be16(port), &ss);
     struct socket *s;
+    int backlog = 128;
     int err;
 
     /* The shared TBT_AF_* constants are the Linux ABI numbers; fail the build
@@ -171,7 +190,25 @@ static int tbt_listener_start(struct tbt_listener *l, u8 slot, u16 port)
     if (err)
         goto fail;
 
-    err = kernel_listen(s, 128);
+    /* A far listener accepts one connection per carrier slot; a client that
+     * opens its whole carrier set at once can exceed the historical
+     * 128-entry queue (256 by default). Size the far queue from the session's
+     * slots so the burst is absorbed by the backlog instead of forced into
+     * SYN retransmissions. The near side faces arbitrary applications and
+     * keeps the usual 128. */
+    if (t->cfg.role == TBT_ROLE_FAR)
+    {
+        u32 slots = t->cfg.carriers ? t->cfg.carriers
+                                    : (u32)t->cfg.n + t->cfg.m;
+
+        if (slots > (u32)backlog)
+        {
+            if (slots > (u32)TBT_MAX_CARRIERS_LIMIT)
+                slots = TBT_MAX_CARRIERS_LIMIT;
+            backlog = (int)slots;
+        }
+    }
+    err = kernel_listen(s, backlog);
     if (err)
         goto fail;
 

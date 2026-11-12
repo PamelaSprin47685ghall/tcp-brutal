@@ -14,20 +14,29 @@ make it fail; the observed defects are in `findings.md`.
 
 ```sh
 adversarial/run.sh                  # build tbtun.ko, boot the guests, print the table
-adversarial/run.sh --no-build       # use the existing tbtun.ko
+adversarial/run.sh --no-build       # use build/kernel/tbtun.ko as-is
 adversarial/run.sh --no-crash       # skip the isolated close-flush repro
+adversarial/run.sh --self-test      # check the expected-result manifest, no QEMU
+adversarial/run.sh --ko /tmp/tbtun.ko --kernel /tmp/vmlinuz  # explicit images
 TBT_ADV_GROUPS="public control" adversarial/run.sh --no-build
 TBT_ADV_GROUPS=far TBT_ADV_CARRIER_TIMEOUT=180 adversarial/run.sh --no-build
 ```
 
+The `public` and `stable` groups use `TBT_ADV_PUBLIC_TIMEOUT` (default 2400 s;
+`stable` includes the 10k-cycle public phase); the other groups use
+`TBT_ADV_CARRIER_TIMEOUT` (default 240 s) or `--timeout SECONDS`.
+
 Requirements are the same as `tests/qemu/` (see that README): the kernel image
-and busybox in `~/.cache/tbtun-build`, `qemu-system-x86_64`, and the header
-payload that `make check` uses. The host needs no root and no network; KVM is
-used when `/dev/kvm` is writable, otherwise TCG.
+and busybox in `~/.cache/tbtun-build` or the payload cache named by its
+`env.sh` (`T52`, normally `~/.cache/tbtun-build-t52`),
+`qemu-system-x86_64`, and the header payload that `make check` uses. The host
+needs no root and no network; KVM is used when `/dev/kvm` is writable,
+otherwise TCG.
 
 `run.sh` builds `tbtun.ko` with the documented `source ~/.cache/tbtun-build/env.sh;
-make check` (unless `--no-build`), builds `adv_probe.c`, and boots **one guest
-per group**. Each guest runs the phases listed in `/adv-phases.txt` and prints
+make check` (unless `--no-build`) and then uses `build/kernel/tbtun.ko`,
+builds `adv_probe.c` against `src/kernel/tbt_uapi.h`, and boots **one guest per
+group**. Each guest runs the phases listed in `/adv-phases.txt` and prints
 
 ```
 PHASE_START <phase>
@@ -40,7 +49,12 @@ can hang the kernel: the hostile-carrier hang must not hide the public-port
 results. A phase that starts but never ends is reported as
 `console.hang.<phase> FAIL`; a phase that never starts is
 `console.missing.<phase> FAIL`; kernel oops/warning lines found on the console
-add `console.klog.<group> FAIL`. The default groups are the individual phases
+add `console.klog.<group> FAIL`; a group that hits its QEMU timeout adds
+`console.timeout.<group> FAIL`. Each phase also declares the attacks it must
+report, so a probe crash or exec failure cannot pass by omission: every
+expected name with no `ADV_RESULT` line is synthesized as FAIL with the QEMU
+return code. `--self-test` exercises that check without booting anything.
+The default groups are the individual phases
 (`public control resource slab final replay rmmod flush catconfig cfg_mix param
 port near far stall httptorn hole create`) plus the isolated crash repro. The
 `catconfig` group also runs `bigcfg`, the `writer` group also runs
@@ -142,10 +156,10 @@ near's nonce, index and generation from its own HELLO.
 | --- | --- | --- |
 | `ctl.nonroot` | uid 1000 opens `config` for write | EACCES/EPERM; config unchanged |
 | `ctl.line513`, `ctl.line512` | a line at/just over the old 512-byte bound | refused or buffered; nothing applied |
-| `ctl.line1025`, `ctl.line1024nonl` | line at/over the current 1024-byte buffer | `-E2BIG`; nothing applied |
+| `ctl.line1025`, `ctl.line1024nonl` | a 1025-byte line with newline, and 1024 bytes without newline | both are within the current `TBT_LINE_MAX` (1152) but are not valid directives: the newline form is refused with EINVAL; the unterminated form is buffered and refused when the write closes. Nothing is applied |
 | `ctl.line512nonl` | 512 bytes, no newline | buffered or refused; never applied |
 | `init.cfg_roundtrip` | read the canonical config, write every line back | all lines accepted |
-| `ctl.release_overflow` | a valid tunnel line buffered without a newline, then 1100 bytes that overflow the 1024-byte line buffer | write 2 reports `-E2BIG`; the close-time drain discards the tail and tunnel 77 never appears |
+| `ctl.release_overflow` | a valid tunnel line buffered without a newline, then 1100 bytes that overflow the remaining `TBT_LINE_MAX` (1152) line buffer | write 2 reports `-E2BIG`; the close-time drain discards the tail and tunnel 77 never appears |
 | `init.cfg_replay` | line-by-line replay during an 8 MiB transfer | no deadlock; old stream closes cleanly |
 | `init.flush` | `flush` during an 8 MiB transfer | app sees EOF/reset, not a timeout |
 | `init.rmmod` | `rmmod tbtun` during an 8 MiB transfer | rmmod returns, app sees a clean error, guest survives |
@@ -164,7 +178,7 @@ near's nonce, index and generation from its own HELLO.
 
 | Attack | What is sent | Safe result |
 | --- | --- | --- |
-| `cfg.big_write` | 64 canonical tunnel lines, every scalar at its parser maximum and 8 `srcaddrs` entries: 34,487 bytes | write rc=0 and 64 tunnels exist; each line is 537/538 bytes, below the 1024-byte line buffer |
+| `cfg.big_write` | 64 canonical tunnel lines, every scalar at its parser maximum and 8 `srcaddrs` entries: 34,487 bytes | write rc=0 and 64 tunnels exist; each line is 537/538 bytes, below the 1152-byte line buffer |
 | `cfg.big_roundtrip` | the same config read once in 1000-byte `read()`s and once in one 64 KiB read | both reads are byte-identical to the 64 lines written, larger than 32768 bytes, with no truncation and no missing tunnel. The 1000-byte path exercises the offset-served snapshot (review 19); the size exercises the removed 32 KiB render buffer (review 30) |
 | `cfg.big_replay` | `cat config > save`, `flush`, `cat save > config` | rc=0, 64 tunnels recreated, and the re-render has the same byte count |
 | `cfg.echo_after_big` | a 1 MiB echo after the big config is replaced by the normal far+near pair | byte-exact |
@@ -172,7 +186,7 @@ near's nonce, index and generation from its own HELLO.
 | `hole.age` | a far stream with `hole_budget_ms=100` receives `DATA seq=1 len=1`, leaving offset 0 missing | the 10 ms feedback tick kills the stream; `dmesg` holds one `RXHOLEKILL` with `50000 <= age_us < 5000000`, i.e. the measured hole (~100 ms), not the ktime epoch. Requires `debug=2` |
 | `create.baseline` | the normal far+near pair echoes 1 MiB | byte-exact |
 | `create.failure` | a stranger holds `127.0.0.1:19199`; a new tunnel id is written on that port | the write fails visibly, no tunnel row appears, the running tunnels still echo, and the retry after the port is released succeeds; no oops |
-| `create.replace` | the same stranger; a replacement line for the running tunnel id on the held port | the write fails and the old tunnel is not left half-configured: either it still serves or it is cleanly removed (`old_survived` prints which). Destroy-on-failure is the design choice: the undo path (`tbt_session.c:245-255`) stops the old listener, destroys the old session and drops its reference, so a failed replace never leaves a half-configured tunnel or a leak. `old_survived=0` is that contract; the test fails only if a row exists that does not serve |
+| `create.replace` | the same stranger; a replacement line for the running tunnel id on the held port | the write fails and the old tunnel must still serve: `tbt_tunnel_add()` restores the old listener and re-adds the old tunnel under `tbt_lock`. `old_survived=1` is the contract; if the old port cannot be rebound the kernel logs and drops the old tunnel, and `old_survived=0` is accepted only when no non-serving row remains |
 
 ### Kernel-state sanity (`ADV_KLOG`, `init.dmesg`, `console.klog.*`)
 
@@ -181,7 +195,12 @@ Every hostile-carrier attack calls `dmesg` before and after; any new
 `refcount_t:`, `KASAN`, `UBSAN`, `Call Trace:` or `deprecated workqueue` line
 is printed and fails the attack. The host also scans each console, because a
 guest that hangs never prints its own dmesg. `init.slab_leak` runs 100
-unauthenticated garbage connections and compares `/proc/slabinfo`.
+unauthenticated garbage connections and counts the objects in every
+`/proc/slabinfo` cache whose name starts with `kmalloc` (this kernel has no
+dedicated 32k cache); `init.slab_after_flush` asserts that count returns to
+the pre-test idle baseline. Both report SKIP, never PASS, if the guest cannot read
+`/proc/slabinfo` or if the probe did not close most of the 100 connections, so
+the growth could not be attributed to a per-connection leak.
 
 ## The isolated crash repro
 

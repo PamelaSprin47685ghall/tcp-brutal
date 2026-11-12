@@ -78,6 +78,26 @@ struct tbt_cfg_file {
     struct tbt_linebuf lb;
     struct net *net; /* captured at open; valid for every line at release */
 
+    /* True when the last write() did not leave lb's unterminated tail as the
+     * caller's complete final line: a line in the chunk failed (the writer
+     * was told -EINVAL/-E2BIG), or the write supplied more than one
+     * TBT_LINE_MAX chunk and the remainder was never consumed. release()
+     * must not apply such a tail as the documented final unterminated line.
+     * A later write that consumes everything it was given and reports no
+     * error clears the flag. */
+    bool discard_tail;
+
+    /* Serializes write() on one file description. Nothing below the handler
+     * does it: proc_reg_write() only brackets the call with use_pde(), and
+     * fdget_pos() skips f_pos_lock when file_count(file) == 1, which is the
+     * normal case for two threads sharing the process fd table. Without this
+     * lock two writers interleave fragments of different lines in lb, so a
+     * line neither of them wrote can be parsed and applied. The handler may
+     * sleep (copy_from_user, kmalloc, tbt_tunnel_add), so a mutex is the
+     * right primitive. It nests above cf->lock and tbt_lock; neither of
+     * those is ever held while taking it. */
+    struct mutex write_lock;
+
     /* Read snapshot. `config` is write-line-buffered, so it cannot be a
      * seq_file; the snapshot is rendered once per open file description and
      * served by offset. The mutex protects out/out_len/snapshot_valid against
@@ -91,7 +111,14 @@ struct tbt_cfg_file {
 static void tbt_cfg_drop_snapshot(struct tbt_cfg_file *cf)
 {
     mutex_lock(&cf->lock);
-    kvfree(cf->out);
+    /* The snapshot is the canonical config text, so it contains
+     * crypto_key=<hex> for every tunnel that has one. Do not leave that copy
+     * in freed memory. */
+    if (cf->out)
+    {
+        tbt_memzero_explicit(cf->out, cf->out_len);
+        kvfree(cf->out);
+    }
     cf->out = NULL;
     cf->out_len = 0;
     cf->snapshot_valid = false;
@@ -196,6 +223,7 @@ static int tbt_cfg_open(struct inode *inode, struct file *file)
     cf = kzalloc(sizeof(*cf), GFP_KERNEL);
     if (!cf)
         return -ENOMEM;
+    mutex_init(&cf->write_lock);
     mutex_init(&cf->lock);
     /* The control surface is created in init_net only (DESIGN.md §8.3).
      * Capture init_net, not the writer's netns: a bind-mounted /proc from
@@ -210,11 +238,12 @@ static ssize_t tbt_cfg_write(struct file *file, const char __user *ubuf, size_t 
     struct tbt_cfg_file *cf = file->private_data;
     struct tbt_linebuf *lb = &cf->lb;
     char *tmp;
-    size_t n, i;
+    size_t n, i, supplied = len;
     int err = 0;
 
     if (!len)
         return 0;
+    mutex_lock(&cf->write_lock);
     /* Any write can change the rendered text; drop the snapshot so the next
      * read renders the post-write configuration. */
     tbt_cfg_drop_snapshot(cf);
@@ -226,10 +255,23 @@ static ssize_t tbt_cfg_write(struct file *file, const char __user *ubuf, size_t 
      * not belong on the kernel stack. */
     tmp = kmalloc(n, GFP_KERNEL);
     if (!tmp)
+    {
+        /* The write failed. Do not let release() apply a tail buffered by an
+         * earlier write as though this handler had accepted the stream. */
+        cf->discard_tail = true;
+        lb->len = 0;
+        lb->overflow = false;
+        mutex_unlock(&cf->write_lock);
         return -ENOMEM;
+    }
     if (copy_from_user(tmp, ubuf, n))
     {
+        cf->discard_tail = true;
+        lb->len = 0;
+        lb->overflow = false;
+        tbt_memzero_explicit(tmp, n);
         kfree(tmp);
+        mutex_unlock(&cf->write_lock);
         return -EFAULT;
     }
     for (i = 0; i < n; i++)
@@ -260,11 +302,25 @@ static ssize_t tbt_cfg_write(struct file *file, const char __user *ubuf, size_t 
         }
         lb->buf[lb->len++] = c;
     }
+    /* A failed line and a chunk-cut write both mean the unterminated bytes
+     * left in lb are not a final line the caller stood behind. On error drop
+     * them now as well, so a later write cannot append to a rejected line;
+     * on a short success keep them, because the caller must resend the
+     * remainder and the prefix belongs to that line. */
+    cf->discard_tail = err != 0 || supplied > TBT_LINE_MAX;
+    if (err)
+    {
+        lb->len = 0;
+        lb->overflow = false;
+    }
+    /* tmp holds a copy of user input, which may include crypto_key=<hex>. */
+    tbt_memzero_explicit(tmp, n);
     kfree(tmp);
 
     /* A read that raced this write may have snapshotted an intermediate
      * config; drop it again so the next read sees the final state. */
     tbt_cfg_drop_snapshot(cf);
+    mutex_unlock(&cf->write_lock);
     return err ? err : len;
 }
 
@@ -274,10 +330,18 @@ static int tbt_cfg_release(struct inode *inode, struct file *file)
 
     if (cf)
     {
+        /* The last write was rejected or cut at TBT_LINE_MAX: the
+         * unterminated tail is not a line the caller completed, so the
+         * close-flush must not install it. A fully consumed, error-free
+         * final line (including the documented write-without-newline) still
+         * flushes. */
+        if (cf->discard_tail)
+            cf->lb.len = 0;
         tbt_config_drain(&cf->lb, true, cf->net); // flush a final line
-        mutex_lock(&cf->lock);
-        kvfree(cf->out);
-        mutex_unlock(&cf->lock);
+        tbt_cfg_drop_snapshot(cf); /* zeroes the rendered crypto_key text */
+        /* The line buffer holds a copy of user input, which may include
+         * crypto_key=<hex>. */
+        tbt_memzero_explicit(&cf->lb, sizeof(cf->lb));
         put_net(cf->net);
         kfree(cf);
     }
@@ -350,6 +414,8 @@ static int tbt_config_snapshot(struct tbt_cfg_file *cf)
         n = tbt_render_cfg(&t->cfg, out + off, alloc - off);
         if (n < 0)
         {
+            /* Earlier lines may already contain crypto_key=<hex>. */
+            tbt_memzero_explicit(out, alloc);
             kvfree(out);
             err = n;
             goto unlock;
@@ -358,6 +424,7 @@ static int tbt_config_snapshot(struct tbt_cfg_file *cf)
     }
     if (off != total)
     {
+        tbt_memzero_explicit(out, alloc);
         kvfree(out);
         err = -E2BIG;
         goto unlock;
@@ -368,6 +435,8 @@ static int tbt_config_snapshot(struct tbt_cfg_file *cf)
 
 unlock:
     mutex_unlock(&tbt_lock);
+    /* The measuring pass leaves the last rendered line, crypto key included. */
+    tbt_memzero_explicit(line, TBT_LINE_MAX);
     kvfree(line);
     return err;
 }
@@ -852,7 +921,12 @@ static int tbt_show_stats(struct seq_file *m, void *v)
 
                 for (k = 0; k < s->n_car; k++)
                 {
-                    struct tbt_carrier *c = READ_ONCE(s->car[k]);
+                    /* w_replace() and join() swap sess->car[] under
+                     * sess->lock and drop the slot's reference; a naked
+                     * READ_ONCE followed by a dereference can outlive the
+                     * last tbt_carrier_put(). Pin the object, as the cc and
+                     * c12 blocks below already do. */
+                    struct tbt_carrier *c = tbt_carrier_get(s, (u8)k);
 
                     if (!c)
                         empty++;
@@ -860,6 +934,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                         up++;
                     else
                         replacing++;
+                    tbt_carrier_put(c);
                 }
                 rcu_read_lock();
                 {
@@ -1555,13 +1630,16 @@ static int tbt_show_stats(struct seq_file *m, void *v)
 
                     for (r = 0; r < s->n_car; r++)
                     {
-                        struct tbt_carrier *lc = READ_ONCE(s->car[r]);
+                        /* Same lifetime rule: the slot can be swapped and its
+                         * carrier freed by w_replace()/join(). */
+                        struct tbt_carrier *lc = tbt_carrier_get(s, (u8)r);
 
                         if (!lc)
                             continue;
                         live_bytes += READ_ONCE(lc->tx_bytes);
                         live_data += READ_ONCE(lc->data_frames);
                         live_retx += READ_ONCE(lc->retx_data);
+                        tbt_carrier_put(lc);
                     }
                     seq_printf(m, "tunnel %llu reconcile live_bytes=%llu "
                                   "live_data=%llu live_retx=%llu "

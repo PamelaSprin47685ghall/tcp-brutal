@@ -33,8 +33,21 @@ long tbt_mem_avail_kb(void)
 {
     unsigned long free_pages = global_zone_page_state(NR_FREE_PAGES);
     unsigned long file_pages = global_node_page_state(NR_FILE_PAGES);
+    unsigned long not_reclaimable = global_node_page_state(NR_SHMEM) +
+                                    global_node_page_state(NR_UNEVICTABLE);
     unsigned long reserve = totalram_pages() / 32;
-    long pages = (long)free_pages + (long)file_pages - (long)reserve;
+    long pages;
+
+    /* NR_FILE_PAGES includes shmem (reclaimable only when swap backs it)
+     * and mlocked pages on the unevictable list. Neither may be counted as
+     * free-able here: this value gates the FEC TX pump and new streams, so
+     * overestimating it re-enters the direct-reclaim stall this check
+     * exists to prevent. */
+    if (file_pages > not_reclaimable)
+        file_pages -= not_reclaimable;
+    else
+        file_pages = 0;
+    pages = (long)free_pages + (long)file_pages - (long)reserve;
 
     if (pages < 0)
         pages = 0;
@@ -44,6 +57,15 @@ long tbt_mem_avail_kb(void)
 LIST_HEAD(tbt_tunnels);
 DEFINE_MUTEX(tbt_lock);
 
+/* tbt_session_destroy() switches its final drain wait from bounded-leak to
+ * unconditional when this is set, so module .text cannot be unmapped under a
+ * work item that still references it. Sessions leaked by an earlier /proc del
+ * or flush are off every tunnel list by then; tbt_session_wait_leaked() waits
+ * those out too. Declared locally: tbtun.h is shared with workers outside
+ * this file's slice. */
+void tbt_session_mark_unloading(void);
+void tbt_session_wait_leaked(void);
+
 unsigned int debug;
 module_param(debug, uint, 0444);
 MODULE_PARM_DESC(debug, "Debug verbosity (0..3)");
@@ -51,6 +73,10 @@ MODULE_PARM_DESC(debug, "Debug verbosity (0..3)");
 unsigned int max_tunnels = 64;
 module_param(max_tunnels, uint, 0444);
 MODULE_PARM_DESC(max_tunnels, "Maximum configured tunnels (default 64)");
+
+/* The stats renderer allocates one reference per tunnel and bounds itself at
+ * 4096; a larger max_tunnels would silently stop accounting there. */
+#define TBT_MAX_TUNNELS_LIMIT 4096u
 
 unsigned int max_carriers = TBT_MAX_CARRIERS_LIMIT;
 module_param(max_carriers, uint, 0444);
@@ -74,7 +100,34 @@ MODULE_PARM_DESC(local_queue_bytes,
  * peer sends FIN and stops writing while the reverse direction keeps
  * downloading) must not be cut short. Writable so a probe can shorten it. */
 unsigned int close_hard_cap_ms = 600000;
-module_param(close_hard_cap_ms, uint, 0644);
+/* Bounds are enforced on every write, not just at load: the value sizes the
+ * final bound on a stuck close, so a runtime write of 0 or a huge value would
+ * either reset every live stream immediately or pin a session forever. */
+#define TBT_CLOSE_HARD_CAP_MIN_MS 1000u
+#define TBT_CLOSE_HARD_CAP_MAX_MS 3600000u
+
+static int tbt_close_hard_cap_set(const char *val,
+                                  const struct kernel_param *kp)
+{
+    unsigned int ms;
+    int err = kstrtouint(val, 0, &ms);
+
+    (void)kp;
+    if (err)
+        return err;
+    if (ms < TBT_CLOSE_HARD_CAP_MIN_MS || ms > TBT_CLOSE_HARD_CAP_MAX_MS)
+        return -EINVAL;
+    WRITE_ONCE(close_hard_cap_ms, ms);
+    return 0;
+}
+
+static const struct kernel_param_ops tbt_close_hard_cap_ops = {
+    .set = tbt_close_hard_cap_set,
+    .get = param_get_uint,
+};
+
+module_param_cb(close_hard_cap_ms, &tbt_close_hard_cap_ops,
+                &close_hard_cap_ms, 0644);
 MODULE_PARM_DESC(close_hard_cap_ms,
                  "Half-open close hard cap in ms (default 600000)");
 
@@ -191,14 +244,16 @@ static int __init tbtun_init(void)
         pr_err("tbtun: max_carriers must be 1..%d\n", TBT_MAX_CARRIERS_LIMIT);
         return -EINVAL;
     }
-    if (!max_tunnels)
+    if (!max_tunnels || max_tunnels > TBT_MAX_TUNNELS_LIMIT)
     {
-        pr_err("tbtun: max_tunnels must be >= 1\n");
+        pr_err("tbtun: max_tunnels must be 1..%u\n", TBT_MAX_TUNNELS_LIMIT);
         return -EINVAL;
     }
-    if (close_hard_cap_ms < 1000 || close_hard_cap_ms > 3600000)
+    if (close_hard_cap_ms < TBT_CLOSE_HARD_CAP_MIN_MS ||
+        close_hard_cap_ms > TBT_CLOSE_HARD_CAP_MAX_MS)
     {
-        pr_err("tbtun: close_hard_cap_ms must be 1000..3600000\n");
+        pr_err("tbtun: close_hard_cap_ms must be %u..%u\n",
+               TBT_CLOSE_HARD_CAP_MIN_MS, TBT_CLOSE_HARD_CAP_MAX_MS);
         return -EINVAL;
     }
 
@@ -206,8 +261,11 @@ static int __init tbtun_init(void)
 
     /* The evidence file and /proc identity must name the build that is
      * running, not the .ko that was copied. A stale module made the first
-     * 0.7.1 FIN probes look absent. */
-    pr_info("tbtun: probe build 071-final-1\n");
+     * 0.7.1 FIN probes look absent. Derived from tbt_uapi.h so this line
+     * cannot drift from MODULE_VERSION; it prints before any subsystem
+     * init, so a failed load is still attributable to one build. */
+    pr_info("tbtun: probe build %u.%u.%u\n",
+            TBT_VERSION_MAJOR, TBT_VERSION_MINOR, TBT_VERSION_PATCH);
 
     ret = tbt_fec_data_module_init();
     if (ret)
@@ -253,10 +311,19 @@ static void __exit tbtun_exit(void)
     /* Stop new /proc calls and wait for every in-flight fop.  remove_proc_entry()
      * waits for pde users and closes pde_openers, including tbt_cfg_release(). */
     tbt_procfs_exit();
+    /* From here on a session that does not drain must block the unload, not
+     * be leaked: a leaked session keeps work items, sockets and timers that
+     * call module .text after it is unmapped. No new session can be created
+     * after tbt_procfs_exit(). */
+    tbt_session_mark_unloading();
     /* tbt_tunnel_shutdown() detaches the list under tbt_lock and tears the
      * sessions down outside it; a destroy that waits for work must not pin
      * the global lock. */
     tbt_tunnel_shutdown();
+    /* A session that an earlier runtime destroy (not this unload) timed out
+     * on is no longer reachable through any tunnel. Wait for its references
+     * and free it before any module-owned workqueue or text can go away. */
+    tbt_session_wait_leaked();
     /* Every carrier socket has been released, so no socket can still run the
      * CC that this module registered. */
     tbt_cc_module_exit();

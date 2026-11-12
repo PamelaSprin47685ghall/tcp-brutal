@@ -252,20 +252,17 @@ struct tbt_tunnel
     struct tbt_session *sess; /* C2: one session per tunnel */
     struct list_head sessions;
 
-    /* Crypto state kept from the tunnel this one replaced. Each side checks
-     * every later HELLO against the first one it saw: a different key is
-     * "crypto key changed" and a different TX nonce is "crypto nonce
-     * changed". The replaced session's last HELLOs and the replacement's
-     * HELLOs are indistinguishable to the peer, so regenerating either one
-     * rejects every carrier of the replacement (measured: 256 carriers, near
-     * up=18, 25 far HELLO rejections). The TX nonce is inherited whenever
-     * the role is unchanged. The key is inherited only by a near side, and
-     * only when it generated and announced that key (key_id=1): a configured
-     * or adopted key is not this tunnel's to carry. */
+    /* Crypto key kept from the tunnel this one replaced. The key is
+     * inherited only by a near side, and only when it generated and
+     * announced that key (key_id=1): a configured or adopted key is not
+     * this tunnel's to carry. The TX nonce is deliberately NOT inherited:
+     * a new session restarts packet counters at zero, so reusing a nonce
+     * would reproduce a (key, nonce, counter) keystream. A replacement
+     * generates a fresh nonce and announces it with a strictly newer HELLO
+     * generation; a PSK peer accepts the rotation, while a generated-key
+     * peer fails closed instead of reusing the stream. */
     u8 crypto_key_inherit[TBT_CRYPTO_KEY_LEN];
-    u8 crypto_tx_nonce_inherit[TBT_CRYPTO_NONCE_LEN];
     bool crypto_key_inherit_valid;
-    bool crypto_tx_nonce_inherit_valid;
 
     /* Listeners, present once bound. nlisteners is 1 for a far tunnel and
      * 1 + cfg.nmap for a near tunnel. */
@@ -1469,16 +1466,25 @@ struct tbt_session
     struct tbt_crypto_pair crypto_ctx;
     bool crypto_tx_ready; /* published after tx context init */
     bool crypto_ready;    /* rx nonce learned; both contexts initialized */
-    /* Re-incarnation (HELLO wire version 9). `crypto_epoch` is the near
-     * side's nonce generation, strictly increasing across its restarts; it
-     * is the only thing that authorises a new crypto nonce, a new session
-     * nonce, or a moved anchor. `crypto_tx_epoch` is this side's own TX
-     * generation and travels in our HELLO. A TX rotation is deferred to
+    /* Re-incarnation (HELLO wire version 11; v9 body layout). `crypto_epoch`
+     * is the near side's nonce generation, strictly increasing across its
+     * restarts; it is the only thing that authorises a new crypto nonce, a
+     * new session nonce, or a moved anchor. `crypto_tx_epoch` is this side's
+     * own TX nonce generation; a fresh epoch is allocated for every HELLO
+     * body, so this field is not reused there. A TX rotation is deferred to
      * `crypto_tx_pending` because only w_fec_tx may touch crypto_ctx.tx. */
     bool crypto_epoch_set;
     u64 crypto_epoch;
     u64 crypto_tx_epoch;
     bool crypto_tx_pending;
+    /* HELLO v11 freshness: per-path high-water of authenticated HELLO
+     * epochs and the paths that have one. A PSK-proved HELLO at or below
+     * its path's high-water is a replay and cannot join; a live occupant
+     * additionally yields only to a strictly newer epoch. Non-PSK HELLOs
+     * carry no authenticated epoch and leave this table untouched. Both
+     * the array and the bitmap are protected by ->lock. */
+    u64 peer_hello_epoch[TBT_MAX_CARRIERS_LIMIT];
+    DECLARE_BITMAP(peer_hello_epoch_valid, TBT_MAX_CARRIERS_LIMIT);
     /* FEC flows, keyed by sid. `fec_tx`/`fec_rx` name the primary flow (the
      * first live one) for the old single-stream readers; every data-plane
      * path looks its flow up by sid and never assumes these are the only
@@ -1721,10 +1727,11 @@ struct tbt_session
     atomic64_t stall_idle_skips; /* poll: no unacked bytes, clock reset */
     atomic64_t stall_declared;   /* poll: a stall paused a FEC carrier */
     atomic64_t stall_recovered;  /* poll: snd_una moved again after a pause */
-    u64 stall_drop;              /* frames dropped by tbt_tx_path_stalled();
-                                  * that helper has no caller today (ARQ kills,
-                                  * FEC has no retain), so this stays 0 until
-                                  * ARQ adopts pause semantics */
+    u64 stall_drop;              /* frames dropped by the ARQ stall-pause
+                                  * helper; that helper has no caller today
+                                  * (ARQ kills, FEC has no retain), so this
+                                  * stays 0 until ARQ adopts pause
+                                  * semantics */
     atomic64_t stall_dead;       /* poll: a paused carrier outlived its bound
                                   * and was declared lost after all */
     atomic64_t stall_replaced;   /* poll: a long stall replaced its carrier */
@@ -1758,7 +1765,6 @@ struct tbt_session
     u64 replace_cost_bytes;      /* poll: C_r of the last decision */
     u64 replace_cost_ewma;       /* poll: EWMA of C_r */
     u64 last_stall_replace_ns;   /* poll: last replacement, for the T_r wait */
-    u64 last_carrier_add_ns;     /* poll: last growth, paced like a dial */
     /* Measured send rate: DATA bytes the pump handed to carriers since the
      * last sample. The window/RTT estimate overstates a receive-heavy session
      * (the far side sends little but has a large window), so the measured
@@ -2281,6 +2287,10 @@ struct tbt_carrier
     u8 rx_state;                  /* what our FBK reports for this path */
     u8 profile;                   /* effective container: 1 http-kal, 2 drip, 3 raw */
     u8 peer_gen;                  /* peer's generation for this path (HELLO) */
+    /* HELLO v11: the authenticated epoch this carrier presented. Set by
+     * tbt_rx_hello() before tbt_session_join(); the join compares and
+     * publishes it under sess->lock. */
+    u64 hello_epoch;
     u8 dbg_stall_dumped;          /* debug>=2: the stall dump ran for this gen */
     bool diag_stall_once;         /* one unconditional stall snapshot per gen */
     bool http_started;            /* our request/response header block is on the wire */
@@ -2373,11 +2383,6 @@ void tbt_fbk_kick(struct tbt_session *sess, bool now);
 void tbt_tx_ack(struct tbt_session *sess, struct tbt_carrier *c,
                 u64 uack, u64 sid);
 void tbt_tx_path_lost(struct tbt_session *sess, u8 index);
-/* Drop a stalled path's unacknowledged ARQ frames without repathing them.
- * Reserved for an ARQ pause semantics: today ARQ kills and repaths a stalled
- * carrier (tbt_carrier_lost()), and FEC has no retain entries to drop, so
- * nothing calls this yet. */
-void tbt_tx_path_stalled(struct tbt_session *sess, u8 index);
 void tbt_tx_free_stream(struct tbt_stream *st);
 void tbt_tx_free_queue(struct tbt_session *sess);
 void tbt_tx_frame_free(struct tbt_frame *fr);
@@ -2416,7 +2421,6 @@ static inline bool tbt_carrier_sk_present(struct tbt_carrier *c)
     return rcu_access_pointer(c->sk) != NULL;
 }
 bool tbt_carrier_arm_tx(struct tbt_carrier *c);
-bool tbt_carrier_arm_pump(struct tbt_carrier *c, unsigned int ms);
 bool tbt_carrier_arm_rx(struct tbt_carrier *c);
 void tbt_carrier_quiesce(struct tbt_carrier *c);
 int tbt_carriers_start(struct tbt_tunnel *t, struct tbt_session *sess);
@@ -2489,10 +2493,6 @@ void tbt_fec_out_kick(struct tbt_session *sess);
 void tbt_fec_rx_work(struct work_struct *w);
 int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len);
 int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len);
-/* A new stream takes over the session's FEC plane: drop the previous stream's
- * reorder blocks and delivery cursors before its bytes can reach the new
- * stream. The first FEC record after this call sets the new frontier. */
-void tbt_fec_rx_new_stream(struct tbt_session *sess, u64 sid);
 /* FIN names the stream's packet range. 0.8 FEC sends the frontier in both
  * the frame header and the body, so pkt_end is the only end marker; the
  * receiver uses it to complete a final block whose parity and LAST flag
@@ -2574,9 +2574,11 @@ bool tbt_session_arm(struct tbt_session *s, enum tbt_sess_work w,
 void tbt_session_cancel(struct tbt_session *s, enum tbt_sess_work w);
 void tbt_session_destroy(struct tbt_tunnel *t);
 int tbt_session_create(struct tbt_tunnel *t);
-/* The HELLO wire-version-9 generation clock: realtime microseconds. */
+/* The HELLO generation clock: realtime microseconds, made strictly
+ * increasing module-wide. Every FEC HELLO body carries a fresh value. */
 u64 tbt_hello_epoch_now(void);
-int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index);
+int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index,
+                     bool authenticated);
 void tbt_session_retire(struct tbt_session *sess, u8 index, u8 gen);
 bool tbt_carrier_dead(struct tbt_carrier *c);
 

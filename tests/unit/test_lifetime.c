@@ -4,10 +4,13 @@
  * tbt_session_arm()/tbt_session_cancel() (tbt_session.c) and
  * tbt_stream_schedule()/tbt_stream_cancel() (tbt_sock.c) share one rule: the
  * sched bit owns exactly one reference, the arm takes that reference before
- * it publishes the bit, and an arm whose queue attempt was dropped returns
- * the reference itself. A missed put leaves tbt_session_destroy() waiting on
- * &drained forever (0.2.1: `del 1` blocked in D state and pinned rmmod behind
- * it).
+ * it publishes the bit, and only the entry or the teardown reclaim (after
+ * every scheduler has stopped) returns it. A queue dropped by a racing
+ * cancel leaves the bit and its reference for that reclaim; work_pending()
+ * must never decide ownership, because process_one_work() clears PENDING
+ * before the entry clears the sched bit. A missed put leaves
+ * tbt_session_destroy() waiting on &drained forever (0.2.1: `del 1` blocked
+ * in D state and pinned rmmod behind it).
  *
  * The kernel workqueue cannot run here, so this file models it: a work item
  * is idle, pending or disabled, and cancel is split into begin/end so the
@@ -111,22 +114,13 @@ static bool arm_start(struct life *s, int w)
     return true;
 }
 
-/* The second half: queue and return the reference if no instance took it. */
-static bool arm_post(struct life *s, int w)
-{
-    if (!s->pending[w] && (s->sched & (1ul << w)))
-    {
-        s->sched &= ~(1ul << w);
-        put(s);
-        return false;
-    }
-    return true;
-}
-
 static bool arm_finish(struct life *s, int w)
 {
     queue(s, w);
-    return arm_post(s, w);
+    /* The bit and its reference belong to the instance once the queue call
+     * is made. A dropped queue is recovered by reclaim() only after every
+     * scheduler has stopped. */
+    return true;
 }
 
 static bool arm(struct life *s, int w)
@@ -165,6 +159,18 @@ static void cancel_end(struct life *s, int w, bool canceled)
 static void cancel(struct life *s, int w)
 {
     cancel_end(s, w, cancel_begin(s, w));
+}
+
+/* tbt_session_sched_reclaim()/tbt_stream_sched_reclaim(): after every
+ * scheduler has stopped, a still-set bit with no pending instance is a
+ * queue a cancel dropped; return its reference. */
+static bool reclaim(struct life *s, int w)
+{
+    if (s->pending[w] || !(s->sched & (1ul << w)))
+        return false;
+    s->sched &= ~(1ul << w);
+    put(s);
+    return true;
 }
 
 static void test_arm_and_entry(void)
@@ -207,8 +213,8 @@ static void test_cancel_pending(void)
     ok(!s.pending[2], "cancel pending: nothing queued");
 }
 
-/* The 0.2.1 hang: cancel disables the work, an arm races it, the queue is
- * dropped. The arm must return its own reference. */
+/* Cancel disables the work, an arm races it, the queue is dropped. The bit
+ * keeps the reference; teardown reclaim returns it. */
 static void test_arm_during_cancel(void)
 {
     struct life s;
@@ -217,15 +223,17 @@ static void test_arm_during_cancel(void)
     life_init(&s, 1);
     canceled = cancel_begin(&s, 3);
     ok(!canceled, "arm during cancel: nothing was pending");
-    ok(!arm(&s, 3), "arm during cancel: refused");
+    ok(arm(&s, 3), "arm during cancel: bit and reference stay with the arm");
+    ok_int(s.refs, 2, "arm during cancel: reference held, not returned");
     cancel_end(&s, 3, canceled);
-    ok_int(s.refs, 1, "arm during cancel: reference not leaked");
+    ok(reclaim(&s, 3), "arm during cancel: teardown reclaims the dropped queue");
+    ok_int(s.refs, 1, "arm during cancel: reference returned exactly once");
     ok(!(s.sched & (1ul << 3)), "arm during cancel: bit not left set");
 }
 
 /* The mirror race: the arm takes its reference and claims the bit, then a
  * cancel runs before the queue attempt. The canceller must not return a
- * reference it does not own, and the arm must return its own. */
+ * reference it does not own; the dropped queue is reclaimed at teardown. */
 static void test_cancel_between_bit_and_queue(void)
 {
     struct life s;
@@ -235,10 +243,11 @@ static void test_cancel_between_bit_and_queue(void)
     ok(arm_start(&s, 0), "bit before queue: arm owns the bit");
     canceled = cancel_begin(&s, 0);
     ok(!canceled, "bit before queue: cancel finds nothing pending");
-    ok(!arm_finish(&s, 0), "bit before queue: dropped queue refused");
+    ok(arm_finish(&s, 0), "bit before queue: dropped queue keeps the bit");
     cancel_end(&s, 0, canceled);
-    ok_int(s.refs, 1, "bit before queue: reference still owned by the arm");
-    ok_int(s.refs, 1, "bit before queue: arm returned its reference");
+    ok_int(s.refs, 2, "bit before queue: reference still owned by the arm");
+    ok(reclaim(&s, 0), "bit before queue: teardown reclaims it");
+    ok_int(s.refs, 1, "bit before queue: reference returned exactly once");
     ok(!(s.sched & 1ul), "bit before queue: bit cleared");
 }
 
@@ -254,8 +263,8 @@ static void test_closing(void)
     ok(!(s.sched & (1ul << 1)), "closing: bit not left set");
 }
 
-/* The entry may clear the bit between the queue attempt and the arm's
- * post-queue check. Exactly one of the two returns the reference. */
+/* The entry may clear the bit immediately after the queue call. The arm
+ * must not look at work_pending() afterwards: the entry owns the reference. */
 static void test_entry_races_post_check(void)
 {
     struct life s;
@@ -263,8 +272,8 @@ static void test_entry_races_post_check(void)
     life_init(&s, 1);
     ok(arm_start(&s, 2), "post check: arm owns the bit");
     queue(&s, 2);
+    ok(arm_finish(&s, 2), "post check: the arm returns without a post-queue put");
     entry(&s, 2); /* the worker runs and returns the reference */
-    ok(arm_post(&s, 2), "post check: the entry owns the reference");
     ok_int(s.refs, 1, "post check: no double put");
     put(&s);
     ok_int(s.completed, 1, "post check: completion fired once");

@@ -58,7 +58,7 @@
  * exists so a hostile peer cannot make the parser scan forever. */
 #define TBT_HTTP_HDR_MAX 4096
 
-/* Response header block bound. The emitted block is 163 bytes; the ceiling is
+/* Response header block bound. The emitted block is 155 bytes; the ceiling is
  * for the stack buffer a caller allocates. */
 #define TBT_HTTP_RESP_MAX 256
 
@@ -120,7 +120,13 @@ struct tbt_http_cfg
 
 /* Response inputs. The far side emits one block per segment; the only field
  * that varies is the UTC time, supplied as epoch seconds so this unit needs no
- * clock, no timezone and no locale. */
+ * clock, no timezone and no locale.
+ *
+ * u64 because the wire format has no sign, but a caller may hand over a
+ * negative time64_t converted to u64 (a clock before 1970) or a corrupt
+ * future value. tbt_http_resp_header() renders any value outside
+ * 0..253402300799 (1970-01-01 through 9999-12-31 UTC) as the Unix epoch
+ * instead of failing; see its contract. */
 struct tbt_http_resp_cfg
 {
     u64 unix_secs;
@@ -200,7 +206,10 @@ struct tbt_http_req
  * Content-Length, no Expect, no duplicate, no lowercase spelling. The request
  * line must be the exact literal (POST, the design path, HTTP/1.1). A header
  * block longer than TBT_HTTP_HDR_MAX is a protocol error. A bare LF, obs-fold
- * or whitespace before a colon is a protocol error.
+ * or whitespace before a colon is a protocol error. The IPv4 Host literal is
+ * RFC 3986 dec-octet form: a multi-digit octet may not start with '0', so
+ * one address has exactly one accepted spelling ("010.0.0.1" is PROTO, not
+ * decimal 10 and not octal 8).
  *
  * The block identifies nothing about the carrier: there is no
  * X-TBTUN-Carrier, no carrier index and no "tbtun" anywhere on the wire. The
@@ -214,7 +223,10 @@ size_t tbt_http_req_parse(const char *buf, size_t len, struct tbt_http_req *out,
  * Exactly TBT_HTTP_DATE_LEN (29) bytes, no NUL, no timezone database, no
  * locale. Gregorian leap-year arithmetic; 1970-01-01 through
  * 9999-12-31 23:59:59 are representable. Returns 29, or 0 when cap < 29 or
- * the value is outside that range (the year would not be four digits). */
+ * the value is outside that range (the year would not be four digits), so a
+ * caller can detect an impossible clock. tbt_http_resp_header() handles that
+ * case itself with the documented epoch fallback, and a caller that needs a
+ * wire Date should use the builder rather than ignore this 0. */
 size_t tbt_http_http_date(char *buf, size_t cap, u64 unix_secs);
 
 /* Emit the response header block of DESIGN.md §3.2, including the final blank
@@ -228,8 +240,13 @@ size_t tbt_http_http_date(char *buf, size_t cap, u64 unix_secs);
  *   Date: <cfg->unix_secs as IMF-fixdate>
  *   <blank line>
  *
- * Returns the bytes written (163 for a four-digit year), or 0 when cap is too
- * small, cfg is NULL, or the date is outside the representable range. */
+ * Returns the bytes written (155), or 0 only when cap is too small or cfg is
+ * NULL. The date never causes a failure: a unix_secs outside
+ * 0..253402300799 -- including a negative time64 converted to u64 by the
+ * caller -- is rendered as the Unix epoch, "Thu, 01 Jan 1970 00:00:00 GMT".
+ * That is a valid IMF-fixdate and the conventional "clock not set" value, so
+ * the block keeps its §3.2 shape; the carrier must be able to start before
+ * NTP can correct a boot-time clock. */
 size_t tbt_http_resp_header(char *buf, size_t cap, const struct tbt_http_resp_cfg *cfg);
 
 /* Parse the response status line and headers from buf[0..len).
@@ -481,9 +498,16 @@ struct tbt_http_rx
 size_t tbt_http_frame_decode(struct tbt_http_rx *rx, const u8 *buf, size_t len,
                              struct tbt_rec *out, int *err);
 
-/* FEC variant: one chunk == one 40-byte record. Drip (1 byte) and the old PAD
- * chunk (32 bytes) are skipped. On TBT_RX_OK, *rec points into rx->rec and
- * *rec_len is the record length; valid until the next call. */
+/* FEC variant: one chunk == one record. Drip (1 byte) is skipped. As in the
+ * legacy assembler above, a chunk of size 2..TBT_HDR_LEN-1 is TBT_RX_PROTO:
+ * it is neither the drip nor long enough for a frame header, so a peer may
+ * not mint arbitrary filler chunks. A 48-byte-or-longer body whose first
+ * byte is a FEC type must announce exactly TBT_FEC_HDR_LEN + payload_len; a
+ * 32-byte-or-longer body whose first byte is a legacy frame type must
+ * announce exactly TBT_HDR_LEN + body_len. A legacy control record,
+ * including the 32-byte PAD chunk, is returned as a record too (the caller
+ * ignores PAD). On TBT_RX_OK, *rec points into rx->rec and *rec_len is the
+ * record length; valid until the next call. */
 size_t tbt_http_fec_frame_decode(struct tbt_http_rx *rx, const u8 *buf, size_t len,
                                  const u8 **rec, size_t *rec_len, int *err);
 
